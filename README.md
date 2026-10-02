@@ -266,4 +266,5 @@ Safety rules enforced by the orchestrator:
 | `No price for '<model>'` | Use a model listed in `config.PRICE_TABLE`, or ask Hung to add its price |
 | `KnowledgeLayerError` | `knowledge_layer.yaml` has an unknown claim type, verdict or field; the message names it |
 | `TypeError: ... does not implement the <slot> protocol` | Your class's method name or arguments differ from `contracts/interfaces.py` |
+| `pip install` fails with `OSError ... No such file or directory` and a "Long Path" hint (Windows) | The folder path is too long. Clone into a short path such as `C:\dev\GenAI-group-project` (not deep inside OneDrive), or enable Windows long paths |
 | Git warns "LF will be replaced by CRLF" | Harmless on Windows |
