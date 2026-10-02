@@ -87,6 +87,8 @@ Expected with the stubs: 4 sub-claims.
 | Command | What it does |
 |---|---|
 | `finsight run "<claim>" [--cutoff YYYY-MM-DD] [--json] [--no-evidence]` | Evaluate a claim and print the assessment |
+| `finsight run "<claim>" --stages` | Also print what each pipeline stage did, as it runs (gates, sub-claims, plan, evidence, audit, retries, verdicts) |
+| `finsight run "<claim>" --company CMPX` | Answer a "which company?" clarification |
 | `finsight trace <request_id> [--json]` | Print the decision log of a past run (`logs/<request_id>.json`) |
 | `finsight eval --system {direct,rag,finsight,all} --split dev` | Run the evaluation (see below) |
 | `finsight eval --validate` | Check both dataset files for mistakes |

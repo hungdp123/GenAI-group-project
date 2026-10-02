@@ -14,6 +14,7 @@ sub-claim) goes to `clarification`, which returns a question to the user.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -29,7 +30,7 @@ from finsight.contracts.schemas import (
     FinSightState,
 )
 from finsight.knowledge.loader import KnowledgeLayer, default_knowledge_layer
-from finsight.logging.decision_log import write_log
+from finsight.logging.decision_log import DecisionLogRecorder, write_log
 
 
 @dataclass
@@ -115,8 +116,13 @@ def execute(
     settings: Settings | None = None,
     kb: KnowledgeLayer | None = None,
     company_ticker: str | None = None,
+    on_stage: Callable[[str, dict, DecisionLogRecorder], None] | None = None,
 ) -> RunOutput:
-    """Run the full pipeline and return the assessment plus its decision log. Never raises."""
+    """Run the full pipeline and return the assessment plus its decision log. Never raises.
+
+    `on_stage(node, update, recorder)` is called after every graph node (used by `finsight run --stages`).
+    It only observes; an exception inside it is ignored so it can never change the run.
+    """
     settings = settings or get_settings()
     ctx = RunContext(registry=registry, settings=settings, kb=kb)  # type: ignore[arg-type]
     try:
@@ -125,11 +131,30 @@ def execute(
         ctx.kb = kb or default_knowledge_layer()
         initial = FinSightState(raw_input=claim or "", cutoff_input=_coerce_date(cutoff),
                                 company_hint=company_ticker)
-        out = build_graph(ctx).invoke(initial, config={"recursion_limit": 40 + 6 * settings.max_retries})
-        return RunOutput(FinalAssessment.model_validate(out["final"]),
-                         DecisionLog.model_validate(out["decision_log"]))
+        config = {"recursion_limit": 40 + 6 * settings.max_retries}
+        graph = build_graph(ctx)
+        if on_stage is None:
+            out = graph.invoke(initial, config=config)
+        else:
+            out = None
+            for mode, chunk in graph.stream(initial, config=config, stream_mode=["updates", "values"]):
+                if mode == "values":
+                    out = chunk
+                    continue
+                for node, update in chunk.items():
+                    try:
+                        on_stage(node, update or {}, ctx.recorder)
+                    except Exception:  # noqa: BLE001 - observers must never break a run
+                        pass
+        return RunOutput(FinalAssessment.model_validate(_field(out, "final")),
+                         DecisionLog.model_validate(_field(out, "decision_log")))
     except Exception as exc:  # noqa: BLE001 - last line of defence: the caller always gets an assessment
         return _crash_output(ctx, claim, exc)
+
+
+def _field(state, name: str):
+    """Graph output may be a dict or a FinSightState depending on the LangGraph call path."""
+    return state[name] if isinstance(state, dict) else getattr(state, name)
 
 
 def _crash_output(ctx: RunContext, claim: str, exc: Exception) -> RunOutput:

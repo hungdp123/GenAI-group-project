@@ -87,7 +87,7 @@ class NarrativeAgent:
 | **Person 2 (Stella)**: Narrative Evidence Agent | `agents/narrative/stub.py` | `NarrativeAgent.gather(sub_claim, cutoff_date, feedback) -> list[EvidenceItem]` (return SUPPORTING **and** CHALLENGING) | `test_narrative_contract` |
 | **Person 2 (Stella)**: Basic RAG retriever | `agents/narrative/retriever_stub.py` | `Retriever.retrieve(query, top_k, cutoff_date) -> list[EvidenceItem]` | `test_retriever_contract` |
 | **Person 3 (Amelia)**: Claim Decomposition | `agents/decomposition/stub.py` | `Decomposer.decompose(claim, cutoff_date) -> list[SubClaim]` (unique `sub_claim_id`s) | `test_decomposer_contract` |
-| **Person 3 (Amelia)**: Verification / Auditor | `agents/auditor/stub.py` | `Auditor.audit(sub_claim, evidence) -> AuditResult` (set `feedback_for_retry` when failing) | `test_auditor_contract` |
+| **Person 3 (Amelia)**: Verification / Auditor | `agents/auditor/stub.py` | `Auditor.audit(sub_claim, evidence) -> AuditResult` (set `feedback_for_retry` when failing) | `test_auditor_contract`, then the pending cases in `tests/test_auditor_checks.py` |
 | **Person 4 (Irine)**: Advice Boundary | `agents/advice_boundary/stub.py` | `AdviceBoundary.check(text, stage) -> AdviceDecision` | `test_advice_boundary_contract` |
 | **Person 4 (Irine)**: Tier Policy | `agents/tier_policy/stub.py` | `TierPolicy.apply(sub_claim, proposed, evidence, rule) -> (Verdict, reason \| None)` | `test_tier_policy_never_raises` |
 | **Person 4 (Irine)**: Knowledge layer content | `finsight/knowledge/knowledge_layer.yaml` (keep the field names) | `KnowledgeRule` in `schemas.py` | `tests/test_knowledge.py` |
@@ -112,6 +112,10 @@ class NarrativeAgent:
   - Use `SubClaimType.OTHER` only when a sub-claim really fits no type. If **every** sub-claim is OTHER (or there
     are none), the orchestrator asks the user what to check.
 - **Auditor (Amelia):**
+  - `tests/test_auditor_checks.py` lists 14 mistakes the specialists can make that your auditor must catch
+    (wrong units, wrong metric or period, numbers that contradict the sub-claim, citations that don't support
+    it, mislabelled stance or tier, missing provenance, conflicting evidence, ...). They are marked
+    `pending` (XFAIL) against the stub; when one starts passing (XPASS), delete its `@pending` line.
   - You do the diagram's "number + citation checks". The orchestrator adds "source tier: enough?" itself
     (`routing.tier_shortfall`), so don't re-implement tier rules.
   - `passed=False`, or too little evidence from the required tiers, triggers one re-planned re-gather of
