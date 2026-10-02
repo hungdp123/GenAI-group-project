@@ -94,6 +94,7 @@ Expected with the stubs: 4 sub-claims.
 | `finsight mode [mock\|paid] [--model M]` | Show or switch the LLM mode |
 | `finsight usage` | Paid LLM spend recorded on this machine vs the $150 credit |
 | `finsight graph` | Regenerate `docs/orchestrator_graph.md` |
+| `python scripts/check.py [--quick]` | Run every check locally (same as CI + scenario smoke test), mock mode |
 
 If `finsight` is not found, activate the virtual environment, or use `python -m finsight ...`.
 
@@ -155,10 +156,16 @@ PowerShell: `$env:NAME="value"`. bash: `export NAME=value`, or put `NAME=value` 
 3. **Before opening a PR,** bring in the latest `main` and run the checks:
    ```bash
    git pull origin main
-   pytest
-   finsight eval --validate
+   python scripts/check.py               # everything CI checks + a scenario smoke test (~15 s, free)
    git status                            # config.yaml, logs/, results/, data/ must NOT appear
    ```
+   `scripts/check.py` runs, in mock mode:
+   - lint, the secrets check, the full test suite and dataset validation;
+   - a check that the graph doc is current;
+   - one smoke run per path in the architecture (demo, refusals, clarification, injection, cut-off, retry);
+   - the dev evaluation.
+
+   It ends with `All good` or a list of what failed. Use `--quick` to skip the test suite and the evaluation.
 4. **Open a PR into `main`** and ask one teammate to review. Use the checklist in
    [CONTRIBUTING.md](CONTRIBUTING.md#pull-request-checklist). Never push directly to `main`.
 

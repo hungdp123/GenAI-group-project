@@ -27,7 +27,7 @@ Setup, Git workflow and commands are in the [README](README.md).
    ```
 4. **Register it.** Change **only your own line** in `DEFAULT_IMPLEMENTATIONS` in `finsight/config.py`.
    Do not touch `STUB_IMPLEMENTATIONS`.
-5. **Run the full suite:** `pytest`. Then open a PR using the [checklist](#pull-request-checklist).
+5. **Run all checks:** `python scripts/check.py` (lint, secrets, tests, datasets, scenario smoke test). Then open a PR using the [checklist](#pull-request-checklist).
 6. **Keep `stub.py`.** The end-to-end tests and offline demos still use it.
 
 ### How the tests treat your agent
@@ -148,7 +148,7 @@ GitHub pre-fills this checklist when you open a PR (`.github/pull_request_templa
 - [ ] Branched from the latest `main` and merged `main` again just before opening the PR
 - [ ] Only my own folders changed (+ my own line in `DEFAULT_IMPLEMENTATIONS`, if swapping a stub)
 - [ ] No changes to `finsight/contracts/` (or agreed with Hung)
-- [ ] `pytest` passes locally, and the CI checks on this PR are green
+- [ ] `python scripts/check.py` says "All good", and the CI checks on this PR are green
 - [ ] `finsight eval --validate` says "datasets OK"
 - [ ] `git status` shows no config.yaml, logs/, results/ or data/ files, and no API keys anywhere
 - [ ] New dependencies added to `pyproject.toml` and listed here: ...
