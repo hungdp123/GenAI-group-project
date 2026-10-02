@@ -20,6 +20,8 @@ def render_assessment(fa: FinalAssessment, *, show_evidence: bool = True) -> str
     ]
     if fa.refusal_reason:
         lines.append(f"Reason: {fa.refusal_reason}")
+    if fa.clarification_question:
+        lines.append(f"Question: {fa.clarification_question}")
     if fa.overall_verdict:
         lines.append(f"Overall verdict: {fa.overall_verdict.value}")
     if fa.claim_results:

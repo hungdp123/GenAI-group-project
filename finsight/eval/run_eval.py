@@ -52,7 +52,9 @@ class EvalItem(BaseModel):
     split: Literal["dev", "heldout"]
     gold_claims: list[GoldClaim] = Field(default_factory=list)
     expect_refusal: bool = False
-    category: Literal["normal", "adversarial_advice", "out_of_scope", "injection", "temporal"] = "normal"
+    expect_clarification: bool = False  # unclear or missing info: the system should ask a question
+    category: Literal["normal", "adversarial_advice", "out_of_scope", "injection", "temporal",
+                      "clarification"] = "normal"
     notes: str | None = None
 
 
@@ -89,10 +91,13 @@ def validate_datasets() -> list[str]:
         for i in split_items:
             if i.split != split:
                 problems.append(f"{i.item_id}: split={i.split} but stored in {split} file")
-            if i.expect_refusal and i.gold_claims:
-                problems.append(f"{i.item_id}: refusal items must not have gold_claims")
-            if not i.expect_refusal and not i.gold_claims:
-                problems.append(f"{i.item_id}: non-refusal items need gold_claims")
+            stops = i.expect_refusal or i.expect_clarification
+            if i.expect_refusal and i.expect_clarification:
+                problems.append(f"{i.item_id}: expect_refusal and expect_clarification cannot both be true")
+            if stops and i.gold_claims:
+                problems.append(f"{i.item_id}: refusal/clarification items must not have gold_claims")
+            if not stops and not i.gold_claims:
+                problems.append(f"{i.item_id}: items that are analyzed need gold_claims")
     if HELDOUT_LOCK.exists() and HELDOUT_LOCK.read_text().strip() != file_sha256(dataset_path("heldout")):
         problems.append("heldout file changed after it was frozen (hash mismatch with claims_heldout.lock)")
     return problems
@@ -106,7 +111,14 @@ def freeze_heldout() -> str:
 
 def _base(item: EvalItem, system: str) -> dict:
     return {"system": system, "item_id": item.item_id, "split": item.split, "category": item.category,
-            "expect_refusal": item.expect_refusal, "gold_claims": item.gold_claims}
+            "expect_refusal": item.expect_refusal, "expect_clarification": item.expect_clarification,
+            "gold_claims": item.gold_claims}
+
+
+def _success(completed: bool, valid: bool, have_verdicts: bool, refused: bool, clarified: bool,
+             item: EvalItem) -> bool:
+    return task_success(completed, valid, have_verdicts, refused, item.expect_refusal,
+                        clarified, item.expect_clarification)
 
 
 def run_finsight_item(item: EvalItem, out_dir: Path) -> tuple[RunRecord, str]:
@@ -120,12 +132,14 @@ def run_finsight_item(item: EvalItem, out_dir: Path) -> tuple[RunRecord, str]:
     except ValidationError:
         valid = False
     refused = fa.status is AssessmentStatus.REFUSED
+    clarified = fa.status is AssessmentStatus.NEEDS_CLARIFICATION
     completed = fa.status is not AssessmentStatus.FAILED
-    have_verdicts = refused or (bool(fa.claim_results) and all(r.verdict for r in fa.claim_results))
+    have_verdicts = refused or clarified or (bool(fa.claim_results) and all(r.verdict for r in fa.claim_results))
     retried = {r.claim_id for r in log.retries if not r.exhausted}
     record = RunRecord(
         **_base(item, "finsight"), completed=completed, schema_valid=valid, all_claims_have_verdict=have_verdicts,
-        refused=refused, task_success=task_success(completed, valid, have_verdicts, refused, item.expect_refusal),
+        refused=refused, clarified=clarified,
+        task_success=_success(completed, valid, have_verdicts, refused, clarified, item),
         agent_calls=len(log.agent_calls), tool_calls=sum(c.tool_calls for c in log.agent_calls),
         latency_ms=log.total_latency_ms, input_tokens=sum(c.input_tokens for c in log.agent_calls),
         output_tokens=sum(c.output_tokens for c in log.agent_calls), cost_usd=log.total_cost_usd,
@@ -145,13 +159,15 @@ def run_baseline_item(system: str, item: EvalItem) -> tuple[RunRecord, str]:
                                 error=f"{type(exc).__name__}: {exc}")
     raw = result.model_dump_json(indent=2)
     completed = result.error is None
-    valid = completed and (result.refused or bool(result.claims))
-    have_verdicts = result.refused or (bool(result.claims) and all(c.verdict for c in result.claims))
+    clarified = result.clarification_question is not None
+    stopped = result.refused or clarified
+    valid = completed and (stopped or bool(result.claims))
+    have_verdicts = stopped or (bool(result.claims) and all(c.verdict for c in result.claims))
     calls = result.agent_calls
     record = RunRecord(
         **_base(item, system), completed=completed, schema_valid=valid, all_claims_have_verdict=have_verdicts,
-        refused=result.refused, task_success=task_success(completed, valid, have_verdicts, result.refused,
-                                                           item.expect_refusal),
+        refused=result.refused, clarified=clarified,
+        task_success=_success(completed, valid, have_verdicts, result.refused, clarified, item),
         agent_calls=len(calls), tool_calls=sum(c.tool_calls for c in calls), latency_ms=result.latency_ms,
         input_tokens=sum(c.input_tokens for c in calls), output_tokens=sum(c.output_tokens for c in calls),
         cost_usd=sum(c.cost_usd for c in calls), claims_assessed=len(result.claims),

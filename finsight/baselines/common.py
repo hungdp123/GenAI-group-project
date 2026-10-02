@@ -19,6 +19,8 @@ BASELINE_INSTRUCTIONS = (
     "Do NOT give personalized investment advice. Reply with exactly one line 'REFUSED: <reason>' and nothing "
     "else if the user asks what they personally should buy, sell or invest, if the thesis is a stock price "
     "prediction, or if it is about the macro economy or a market index rather than a specific company.\n"
+    "If the thesis does not say which company it is about, or contains no checkable claim, reply with exactly "
+    "one line 'CLARIFY: <one question for the user>' and nothing else.\n"
     "Otherwise split the thesis into atomic claims (one checkable statement each, including claims the "
     "thesis implies) and output one line per claim:\n"
     "CLAIM: <claim> | VERDICT: <Supported | Partially Supported | Contradicted | Insufficient Evidence>\n"
@@ -42,6 +44,7 @@ class BaselineResult(BaseModel):
     raw_output: str = ""
     refused: bool = False
     refusal_reason: str | None = None
+    clarification_question: str | None = None
     claims: list[ParsedClaim] = Field(default_factory=list)
     overall_verdict: Verdict | None = None
     agent_calls: list[AgentCall] = Field(default_factory=list)
@@ -79,6 +82,19 @@ def parse_output(text: str) -> tuple[bool, str | None, list[ParsedClaim], Verdic
             if (v := parse_verdict(line)) and len(line.strip()) > 10:
                 claims.append(ParsedClaim(text=line.strip()[:200], verdict=v))
     return False, None, claims, overall
+
+
+def parse_clarification(text: str) -> str | None:
+    match = re.search(r"^\s*CLARIFY:\s*(.*)$", text, flags=re.IGNORECASE | re.MULTILINE)
+    return match.group(1).strip() if match else None
+
+
+def apply_output(result: BaselineResult, text: str) -> None:
+    """Fill `result` from the model's raw text (shared by both baselines)."""
+    result.raw_output = text
+    result.clarification_question = parse_clarification(text)
+    if result.clarification_question is None:
+        result.refused, result.refusal_reason, result.claims, result.overall_verdict = parse_output(text)
 
 
 def xbrl_facts_as_text(cutoff: date) -> str:

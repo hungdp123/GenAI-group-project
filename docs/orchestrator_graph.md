@@ -13,6 +13,7 @@ graph TD;
 	intake(intake)
 	advice_gate_input(advice_gate_input)
 	scope_check(scope_check)
+	clarification(clarification)
 	decompose(decompose)
 	plan(plan)
 	gather_evidence(gather_evidence)
@@ -30,15 +31,19 @@ graph TD;
 	apply_tier_policy --> assemble;
 	assemble --> advice_gate_output;
 	audit --> retry_or_accept;
+	clarification --> finalize;
+	decompose -.-> clarification;
 	decompose -.-> finalize;
 	decompose -.-> plan;
 	gather_evidence --> audit;
 	intake -.-> advice_gate_input;
+	intake -.-> clarification;
 	intake -.-> finalize;
 	plan -.-> apply_tier_policy;
 	plan -.-> gather_evidence;
 	retry_or_accept -.-> apply_tier_policy;
 	retry_or_accept -.-> gather_evidence;
+	scope_check -.-> clarification;
 	scope_check -.-> decompose;
 	scope_check -.-> finalize;
 	finalize --> __end__;

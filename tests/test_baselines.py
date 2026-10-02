@@ -45,6 +45,16 @@ def test_parser_structured_and_free_form():
     assert free[0].verdict is Verdict.PARTIALLY_SUPPORTED
 
 
+def test_baseline_clarification_is_parsed():
+    client.set_mock_responder(lambda system, prompt: "CLARIFY: Which company is this thesis about?")
+    try:
+        r = run_direct_llm("Its growth is just getting started.", DEMO_CUTOFF)
+    finally:
+        client.set_mock_responder(None)
+    assert r.clarification_question == "Which company is this thesis about?"
+    assert not r.refused and r.claims == []
+
+
 def test_parser_maps_mixed_to_partial():
     _, _, _, overall = parse_output("CLAIM: a | VERDICT: Supported\nOVERALL: Mixed")
     assert overall is Verdict.PARTIALLY_SUPPORTED

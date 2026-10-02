@@ -89,9 +89,9 @@ class Nodes:
         self.rec.start(request.request_id, state.raw_input, cutoff)
         self.rec.event("intake", f"cutoff={cutoff} defaulted={defaulted}")
         update: dict[str, Any] = {"request": request}
-        # DECISION: invalid input is REFUSED (the user's request cannot be served), not FAILED.
+        # DECISION: missing thesis -> ask for it (Clarification); overlong input -> REFUSED, not FAILED.
         if not thesis:
-            update |= _stop(AssessmentStatus.REFUSED, "Empty thesis.")
+            update["clarification_question"] = routing.CLARIFY_EMPTY
         elif len(thesis) > settings.max_thesis_chars:
             update |= _stop(AssessmentStatus.REFUSED, f"Thesis longer than {settings.max_thesis_chars} characters.")
         return update
@@ -111,18 +111,28 @@ class Nodes:
             update |= _stop(AssessmentStatus.REFUSED, decision.reason or "Personalized investment advice request.")
         return update
 
-    # -- 3. scope check -----------------------------------------------------
+    # -- 3. scope check (second half of the diagram's "initial screening") -------
 
     def scope_check(self, state: FinSightState) -> dict[str, Any]:
-        thesis = state.request.raw_thesis
-        ticker = routing.detect_company(thesis, self.ctx.settings.corpus_companies, state.request.company_ticker)
-        reason = routing.scope_refusal(thesis, ticker)
-        self.rec.gate("scope", reason is not None, reason or f"company={ticker}")
+        thesis, hint = state.request.raw_thesis, state.request.company_ticker
+        companies = self.ctx.settings.corpus_companies
+        ticker = routing.detect_company(thesis, companies, hint)
+        reason, question = routing.scope_screen(thesis, ticker, hint, companies)
+        self.rec.gate("scope", reason is not None, reason or question or f"company={ticker}")
         request = state.request.model_copy(update={"company_ticker": ticker})
         update: dict[str, Any] = {"request": request}
         if reason:
             update |= _stop(AssessmentStatus.REFUSED, reason)
+        elif question:
+            update["clarification_question"] = question
         return update
+
+    # -- clarification (diagram: "Unclear or missing info" -> ask the user) ------
+
+    def clarification(self, state: FinSightState) -> dict[str, Any]:
+        """Stop the run and return the question to the user. The UI resubmits with the answer."""
+        self.rec.gate("clarification", True, state.clarification_question)
+        return {"status": AssessmentStatus.NEEDS_CLARIFICATION}
 
     # -- 4. decompose -------------------------------------------------------
 
@@ -146,6 +156,9 @@ class Nodes:
         if refusing:
             note = self.ctx.kb.rule_for(refusing[0].claim_type).note or "Personalized advice is out of scope."
             update |= _stop(AssessmentStatus.REFUSED, f"Claim {refusing[0].claim_id}: {note}")
+        elif all(c.claim_type is ClaimType.OTHER for c in claims):
+            # DECISION: no recognisable claim (none, or only OTHER) counts as unclear -> ask which claim.
+            update["clarification_question"] = routing.CLARIFY_NO_CLAIM
         return update
 
     # -- 5. plan ------------------------------------------------------------
@@ -243,25 +256,51 @@ class Nodes:
     # -- 8. retry or accept -------------------------------------------------
 
     def retry_or_accept(self, state: FinSightState) -> dict[str, Any]:
+        """The diagram's Auditor decision: "number + citation checks, source tier: enough?".
+
+        Yes -> accept. No -> the orchestrator re-plans the claim (adds the rule's retry_collectors)
+        and re-gathers it with feedback, at most `max_retries` times. Still failing -> the claim
+        becomes INSUFFICIENT_EVIDENCE and the rest of the answer is kept.
+        """
         max_retries = self.ctx.settings.max_retries
-        retry, feedback = [], dict(state.feedback)
+        retry, feedback, plan = [], dict(state.feedback), dict(state.routing_plan)
         retries_used, insufficient = dict(state.retries_used), dict(state.insufficient_reasons)
+        shortfalls = dict(state.tier_shortfalls)
+        claims = {c.claim_id: c for c in state.claims}
         for claim_id in state.pending_claim_ids:
             audit = state.audits.get(claim_id)
-            if claim_id in insufficient or audit is None or audit.passed:
+            if claim_id in insufficient or audit is None:
                 continue
+            rule = self.ctx.kb.rule_for(claims[claim_id].claim_type)
+            if audit.passed:
+                shortfall = routing.tier_shortfall(audit.verdict, state.evidence.get(claim_id, []), rule)
+                if shortfall is None:
+                    shortfalls.pop(claim_id, None)
+                    continue  # accept
+                problem = f"source tier not enough: {shortfall}"
+                hint = shortfall
+            else:
+                problem = "audit failed: " + ("; ".join(audit.failure_reasons) or "no reason given")
+                hint = audit.feedback_for_retry or "; ".join(audit.failure_reasons)
+
             used = retries_used.get(claim_id, 0)
             if used < max_retries:
                 retries_used[claim_id] = used + 1
-                feedback[claim_id] = audit.feedback_for_retry or "; ".join(audit.failure_reasons)
+                feedback[claim_id] = hint
+                plan[claim_id] = routing.replan_entry(plan[claim_id], rule)
+                if plan[claim_id].collectors != state.routing_plan[claim_id].collectors:
+                    self.rec.plan(plan[claim_id])
+                    self.rec.event("retry_or_accept", f"{claim_id}: re-planned collectors -> "
+                                                      f"{plan[claim_id].collectors}")
                 retry.append(claim_id)
-                self.rec.retry(RetryRecord(claim_id=claim_id, attempt=used + 1, feedback=feedback[claim_id]))
+                self.rec.retry(RetryRecord(claim_id=claim_id, attempt=used + 1, feedback=f"{problem} | {hint}"))
             else:
-                insufficient[claim_id] = (f"audit failed after {used} retr{'y' if used == 1 else 'ies'}: "
-                                          + ("; ".join(audit.failure_reasons) or "no reason given"))
-                self.rec.retry(RetryRecord(claim_id=claim_id, attempt=used, exhausted=True))
+                insufficient[claim_id] = f"{problem} (still failing after {used} retr{'y' if used == 1 else 'ies'})"
+                if audit.passed:
+                    shortfalls[claim_id] = insufficient[claim_id]
+                self.rec.retry(RetryRecord(claim_id=claim_id, attempt=used, feedback=problem, exhausted=True))
         return {"pending_claim_ids": retry, "feedback": feedback, "retries_used": retries_used,
-                "insufficient_reasons": insufficient}
+                "insufficient_reasons": insufficient, "routing_plan": plan, "tier_shortfalls": shortfalls}
 
     # -- 9. tier policy + knowledge-layer caps ------------------------------
 
@@ -273,6 +312,8 @@ class Nodes:
                 verdicts[cid] = Verdict.INSUFFICIENT_EVIDENCE
                 if not rule.collectors:
                     capped[cid] = f"knowledge layer: {rule.note or claim.claim_type.value + ' has no collector'}"
+                elif cid in state.tier_shortfalls:
+                    capped[cid] = f"tier rule: {state.tier_shortfalls[cid]}"
                 continue
             evidence = state.evidence.get(cid, [])
             proposed = state.audits[cid].verdict
@@ -379,6 +420,8 @@ class Nodes:
         final = state.final or FinalAssessment(
             request_id=state.request.request_id if state.request else "unknown",
             status=state.status or AssessmentStatus.FAILED, refusal_reason=state.refusal_reason,
+            clarification_question=(state.clarification_question
+                                    if state.status is AssessmentStatus.NEEDS_CLARIFICATION else None),
             as_of_date=state.request.cutoff_date if state.request else None,
             cutoff_was_defaulted=state.request.cutoff_was_defaulted if state.request else False,
             boundary_disclaimer=BOUNDARY_DISCLAIMER,

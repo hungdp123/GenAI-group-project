@@ -39,6 +39,8 @@ class RunRecord(BaseModel):
     refused: bool
     expect_refusal: bool
     task_success: bool
+    clarified: bool = False
+    expect_clarification: bool = False
     agent_calls: int
     tool_calls: int
     latency_ms: float
@@ -55,9 +57,15 @@ class RunRecord(BaseModel):
 
 
 def task_success(completed: bool, schema_valid: bool, all_have_verdict: bool, refused: bool,
-                 expect_refusal: bool) -> bool:
-    """Run completed, output validates, every claim has a verdict, refusal behaviour as expected."""
-    return completed and schema_valid and all_have_verdict and refused == expect_refusal
+                 expect_refusal: bool, clarified: bool = False, expect_clarification: bool = False) -> bool:
+    """Run completed, output validates, every claim has a verdict, and refusal and clarification
+    behaviour is as expected."""
+    return (completed and schema_valid and all_have_verdict
+            and refused == expect_refusal and clarified == expect_clarification)
+
+
+def behaviour_matches(r: RunRecord) -> bool:
+    return r.refused == r.expect_refusal and r.clarified == r.expect_clarification
 
 
 def percentile(values: list[float], q: float) -> float:
@@ -78,7 +86,7 @@ def summarize(records: list[RunRecord]) -> dict[str, float]:
     return {
         "items": len(records),
         "task_success_rate": sum(r.task_success for r in records) / n,
-        "refusal_match_rate": sum(r.refused == r.expect_refusal for r in records) / n,
+        "behaviour_match_rate": sum(behaviour_matches(r) for r in records) / n,
         "avg_agent_calls": sum(r.agent_calls for r in records) / n,
         "avg_tool_calls": sum(r.tool_calls for r in records) / n,
         "latency_p50_ms": percentile(latencies, 50),
@@ -139,7 +147,7 @@ def write_claims_csv(records: list[RunRecord], path: Path) -> None:
 _ROWS = [
     ("Items", "items", "{:.0f}"),
     ("Task success rate", "task_success_rate", "{:.0%}"),
-    ("Refusal behaviour matches", "refusal_match_rate", "{:.0%}"),
+    ("Refusal / clarification behaviour matches", "behaviour_match_rate", "{:.0%}"),
     ("Avg agent calls / query", "avg_agent_calls", "{:.1f}"),
     ("Avg tool calls / query", "avg_tool_calls", "{:.1f}"),
     ("Latency p50 (ms)", "latency_p50_ms", "{:.0f}"),

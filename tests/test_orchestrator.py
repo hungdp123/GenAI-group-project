@@ -129,7 +129,7 @@ def test_retry_exhausted_downgrades_only_that_claim(monkeypatch):
     assert results[ClaimType.DEMAND_ATTRIBUTION].verdict is Verdict.PARTIALLY_SUPPORTED
     assert out.assessment.status is AssessmentStatus.COMPLETED
     assert out.decision_log.retries[-1].exhausted
-    assert any("audit failed after 1 retry" in g for g in out.assessment.evidence_gaps)
+    assert any("audit failed" in g and "still failing after 1 retry" in g for g in out.assessment.evidence_gaps)
 
 
 def test_max_retries_is_configurable(monkeypatch):
@@ -233,10 +233,91 @@ def test_decomposer_exception_returns_failed_not_crash():
 
 
 def test_out_of_scope_is_refused_with_reason():
-    for thesis in ("Will the S&P 500 hit 7000 by December?", "Company X stock price will hit $500 next year.",
-                   "Acme Robotics will dominate humanoid robots."):
+    for thesis in ("Will the S&P 500 hit 7000 by December?", "Company X stock price will hit $500 next year."):
         fa = execute(thesis, DEMO_CUTOFF).assessment
         assert fa.status is AssessmentStatus.REFUSED and fa.refusal_reason, thesis
+
+
+# -- clarification (diagram: unclear or missing info -> ask the user) -----------------------
+
+
+def test_missing_company_asks_then_resubmit_works():
+    from finsight import run_finsight
+
+    thesis = "Its revenue growth is driven by AI infrastructure demand and is just getting started."
+    out = execute(thesis, DEMO_CUTOFF)
+    fa = out.assessment
+    assert fa.status is AssessmentStatus.NEEDS_CLARIFICATION
+    assert "Which company" in fa.clarification_question and "Company X (CMPX)" in fa.clarification_question
+    assert fa.claim_results == [] and fa.overall_verdict is None
+    assert [g.gate for g in out.decision_log.gate_decisions] == ["advice_input", "scope", "clarification"]
+    assert [c.agent for c in out.decision_log.agent_calls] == ["advice_boundary"], "no analysis before answer"
+
+    answered = run_finsight(thesis, DEMO_CUTOFF, company_ticker="CMPX")
+    assert answered.status is AssessmentStatus.COMPLETED and answered.claim_results
+
+    other = run_finsight(thesis, DEMO_CUTOFF, company_ticker="ACME")
+    assert other.status is AssessmentStatus.REFUSED and "not in the frozen corpus" in other.refusal_reason
+
+
+def test_advice_is_refused_before_clarification():
+    fa = execute("Should I buy this stock with my savings?", DEMO_CUTOFF).assessment
+    assert fa.status is AssessmentStatus.REFUSED
+
+
+def test_empty_thesis_asks_for_it():
+    out = execute("   ", DEMO_CUTOFF)
+    assert out.assessment.status is AssessmentStatus.NEEDS_CLARIFICATION
+    assert out.decision_log.agent_calls == []
+
+
+def test_no_checkable_claim_asks_which_claim():
+    fa = execute("Company X is a really interesting company.", DEMO_CUTOFF).assessment
+    assert fa.status is AssessmentStatus.NEEDS_CLARIFICATION
+    assert "Which specific claim" in fa.clarification_question
+
+
+def test_clarification_rendered_for_cli():
+    from finsight.agents.orchestrator.render import render_assessment
+
+    fa = execute("It will keep growing.", DEMO_CUTOFF).assessment
+    assert "Question: Which company" in render_assessment(fa)
+
+
+# -- diagram: auditor "source tier: enough?" + re-plan on retry -------------------------------
+
+
+def test_demo_needs_no_retries():
+    out = execute(DEMO_THESIS, DEMO_CUTOFF)
+    assert out.decision_log.retries == [] and all(r.retries_used == 0 for r in out.assessment.claim_results)
+
+
+def test_tier_shortfall_triggers_one_replanned_retry_then_insufficient():
+    out = execute(DEMO_THESIS, DEMO_CUTOFF, registry=AgentRegistry.from_config(narrative=_Tier3OnlyNarrative()))
+    demand = _by_type(out.assessment)[ClaimType.DEMAND_ATTRIBUTION]
+    assert demand.retries_used == 1 and demand.verdict is Verdict.INSUFFICIENT_EVIDENCE
+    records = [r for r in out.decision_log.retries if r.claim_id == demand.claim.claim_id]
+    assert [r.exhausted for r in records] == [False, True]
+    assert "source tier not enough" in records[0].feedback and "Tier 3" in records[0].feedback
+    # Re-plan: DEMAND_ATTRIBUTION adds the financial collector on its retry.
+    calls = [c.agent for c in out.decision_log.agent_calls if c.claim_id == demand.claim.claim_id]
+    assert calls.count("narrative") == 2 and calls.count("financial") == 1
+
+
+def test_failed_audit_retry_is_replanned(monkeypatch):
+    monkeypatch.setenv("FINSIGHT_STUB_FAIL_CLAIMS", "c1")
+    out = execute(DEMO_THESIS, DEMO_CUTOFF)
+    c1_calls = [c.agent for c in out.decision_log.agent_calls if c.claim_id == "c1"]
+    assert c1_calls.count("financial") == 2 and c1_calls.count("narrative") == 1  # narrative added on retry
+    c1_plans = [p.collectors for p in out.decision_log.routing_plan if p.claim_id == "c1"]
+    assert c1_plans == [["financial"], ["financial", "narrative"]]
+
+
+def test_no_evidence_retries_once_then_insufficient():
+    out = execute(DEMO_THESIS, date(2025, 1, 31))  # every document is after this cut-off
+    assert out.assessment.overall_verdict is Verdict.INSUFFICIENT_EVIDENCE
+    analyzed = [r for r in out.assessment.claim_results if r.claim.claim_type is not ClaimType.COMPARATIVE]
+    assert all(r.retries_used == 1 for r in analyzed)
 
 
 # -- cut-off ----------------------------------------------------------------------------

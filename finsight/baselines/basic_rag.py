@@ -9,7 +9,7 @@ import time
 from datetime import date
 
 from finsight.agents.orchestrator.routing import resolve_cutoff
-from finsight.baselines.common import BaselineResult, baseline_system_prompt, parse_output
+from finsight.baselines.common import BaselineResult, apply_output, baseline_system_prompt
 from finsight.config import AgentRegistry, get_settings
 from finsight.contracts.interfaces import Retriever
 from finsight.contracts.schemas import EvidenceItem
@@ -43,7 +43,6 @@ def run_basic_rag(thesis: str, cutoff: date | None = None, *, retriever: Retriev
     if error:
         result.error = f"{type(error).__name__}: {error}"
     else:
-        result.raw_output = resp.text
-        result.refused, result.refusal_reason, result.claims, result.overall_verdict = parse_output(resp.text)
+        apply_output(result, resp.text)
     result.latency_ms = round((time.perf_counter() - t0) * 1000, 3)
     return result

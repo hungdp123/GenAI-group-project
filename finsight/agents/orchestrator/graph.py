@@ -1,10 +1,15 @@
 r"""FinSight orchestrator graph and the public entry point `run_finsight`. Owner: Person 5 (Hung).
 
-    intake -> advice_gate_input -> scope_check -> decompose -> plan
-           -> gather_evidence -> audit -> retry_or_accept --(retry)--> gather_evidence
-                                                         \--(done)--> apply_tier_policy
-           -> assemble -> advice_gate_output -> finalize
-Any gate that refuses jumps straight to finalize.
+Mirrors the team architecture diagram:
+
+    intake -> advice_gate_input -> scope_check            (initial screening: advice + scope)
+           -> decompose -> plan                           (orchestrator: decompose, plan evidence needs)
+           -> gather_evidence -> audit -> retry_or_accept (specialists in parallel; auditor checks,
+                   ^                          |            "source tier: enough?")
+                   +---- re-plan + retry -----+            (max 1 retry per claim; still failing -> INSUFFICIENT)
+           -> apply_tier_policy -> assemble -> advice_gate_output -> finalize
+Refusals jump straight to finalize. Unclear or missing info (no thesis, no company, no checkable
+claim) goes to `clarification`, which returns a question to the user.
 """
 
 from __future__ import annotations
@@ -36,11 +41,17 @@ class RunOutput:
 # -- conditional edges ---------------------------------------------------------
 
 
-def _continue_or_finalize(next_node: str):
-    def route(state: FinSightState) -> str:
-        return "finalize" if state.status is not None else next_node
+def _continue_or_stop(next_node: str):
+    """Refused/failed -> finalize; unclear or missing info -> clarification; otherwise continue."""
 
-    route.__name__ = f"to_{next_node}_or_finalize"
+    def route(state: FinSightState) -> str:
+        if state.status is not None:
+            return "finalize"
+        if state.clarification_question:
+            return "clarification"
+        return next_node
+
+    route.__name__ = f"to_{next_node}_or_stop"
     return route
 
 
@@ -57,14 +68,19 @@ def build_graph(ctx: RunContext):
     """Compile the StateGraph for one run (nodes close over the run context)."""
     nodes = Nodes(ctx)
     g = StateGraph(FinSightState)
-    for name in ("intake", "advice_gate_input", "scope_check", "decompose", "plan", "gather_evidence",
-                 "audit", "retry_or_accept", "apply_tier_policy", "assemble", "advice_gate_output", "finalize"):
+    for name in ("intake", "advice_gate_input", "scope_check", "clarification", "decompose", "plan",
+                 "gather_evidence", "audit", "retry_or_accept", "apply_tier_policy", "assemble",
+                 "advice_gate_output", "finalize"):
         g.add_node(name, getattr(nodes, name))
 
     g.set_entry_point("intake")
     for src, dst in (("intake", "advice_gate_input"), ("advice_gate_input", "scope_check"),
                      ("scope_check", "decompose"), ("decompose", "plan")):
-        g.add_conditional_edges(src, _continue_or_finalize(dst), {dst: dst, "finalize": "finalize"})
+        paths = {dst: dst, "finalize": "finalize"}
+        if src != "advice_gate_input":  # the advice gate only refuses; it never asks a question
+            paths["clarification"] = "clarification"
+        g.add_conditional_edges(src, _continue_or_stop(dst), paths)
+    g.add_edge("clarification", "finalize")
     g.add_conditional_edges("plan", route_after_plan,
                             {"gather_evidence": "gather_evidence", "apply_tier_policy": "apply_tier_policy"})
     g.add_edge("gather_evidence", "audit")
@@ -129,9 +145,14 @@ def _crash_output(ctx: RunContext, thesis: str, exc: Exception) -> RunOutput:
     return RunOutput(final, log)
 
 
-def run_finsight(thesis: str, cutoff: date | None = None, **kwargs) -> FinalAssessment:
-    """Public API for the UI (Person 4): evaluate `thesis` as of `cutoff` (None -> corpus as-of date)."""
-    return execute(thesis, cutoff, **kwargs).assessment
+def run_finsight(thesis: str, cutoff: date | None = None, company_ticker: str | None = None,
+                 **kwargs) -> FinalAssessment:
+    """Public API for the UI (Person 4): evaluate `thesis` as of `cutoff` (None -> corpus as-of date).
+
+    If the result has status NEEDS_CLARIFICATION, show `clarification_question` to the user and call
+    again with their answer: an edited thesis, or `company_ticker=` for "which company?".
+    """
+    return execute(thesis, cutoff, company_ticker=company_ticker, **kwargs).assessment
 
 
 def export_mermaid(path: str | Path = "docs/orchestrator_graph.md") -> Path:

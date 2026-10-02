@@ -12,8 +12,8 @@ option and marked `# DECISION:` in the code. Rows marked **Team** need group sig
 | D3 | The orchestrator re-applies its own guards after Person 4's TierPolicy: knowledge-layer cap, a positive verdict needs eligible supporting evidence (Tier 3 never counts), counter-evidence rule, and a policy that tries to *raise* a verdict is ignored | Safety holds even if one agent is wrong (defence in depth) | `agents/orchestrator/routing.py`, `nodes.py` | Done |
 | D4 | If any collector fails for a claim, that claim becomes INSUFFICIENT_EVIDENCE; partial evidence is not used | Spec: one failed agent marks its claim, not the run. Keeping half the evidence could bias the verdict | `nodes.py: gather_evidence` | Done |
 | D5 | The advice gate fails **closed**: if it errors at input or output, the run returns FAILED and nothing is analyzed or released | The advice boundary is a hard requirement; an unchecked answer is worse than no answer | `nodes.py` | **Team** |
-| D6 | All out-of-scope requests (price prediction, macro / index, company not in corpus) are REFUSED with a reason | Simple to score against `expect_refusal`; clear to users | `routing.py: scope_refusal` | **Team** |
-| D7 | Empty or overlong (>5000 chars) input is REFUSED, not FAILED | It is a bad request, not a system failure | `nodes.py: intake` | Done |
+| D6 | Price predictions, macro / index theses, and a company named via `company_ticker` that is outside the corpus are REFUSED with a reason. A thesis naming no covered company gets a clarification question instead (D19) | Matches the architecture diagram: refuse what is out of scope, ask when information is missing | `routing.py: scope_screen` | **Team** |
+| D7 | Overlong (>5000 chars) input is REFUSED, not FAILED; an empty thesis asks for clarification | Bad request, not a system failure; empty input is missing info | `nodes.py: intake` | Done |
 | D8 | If the output gate flags the answer, all claim results are removed and a refusal reason returned | Partial release could still leak advice-like text | `nodes.py: advice_gate_output` | Done |
 | D9 | Cut-off priority: explicit argument → "Cut-off date: …" phrase in the thesis → corpus as-of date (flagged as defaulted in the output) | The demo thesis carries its own cut-off; a default must be visible | `routing.py: resolve_cutoff` | Done |
 | D10 | Claims run in parallel in a thread pool inside the gather and audit nodes, rather than the LangGraph Send API | Keeps the state simple (no reducers); same speed-up | `nodes.py` | Done |
@@ -26,7 +26,16 @@ option and marked `# DECISION:` in the code. Rows marked **Team** need group sig
 | D18 | Building the agent registry happens inside `execute`'s error handling | A mis-registered agent returns FAILED with the reason instead of crashing the UI | `orchestrator/graph.py` | Done |
 | D16 | BUSINESS_RISK: no cap, but any Tier 1–2 challenging evidence lowers SUPPORTED to PARTIALLY_SUPPORTED | Reading of "counter-evidence only, can block SUPPORTED" | `knowledge_layer.yaml` | **Team** (Irine) |
 
-## Schema additions (all in `contracts/schemas.py`, version 0.1)
+### Aligning the code with the architecture diagram (2026-10-02)
+
+| # | Decision | Why | Where | Status |
+|---|---|---|---|---|
+| D19 | **Clarification** node: an empty thesis, no covered company named, or no checkable claim (all claims OTHER) stops the run with status NEEDS_CLARIFICATION and a question. The UI resubmits with the answer (`company_ticker=` or an edited thesis) | Diagram: "Unclear or missing info → Clarification → asks user". Asking is better than guessing the company or analyzing a vague claim | `nodes.py: clarification`, `routing.py` | **Team** |
+| D20 | The advice gate runs before any clarification, so advice requests are refused even when the company is missing | Advice must never be engaged with, even to ask a follow-up question | `graph.py` | Done |
+| D21 | **"Source tier: enough?"** is checked before the retry decision: a claim retries if the audit failed **or** it lacks evidence from its required tiers (positive verdict → eligible SUPPORTING evidence; otherwise any required-tier item). Still not enough after the retry → INSUFFICIENT_EVIDENCE | Diagram puts the tier check inside the auditor's decision, with "No" leading to a retry | `routing.tier_shortfall`, `nodes.py: retry_or_accept` | Done |
+| D22 | **Re-plan on retry**: each knowledge-layer rule lists `retry_collectors`, added to the claim's plan for its retry (seed: numeric types add narrative; demand / risk add financial; continuation adds none) | Diagram: "Orchestrator re-plans / retrieves more"; data-driven so Irine controls it | `knowledge_layer.yaml`, `routing.replan_entry` | **Team** (Irine) |
+
+## Schema additions (all in `contracts/schemas.py`, version 0.2)
 
 | # | Addition | Why |
 |---|---|---|
@@ -34,6 +43,7 @@ option and marked `# DECISION:` in the code. Rows marked **Team** need group sig
 | S2 | `AgentCall.claim_id` | Per-claim cost and latency tracing |
 | S3 | `DecisionLog.temporal_violations`, `events`, `status` | Temporal drops must be logged; events give a readable trace |
 | S4 | `KnowledgeRule` lives in `schemas.py` | `TierPolicy.apply` needs it, and agents may only import from `contracts` |
+| S5 | v0.2: `AssessmentStatus.NEEDS_CLARIFICATION`, `FinalAssessment.clarification_question`, `KnowledgeRule.retry_collectors`, `"clarification"` gate | Clarification and re-plan steps from the architecture diagram; all new fields have defaults, so existing code keeps working |
 
 ## LLM usage and cost
 
@@ -54,6 +64,7 @@ option and marked `# DECISION:` in the code. Rows marked **Team** need group sig
 | E3 | Retry rate = claims retried at least once / claims assessed | Per-claim view matches how retries work | `eval/metrics.py` | Done |
 | E4 | Heldout split is frozen by a SHA-256 lock file; `--final` refuses to run if the file is unfrozen or changed | The heldout split cannot drift after we have seen results | `eval/run_eval.py` | Done |
 | E5 | The dataset validator rejects duplicate IDs, dev→heldout thesis leaks, refusal items with gold claims, and items that should have gold claims but don't | Catches labeling mistakes before they become results | `eval/run_eval.py` | Done |
+| E6 | Eval items can set `expect_clarification`; task success requires both refusal and clarification behaviour to match. Baselines get the same "CLARIFY: <question>" instruction | Clarification is part of the architecture, so it is scored, and fairly | `eval/`, `baselines/common.py` | Done |
 
 ## Known limitations (state these in the report)
 

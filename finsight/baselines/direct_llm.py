@@ -6,7 +6,7 @@ import time
 from datetime import date
 
 from finsight.agents.orchestrator.routing import resolve_cutoff
-from finsight.baselines.common import BaselineResult, baseline_system_prompt, parse_output, xbrl_facts_as_text
+from finsight.baselines.common import BaselineResult, apply_output, baseline_system_prompt, xbrl_facts_as_text
 from finsight.config import get_settings
 from finsight.llm.client import complete, data_block
 from finsight.logging.decision_log import tracked_call
@@ -25,7 +25,6 @@ def run_direct_llm(thesis: str, cutoff: date | None = None) -> BaselineResult:
     if error:
         result.error = f"{type(error).__name__}: {error}"
     else:
-        result.raw_output = resp.text
-        result.refused, result.refusal_reason, result.claims, result.overall_verdict = parse_output(resp.text)
+        apply_output(result, resp.text)
     result.latency_ms = round((time.perf_counter() - t0) * 1000, 3)
     return result

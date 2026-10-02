@@ -182,8 +182,9 @@ from finsight import run_finsight, execute
 from finsight.agents.orchestrator.render import render_assessment
 
 assessment = run_finsight(thesis_text, cutoff=None)   # FinalAssessment (Pydantic model)
-assessment.status            # COMPLETED | REFUSED | FAILED
+assessment.status            # COMPLETED | REFUSED | FAILED | NEEDS_CLARIFICATION
 assessment.refusal_reason    # show this when REFUSED / FAILED
+assessment.clarification_question   # show this when NEEDS_CLARIFICATION, then resubmit (below)
 assessment.overall_verdict
 assessment.claim_results     # each: claim, verdict, highest_tier_used, supporting, challenging, rationale, capped_by
 assessment.as_of_date, assessment.cutoff_was_defaulted, assessment.boundary_disclaimer   # always display these
@@ -196,6 +197,18 @@ run.assessment, run.decision_log
 
 The disclaimer must always be shown. `run_finsight` never raises: problems come back as
 `status=FAILED` with a reason. To see the full JSON shape, run `finsight run "<thesis>" --json`.
+
+**Clarification loop** (the diagram's "Clarification → asks user" arrow):
+
+```python
+a = run_finsight("Its revenue growth is just getting started.")
+if a.status == "NEEDS_CLARIFICATION":
+    answer = ask_user(a.clarification_question)          # e.g. "Company X" / "CMPX"
+    a = run_finsight(thesis_text, company_ticker="CMPX")   # "which company?" -> pass the ticker
+    # "which claim?" -> resubmit an edited thesis instead
+```
+
+A ticker outside the corpus comes back REFUSED, with the list of covered companies.
 
 ## Evaluation
 
@@ -219,23 +232,44 @@ Dataset format and labeling rules are in [docs/eval_dataset_guide.md](docs/eval_
 
 ## Architecture
 
+The code follows the team architecture diagram:
+
 ```mermaid
-graph TD
-  intake --> advice_gate_input
-  advice_gate_input -->|flagged| finalize
-  advice_gate_input --> scope_check
-  scope_check -->|out of scope| finalize
-  scope_check --> decompose
-  decompose -->|advice claim / failure| finalize
-  decompose --> plan
-  plan --> gather_evidence
-  plan -->|no collectors| apply_tier_policy
-  gather_evidence --> audit --> retry_or_accept
-  retry_or_accept -->|failed, retries left| gather_evidence
-  retry_or_accept --> apply_tier_policy --> assemble --> advice_gate_output --> finalize
+graph LR
+  user([User: thesis + cut-off]) --> screen[Initial screening<br/>advice_gate_input + scope_check]
+  screen -->|advice request / out of scope| refuse1[Refuse with reason, logged]
+  screen -->|unclear or missing info| clarify[Clarification:<br/>ask for company / claim]
+  clarify -.->|user answers, resubmits| user
+  screen --> orch[Orchestrator:<br/>decompose + plan]
+  orch -->|no checkable claim| clarify
+  orch --> fin[Financial Analysis Agent]
+  orch --> nar[Narrative Evidence Agent]
+  fin --> aud{Auditor: number + citation checks,<br/>source tier enough?}
+  nar --> aud
+  aud -.->|No: re-plan + retrieve more, max 1 retry| orch
+  aud -->|Yes, or still failing = Insufficient Evidence| tier[Tier policy + caps]
+  tier --> overall[Overall assessment]
+  overall --> final{Advice Boundary:<br/>final check}
+  final -->|pass| report([User report])
+  final -->|flag| refuse2[Refuse with reason, logged]
 ```
 
-The generated diagram is in [docs/orchestrator_graph.md](docs/orchestrator_graph.md); regenerate it with `finsight graph`.
+How the diagram's boxes map to the code (`finsight/agents/orchestrator/`):
+
+| Diagram | Graph node(s) | Notes |
+|---|---|---|
+| Advice Boundary Agent: initial screening (advice + scope) | `advice_gate_input`, `scope_check` | Advice: Irine's agent. Scope: deterministic rules (price predictions, macro theses, companies outside the corpus are refused) |
+| Clarification: ask for company / claim | `clarification` | Status `NEEDS_CLARIFICATION` with a question; triggered by an empty thesis, no company named, or no checkable claim |
+| Orchestrator Agent: decompose claims, plan evidence needs | `decompose`, `plan` | Decomposer is Amelia's agent; the plan comes from the knowledge layer |
+| Financial / Narrative agents | `gather_evidence` | Claims in parallel; only the planned collectors; post-cut-off evidence dropped and logged |
+| Auditor: number + citation checks, source tier enough? | `audit`, `retry_or_accept` | Audit is Amelia's agent; the tier-sufficiency check is in `routing.tier_shortfall` |
+| "No": re-plan / retrieve more (max 1 retry) | `retry_or_accept` → `gather_evidence` | Adds the rule's `retry_collectors` and passes feedback; limit `FINSIGHT_MAX_RETRIES` |
+| Still failing: claim = Insufficient Evidence | `retry_or_accept` | Only that claim is downgraded; the rest of the answer is kept |
+| Overall assessment | `apply_tier_policy`, `assemble` | Irine's tier policy + orchestrator caps; overall rule in `aggregation.py` |
+| Advice Boundary: final check, pass / flag | `advice_gate_output`, `finalize` | Flag replaces the answer with a refusal |
+| Every step is written to the decision log | all nodes | `logs/<request_id>.json`, view with `finsight trace` |
+
+The exact generated graph is in [docs/orchestrator_graph.md](docs/orchestrator_graph.md); regenerate it with `finsight graph`.
 
 Safety rules enforced by the orchestrator:
 

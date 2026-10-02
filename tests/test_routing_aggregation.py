@@ -46,5 +46,28 @@ def test_guards():
 def test_scope():
     companies = {"CMPX": ["Company X"]}
     assert routing.detect_company("company x is great", companies) == "CMPX"
-    assert routing.scope_refusal("Company X revenue grew", "CMPX") is None
-    assert "Macro" in routing.scope_refusal("The Fed will cut interest rates", None)
+    assert routing.scope_screen("Company X revenue grew", "CMPX", None, companies) == (None, None)
+    refuse, _ = routing.scope_screen("The Fed will cut interest rates", None, None, companies)
+    assert "Macro" in refuse
+    refuse, _ = routing.scope_screen("Acme will grow", None, "ACME", companies)
+    assert "not in the frozen corpus" in refuse
+    refuse, question = routing.scope_screen("This stock will keep growing", None, None, companies)
+    assert refuse is None and "Which company" in question
+
+
+def test_tier_shortfall_and_replan():
+    rule = KnowledgeRule(claim_type=ClaimType.HISTORICAL_GROWTH, collectors=["financial"],
+                         retry_collectors=["narrative", "financial"], highest_verdict=S,
+                         tier_requirement=[SourceTier.TIER_1])
+    assert routing.tier_shortfall(S, [_item(Stance.SUPPORTING, SourceTier.TIER_1)], rule) is None
+    assert "Tier 3" in routing.tier_shortfall(S, [_item(Stance.SUPPORTING, SourceTier.TIER_3)], rule)
+    assert routing.tier_shortfall(I, [], rule).startswith("No evidence")
+    assert routing.tier_shortfall(C, [_item(Stance.CHALLENGING, SourceTier.TIER_1)], rule) is None
+    entry = routing.plan_entry(_claim(), rule)
+    assert routing.replan_entry(entry, rule).collectors == ["financial", "narrative"]
+
+
+def _claim():
+    from finsight.contracts.schemas import Claim
+
+    return Claim(claim_id="c1", text="x", claim_type=ClaimType.HISTORICAL_GROWTH)

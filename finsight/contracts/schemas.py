@@ -13,7 +13,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SCHEMA_VERSION = "0.1"
+# 0.2: NEEDS_CLARIFICATION status + FinalAssessment.clarification_question, KnowledgeRule.retry_collectors,
+#      "clarification" gate.
+SCHEMA_VERSION = "0.2"
 
 
 class _Strict(BaseModel):
@@ -91,6 +93,9 @@ class AssessmentStatus(str, Enum):
     COMPLETED = "COMPLETED"
     REFUSED = "REFUSED"
     FAILED = "FAILED"
+    # The thesis is unclear or missing information: show `clarification_question` to the user and
+    # resubmit with their answer (e.g. run_finsight(thesis, company_ticker="CMPX")).
+    NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
 
 
 CollectorName = Literal["financial", "narrative"]
@@ -182,6 +187,10 @@ class KnowledgeRule(_Strict):
         default=False, description="Evidence for this type can only block SUPPORTED, never add support."
     )
     refuse: bool = Field(default=False, description="Do not analyze; refuse the request.")
+    retry_collectors: list[CollectorName] = Field(
+        default_factory=list,
+        description="Extra collectors the orchestrator adds when it re-plans a claim for its retry.",
+    )
     note: str | None = None
 
 
@@ -213,6 +222,8 @@ class FinalAssessment(_Strict):
     cutoff_was_defaulted: bool = False
     boundary_disclaimer: str
     refusal_reason: str | None = None
+    clarification_question: str | None = Field(
+        default=None, description="Set when status is NEEDS_CLARIFICATION: ask the user this.")
 
 
 # ---------------------------------------------------------------------------
@@ -234,9 +245,9 @@ class AgentCall(_Strict):
 
 
 class GateDecision(_Strict):
-    """Any gate in the pipeline: advice (input/output) or scope."""
+    """Any gate in the pipeline: advice (input/output), scope, or a clarification request."""
 
-    gate: Literal["advice_input", "scope", "advice_output"]
+    gate: Literal["advice_input", "scope", "clarification", "advice_output"]
     flagged: bool
     reason: str | None = None
 
@@ -310,6 +321,7 @@ class FinSightState(_Strict):
     request: ThesisRequest | None = None
     status: AssessmentStatus | None = None  # set only when the run stops early
     refusal_reason: str | None = None
+    clarification_question: str | None = None  # set by a gate; the clarification node then stops the run
     advice_decisions: list[AdviceDecision] = Field(default_factory=list)
     claims: list[Claim] = Field(default_factory=list)
     routing_plan: dict[str, RoutePlanEntry] = Field(default_factory=dict)
@@ -319,6 +331,7 @@ class FinSightState(_Strict):
     evidence: dict[str, list[EvidenceItem]] = Field(default_factory=dict)
     audits: dict[str, AuditResult] = Field(default_factory=dict)
     insufficient_reasons: dict[str, str] = Field(default_factory=dict)
+    tier_shortfalls: dict[str, str] = Field(default_factory=dict)  # claims whose evidence tier is not enough
     final_verdicts: dict[str, Verdict] = Field(default_factory=dict)
     capped_by: dict[str, str] = Field(default_factory=dict)
     # outputs

@@ -99,7 +99,8 @@ class NarrativeAgent:
   - Set `computed_value` and `metric_name` on quantitative evidence.
   - XBRL, 10-K and 10-Q evidence is `SourceTier.TIER_1`.
   - `publication_date` is the **filing date**, not the period end.
-  - `feedback` is the auditor's retry hint (e.g. "need an exact citation span").
+  - `feedback` is the retry hint: the auditor's, or the orchestrator's tier hint, e.g. "Need SUPPORTING evidence from TIER_1". Use it to search harder or differently.
+  - On a retry you may also be called for claim types outside your usual set (the knowledge layer's `retry_collectors`). Returning `[]` is fine.
 - **Narrative (Stella):**
   - Fill `citation_span`, `url` and `publication_date` so the auditor can check entailment and the cut-off filter works.
   - Tier 3 news is allowed but can never raise a verdict.
@@ -108,12 +109,22 @@ class NarrativeAgent:
   - Use `ClaimType.PERSONALIZED_ADVICE` for "what should I do" content: the orchestrator refuses the whole request.
   - `COMPARATIVE` claims are not gathered, because peers are out of scope.
   - Mark numeric claims with `is_quantitative=True`.
+  - Use `ClaimType.OTHER` only when a claim really fits no type. If **every** claim is OTHER (or there
+    are none), the orchestrator asks the user which claim to check.
 - **Auditor (Amelia):**
-  - `passed=False` triggers one re-gather of that claim only (`FINSIGHT_MAX_RETRIES`); a second failure makes it INSUFFICIENT_EVIDENCE.
+  - You do the diagram's "number + citation checks". The orchestrator adds "source tier: enough?" itself
+    (`routing.tier_shortfall`), so don't re-implement tier rules.
+  - `passed=False`, or too little evidence from the required tiers, triggers one re-planned re-gather of
+    that claim only (`FINSIGHT_MAX_RETRIES`). Still failing makes it INSUFFICIENT_EVIDENCE.
+  - Set `feedback_for_retry` when failing: it goes to the collectors.
   - The orchestrator uses your `verdict` as the *proposed* verdict, then applies tier rules.
   - Accuracy and Macro-F1 come from `results/<run>/claims.csv` (one row per gold claim, `MISSING` when no predicted claim matched).
 - **Tier policy (Irine):** you may only **lower** a verdict. The orchestrator ignores any raise, then
   re-applies the knowledge-layer cap, the tier requirement and the counter-evidence rule.
+- **Knowledge layer (Irine):** `retry_collectors` per claim type is the diagram's "re-plan" step. On a
+  retry, those collectors are added to the claim's plan. The seed values are a proposal: please confirm them.
+- **UI (Irine):** handle all four statuses: COMPLETED, REFUSED, FAILED and **NEEDS_CLARIFICATION**.
+  For NEEDS_CLARIFICATION, show the question and resubmit (README, "Clarification loop").
 - **Advice boundary (Irine):**
   - It is called at `INPUT` on the raw thesis and at `OUTPUT` on the rendered text (`agents/orchestrator/render.py`).
   - If it raises an exception, the request fails closed.

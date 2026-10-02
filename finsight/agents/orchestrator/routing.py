@@ -78,23 +78,36 @@ def detect_company(thesis: str, companies: dict[str, list[str]], hint: str | Non
     return None
 
 
-def scope_refusal(thesis: str, ticker: str | None) -> str | None:
-    """Reason the request is out of scope, or None if in scope.
+def _covered(companies: dict[str, list[str]]) -> str:
+    return ", ".join(f"{aliases[0]} ({ticker})" for ticker, aliases in companies.items())
 
-    # DECISION: every out-of-scope case is REFUSED (not COMPLETED/INSUFFICIENT) so the
-    # behaviour is easy to score against `expect_refusal`.
+
+def scope_screen(thesis: str, ticker: str | None, hint: str | None,
+                 companies: dict[str, list[str]]) -> tuple[str | None, str | None]:
+    """Initial scope screening: (refusal_reason, clarification_question); both None if in scope.
+
+    # DECISION: price predictions, macro theses and named companies outside the corpus are REFUSED.
+    # A thesis that names no company is unclear, so we ask which company (diagram: Clarification).
     """
     if _PRICE_PREDICTION_RE.search(thesis):
-        return "Price predictions are out of scope: FinSight evaluates company fundamentals, not price targets."
+        return "Price predictions are out of scope: FinSight evaluates company fundamentals, not price targets.", None
+    if ticker is None and hint:
+        return f"{hint} is not in the frozen corpus. FinSight covers: {_covered(companies)}.", None
     if ticker is None and _MACRO_RE.search(thesis):
-        return "Macro / market-level theses are out of scope: FinSight evaluates company-level theses only."
+        return "Macro / market-level theses are out of scope: FinSight evaluates company-level theses only.", None
     if ticker is None:
-        return "No company from the frozen corpus was identified in the thesis."
-    return None
+        return None, (f"Which company is this thesis about? FinSight covers: {_covered(companies)}. "
+                      "Resubmit naming the company.")
+    return None, None
+
+
+CLARIFY_EMPTY = "Please paste the investment thesis you want checked, e.g. a claim about a company's growth."
+CLARIFY_NO_CLAIM = ("Which specific claim should FinSight check? For example revenue growth, margins, "
+                    "what is driving demand, or whether growth will continue.")
 
 
 # ---------------------------------------------------------------------------
-# Plan
+# Plan / re-plan
 # ---------------------------------------------------------------------------
 
 
@@ -103,6 +116,30 @@ def plan_entry(claim: Claim, rule: KnowledgeRule) -> RoutePlanEntry:
         claim_id=claim.claim_id, claim_type=claim.claim_type, collectors=list(rule.collectors),
         verdict_cap=rule.highest_verdict, tier_requirement=list(rule.tier_requirement), note=rule.note,
     )
+
+
+def replan_entry(entry: RoutePlanEntry, rule: KnowledgeRule) -> RoutePlanEntry:
+    """Plan for a retry: the original collectors plus the rule's retry_collectors (no duplicates)."""
+    extra = [c for c in rule.retry_collectors if c not in entry.collectors]
+    return entry.model_copy(update={"collectors": [*entry.collectors, *extra]})
+
+
+def tier_shortfall(verdict: Verdict, evidence: list[EvidenceItem], rule: KnowledgeRule) -> str | None:
+    """The auditor's "source tier: enough?" question. Returns retry feedback when NOT enough, else None.
+
+    A positive verdict needs SUPPORTING evidence from a required tier (Tier 3 never counts).
+    Any other verdict needs at least one item from a required tier.
+    """
+    if not rule.tier_requirement:
+        return None
+    tiers = "/".join(t.value for t in rule.tier_requirement)
+    if verdict.is_positive:
+        if eligible_support(evidence, rule):
+            return None
+        return f"Need SUPPORTING evidence from {tiers}; Tier 3 news cannot support a verdict."
+    if any(e.source_tier in rule.tier_requirement and e.source_tier is not SourceTier.TIER_3 for e in evidence):
+        return None
+    return f"No evidence from {tiers} was found; search {tiers} sources for this claim."
 
 
 # ---------------------------------------------------------------------------

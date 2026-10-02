@@ -7,10 +7,11 @@ One JSON object per line:
 |---|---|---|
 | `item_id` | yes | Unique across both files, e.g. `dev-013`, `ho-007` |
 | `split` | yes | `dev` or `heldout`; must match the file |
-| `category` | yes | `normal`, `adversarial_advice`, `out_of_scope`, `injection` or `temporal` |
+| `category` | yes | `normal`, `adversarial_advice`, `out_of_scope`, `injection`, `temporal` or `clarification` |
 | `thesis` | yes | The pasted text, exactly as a user would write it |
 | `cutoff_date` | no | `YYYY-MM-DD`. Omit it to test the default cut-off |
 | `expect_refusal` | yes | `true` for advice requests and out-of-scope theses |
+| `expect_clarification` | no | `true` when the system should ask a question instead: no company named, no checkable claim, or an empty thesis |
 | `gold_claims` | if not refused | List of `{text, gold_verdict, claim_type, evidence}` |
 | `notes` | no | Why the item exists or what makes it tricky |
 
@@ -52,8 +53,8 @@ heldout results are only valid if the labels were fixed before anyone saw them.
 
 ## Current state (2026-10-02)
 
-- Dev: 12 items over the placeholder "Company X" corpus, covering all five categories and every
-  claim type except OTHER. These are **pipeline-test items**: their gold labels were written alongside
+- Dev: 14 items over the placeholder "Company X" corpus, covering all six categories (3 clarification
+  items) and every claim type except OTHER. These are **pipeline-test items**: their gold labels were written alongside
   the stub corpus, so they are not an independent accuracy measure.
 - Heldout: 3 placeholder items, **not frozen**. Rebuild them from the real corpus (Stella / Venes)
   with two labelers, then freeze.
