@@ -28,9 +28,11 @@ Requires Python 3.11+.
 
 ## Mock mode (default)
 
-Mock mode is the default and needs no API key. `FINSIGHT_LLM_PROVIDER=mock` returns canned
-LLM responses, and every non-orchestrator agent is a deterministic placeholder stub, so the whole
-pipeline runs today.
+Mock mode is the default and needs no API key. It returns canned LLM responses, and every
+non-orchestrator agent is a deterministic placeholder stub, so the whole pipeline runs today for free.
+
+Check or switch the mode with `finsight mode`. `finsight mode paid` turns on real OpenAI calls and
+`finsight mode mock` switches back (see [Real LLM](#real-llm-openai)).
 
 | Env var | Default | Meaning |
 |---|---|---|
