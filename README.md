@@ -265,6 +265,29 @@ Two safeguards for the heldout split:
 
 Dataset format and labeling rules are in [docs/eval_dataset_guide.md](docs/eval_dataset_guide.md).
 
+### Per-agent evaluation
+
+The commands above score the **whole system**. To score **each agent on its own** (whichever
+implementation is registered, stub or real):
+
+```bash
+finsight eval --agents all                 # or e.g. --agents auditor,financial
+```
+
+| Agent | Measured on | Key metrics |
+|---|---|---|
+| decomposer | Dev claims' gold sub-claims | Type precision / recall / F1, count accuracy, advice detection |
+| financial | Sub-claims with known XBRL answers | Number accuracy, metric, stance, Tier 1 label, "no data" before filing, cut-off leaks, citations |
+| narrative | Sub-claims with known relevant passages | Evidence recall / precision, stance, finds counter-evidence, cut-off leaks, citations |
+| retriever | Queries with known relevant passages | Recall@3, MRR, cut-off leaks |
+| auditor | Correct evidence + auto-generated broken copies (13 mistake types) | Catch rate (per type), false-alarm rate |
+| advice_boundary | Labelled inputs / outputs | Recall, precision, F1 at input and output |
+| tier_policy | Cases generated from `knowledge_layer.yaml` | Agreement with the rules, illegal verdict raises |
+
+Results: `results/{timestamp}/agents/summary.md` plus `<agent>.json` listing every case.
+The cases live in `finsight/eval/agent_eval/datasets/`; each owner should add real-corpus cases.
+Scores for the stubs as of 2 Oct 2026: [docs/results/2026-10-02_agent_eval_stubs.md](docs/results/2026-10-02_agent_eval_stubs.md).
+
 ## Architecture
 
 The code follows the team architecture diagram ([docs/architecture.svg](docs/architecture.svg), editable SVG):

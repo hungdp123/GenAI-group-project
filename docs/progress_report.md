@@ -14,6 +14,7 @@ without breaking anyone else.
 |---|---|
 | Automated tests | **91 passing** (mock mode, no API cost) |
 | CI pipeline | **GitHub Actions on every push and PR**: lint, secrets check, tests on Ubuntu 3.11 / 3.12 + Windows 3.12; first runs on `Hung` and `main` both ✅ (about 1 min) |
+| Per-agent evaluation | `finsight eval --agents all`: each agent scored on its own (7 evaluators; auditor by error injection). Stub baseline: [results](results/2026-10-02_agent_eval_stubs.md) |
 | Dev evaluation set | **14 items**, all 6 categories |
 | Heldout set | 3 placeholder items, **not frozen yet** |
 | OpenAI spend so far | **$0.17 of $150** (one-off validation runs; now in free mock mode by default) |

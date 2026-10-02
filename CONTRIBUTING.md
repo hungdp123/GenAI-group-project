@@ -27,8 +27,13 @@ Setup, Git workflow and commands are in the [README](README.md).
    ```
 4. **Register it.** Change **only your own line** in `DEFAULT_IMPLEMENTATIONS` in `finsight/config.py`.
    Do not touch `STUB_IMPLEMENTATIONS`.
-5. **Run all checks:** `python scripts/check.py` (lint, secrets, tests, datasets, scenario smoke test). Then open a PR using the [checklist](#pull-request-checklist).
-6. **Keep `stub.py`.** The end-to-end tests and offline demos still use it.
+5. **Score your agent:** `finsight eval --agents <yours>` (`financial`, `narrative`, `retriever`, `decomposer`,
+   `auditor`, `advice_boundary`, `tier_policy`). Compare with the stub's score in
+   `docs/results/2026-10-02_agent_eval_stubs.md`, read the FAIL lines, and add real-corpus cases to
+   `finsight/eval/agent_eval/datasets/` for your agent. Put the before/after numbers in your PR description.
+6. **Run all checks:** `python scripts/check.py` (lint, secrets, tests, datasets, scenario smoke test, evaluations).
+   Then open a PR using the [checklist](#pull-request-checklist).
+7. **Keep `stub.py`.** The end-to-end tests and offline demos still use it.
 
 ### How the tests treat your agent
 

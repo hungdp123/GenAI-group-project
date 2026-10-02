@@ -1,7 +1,7 @@
 """Run every FinSight check locally: the same checks as CI, plus a readable scenario smoke test.
 
     python scripts/check.py           # everything (about 30 s)
-    python scripts/check.py --quick   # skip the full test suite and the evaluation run
+    python scripts/check.py --quick   # skip the full test suite and the evaluation runs
 
 Always runs in MOCK mode: no API key is used and no OpenAI credit is spent.
 Exit code 0 = all checks passed, 1 = something failed (details printed above the summary).
@@ -171,6 +171,21 @@ def check_eval() -> None:
          f"{len(records) - len(failed)}/{len(records)} items" + (f"; failed: {', '.join(failed)}" if failed else ""))
 
 
+def check_agent_eval() -> None:
+    section("8. Per-agent evaluation (mock)")
+    proc = run([sys.executable, "-m", "finsight", "eval", "--agents", "all", "--out", str(TMP / "agent_results")])
+    reports = sorted((TMP / "agent_results").glob("*/agents/*.json"))
+    if proc.returncode != 0 or not reports:
+        step("finsight eval --agents all", False, "\n" + (proc.stdout + proc.stderr)[-2000:])
+        return
+    for path in reports:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        passed = sum(c["passed"] for c in data["cases"])
+        # Scores are information, not pass/fail: stubs score low on purpose. Only crashes fail this check.
+        step(f"{data['agent']} evaluation runs", data["metrics"].get("errors", 0) == 0,
+             f"{passed}/{len(data['cases'])} cases passed ({data['implementation'].rsplit('.', 1)[-1]})")
+
+
 def preflight() -> bool:
     """Fail fast with a clear message when run outside the project's virtual environment."""
     missing = []
@@ -214,9 +229,10 @@ def main() -> int:
         return 2
     t0 = time.perf_counter()
 
-    checks = [check_lint, check_secrets, check_tests, check_datasets, check_graph_doc, check_scenarios, check_eval]
+    checks = [check_lint, check_secrets, check_tests, check_datasets, check_graph_doc, check_scenarios, check_eval,
+              check_agent_eval]
     for check in checks:
-        if args.quick and check in (check_tests, check_eval):
+        if args.quick and check in (check_tests, check_eval, check_agent_eval):
             continue
         guarded(check)
 

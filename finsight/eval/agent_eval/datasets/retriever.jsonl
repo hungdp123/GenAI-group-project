@@ -1,0 +1,5 @@
+{"case_id": "ret-001", "query": "Company X data center revenue growth driven by AI infrastructure demand", "cutoff": "2025-07-31", "relevant": ["CMPX-10Q-2025Q2-MDA-DC"]}
+{"case_id": "ret-002", "query": "Company X gross margin decline and capital expenditure outlook", "cutoff": "2025-07-31", "relevant": ["CMPX-ER-2025Q2-MARGIN"]}
+{"case_id": "ret-003", "query": "Management expects continued strong demand next fiscal year", "cutoff": "2025-07-31", "relevant": ["CMPX-CALL-2025Q2-OUTLOOK"]}
+{"case_id": "ret-004", "query": "Client and Embedded segment revenue growth not from AI", "cutoff": "2025-07-31", "relevant": ["CMPX-10Q-2025Q2-MDA-SEG"]}
+{"case_id": "ret-005", "query": "Company X AI infrastructure demand", "cutoff": "2025-01-31", "relevant": []}

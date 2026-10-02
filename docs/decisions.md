@@ -67,6 +67,7 @@ option and marked `# DECISION:` in the code. Rows marked **Team** need group sig
 | E4 | Heldout split is frozen by a SHA-256 lock file; `--final` refuses to run if the file is unfrozen or changed | The heldout split cannot drift after we have seen results | `eval/run_eval.py` | Done |
 | E5 | The dataset validator rejects duplicate IDs, dev→heldout claim leaks, refusal items with gold sub-claims, and items that should have gold sub-claims but don't | Catches labeling mistakes before they become results | `eval/run_eval.py` | Done |
 | E6 | Eval items can set `expect_clarification`; task success requires both refusal and clarification behaviour to match. Baselines get the same "CLARIFY: <question>" instruction | Clarification is part of the architecture, so it is scored, and fairly | `eval/`, `baselines/common.py` | Done |
+| E7 | **Per-agent evaluation** (`finsight eval --agents`) alongside the end-to-end one. Every agent is scored on its own labelled cases, always the registered implementation. The auditor is scored by **error injection** (correct evidence + 13 automatically broken variants: catch rate and false-alarm rate). Tier-policy cases are generated from the knowledge layer | End-to-end scores can't say *which* agent is wrong, and the orchestrator's safety nets hide agent mistakes (e.g. the tier-policy stub's early cap). Per-agent numbers give each owner a target, and before/after numbers for their PR and the report | `eval/agent_eval/` | Done |
 
 ## Known limitations (state these in the report)
 
