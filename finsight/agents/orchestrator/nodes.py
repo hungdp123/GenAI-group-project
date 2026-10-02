@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from finsight.agents.orchestrator import routing
+from finsight.agents.orchestrator import explain, routing
 from finsight.agents.orchestrator.aggregation import highest_tier, overall_verdict
 from finsight.agents.orchestrator.render import render_assessment
 from finsight.config import BOUNDARY_DISCLAIMER, AgentRegistry, Settings
@@ -365,15 +365,19 @@ class Nodes:
                 rationale=self._rationale(state, sub_claim, evidence),
                 retries_used=state.retries_used.get(cid, 0), capped_by=state.capped_by.get(cid),
             ))
+            results[-1].explanation = explain.explain(results[-1], state.request.cutoff_date,
+                                                      state.insufficient_reasons.get(cid))
             if cid in state.insufficient_reasons:
                 gaps.append(f"{cid}: {state.insufficient_reasons[cid]}")
             elif verdict is Verdict.INSUFFICIENT_EVIDENCE:
                 gaps.append(f"{cid}: no supporting evidence from a required source tier before the cut-off.")
         if not state.sub_claims:
             gaps.append("No checkable sub-claims were found in the claim.")
+        overall = overall_verdict([r.verdict for r in results])
         final = FinalAssessment(
             request_id=state.request.request_id, status=AssessmentStatus.COMPLETED,
-            overall_verdict=overall_verdict([r.verdict for r in results]), sub_claim_results=results,
+            claim=state.request.raw_claim, summary=explain.summary(results, overall),
+            overall_verdict=overall, sub_claim_results=results,
             evidence_gaps=gaps, as_of_date=state.request.cutoff_date,
             cutoff_was_defaulted=state.request.cutoff_was_defaulted, boundary_disclaimer=BOUNDARY_DISCLAIMER,
         )
@@ -422,11 +426,13 @@ class Nodes:
     # -- 12. finalize -------------------------------------------------------
 
     def finalize(self, state: FinSightState) -> dict[str, Any]:
+        status = state.status or AssessmentStatus.FAILED
+        question = state.clarification_question if status is AssessmentStatus.NEEDS_CLARIFICATION else None
         final = state.final or FinalAssessment(
             request_id=state.request.request_id if state.request else "unknown",
-            status=state.status or AssessmentStatus.FAILED, refusal_reason=state.refusal_reason,
-            clarification_question=(state.clarification_question
-                                    if state.status is AssessmentStatus.NEEDS_CLARIFICATION else None),
+            status=status, refusal_reason=state.refusal_reason, clarification_question=question,
+            claim=state.request.raw_claim if state.request else state.raw_input,
+            summary=explain.stop_summary(status, state.refusal_reason, question),
             as_of_date=state.request.cutoff_date if state.request else None,
             cutoff_was_defaulted=state.request.cutoff_was_defaulted if state.request else False,
             boundary_disclaimer=BOUNDARY_DISCLAIMER,

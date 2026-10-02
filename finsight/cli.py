@@ -36,8 +36,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if args.json:
         print(out.assessment.model_dump_json(indent=2))
     else:
-        print(render_assessment(out.assessment, show_evidence=not args.no_evidence))
-        print(f"\nDecision log: {get_settings().logs_dir / (out.decision_log.request_id + '.json')}")
+        print(render_assessment(out.assessment, show_evidence=not args.no_evidence, technical=args.technical))
+        rid = out.decision_log.request_id
+        print(f"Technical log: {get_settings().logs_dir / (rid + '.json')}  (view it: finsight trace {rid})")
     return 0
 
 
@@ -103,6 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--no-evidence", action="store_true", help="hide evidence lines")
     run.add_argument("--stages", action="store_true",
                      help="print what each pipeline stage did, as it runs (intake, gates, decompose, ...)")
+    run.add_argument("--technical", action="store_true",
+                     help="developer view: sub-claim types, tiers, retries, audit rationale, caps")
     run.add_argument("--company", help="ticker, e.g. CMPX (the answer to a 'which company?' clarification)")
     run.set_defaults(func=_cmd_run)
 

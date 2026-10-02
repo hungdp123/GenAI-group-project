@@ -132,6 +132,7 @@ class NarrativeAgent:
 - **Advice boundary (Irine):**
   - It is called at `INPUT` on the raw claim and at `OUTPUT` on the rendered text (`agents/orchestrator/render.py`).
   - If it raises an exception, the request fails closed.
+  - `AdviceDecision.reason` is shown to end users: write it in plain English (no regexes or internal terms).
   - The output text always contains the disclaimer "...not a personalized investment recommendation", so don't flag that sentence.
 
 ## Changing the shared contracts

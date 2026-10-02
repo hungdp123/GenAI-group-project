@@ -88,6 +88,7 @@ Expected with the stubs: 4 sub-claims.
 |---|---|
 | `finsight run "<claim>" [--cutoff YYYY-MM-DD] [--json] [--no-evidence]` | Evaluate a claim and print the assessment |
 | `finsight run "<claim>" --stages` | Also print what each pipeline stage did, as it runs (gates, sub-claims, plan, evidence, audit, retries, verdicts) |
+| `finsight run "<claim>" --technical` | Developer view: sub-claim types, tiers, retries, audit rationale (the reader view is the default) |
 | `finsight run "<claim>" --company CMPX` | Answer a "which company?" clarification |
 | `finsight trace <request_id> [--json]` | Print the decision log of a past run (`logs/<request_id>.json`) |
 | `finsight eval --system {direct,rag,finsight,all} --split dev` | Run the evaluation (see below) |
@@ -215,10 +216,14 @@ assessment = run_finsight(claim_text, cutoff=None)   # FinalAssessment (Pydantic
 assessment.status            # COMPLETED | REFUSED | FAILED | NEEDS_CLARIFICATION
 assessment.refusal_reason    # show this when REFUSED / FAILED
 assessment.clarification_question   # show this when NEEDS_CLARIFICATION, then resubmit (below)
+assessment.summary            # plain-language overall summary: show this FIRST
 assessment.overall_verdict
-assessment.sub_claim_results     # each: sub_claim, verdict, highest_tier_used, supporting, challenging, rationale, capped_by
+assessment.sub_claim_results  # each: sub_claim, verdict, explanation (plain 'why'), supporting, challenging, ...
 assessment.as_of_date, assessment.cutoff_was_defaulted, assessment.boundary_disclaimer   # always display these
-render_assessment(assessment)                          # plain-text version
+render_assessment(assessment)                          # reader view: summary, then details
+# Labels for your own layout: explain.verdict_label(v) -> "Partly supported",
+# explain.source_label(e) -> "Quarterly report (10-Q) filed with the SEC, 25 Jul 2025 (Tier 1: ...)"
+# (from finsight.agents.orchestrator import explain)
 assessment.model_dump_json()                           # JSON for a web front end
 
 run = execute(claim_text, cutoff=None)                # also returns the decision log

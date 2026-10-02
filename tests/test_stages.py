@@ -53,7 +53,7 @@ def test_cli_stages_demo(capsys):
     for i, node in enumerate(DEMO_STAGES, start=1):
         assert f"[{i:>2}] {node}" in out
     assert "sc3  no collector -> INSUFFICIENT_EVIDENCE" in out
-    assert "Result:" in out and "Overall verdict: PARTIALLY_SUPPORTED" in out
+    assert "Result:" in out and "Overall, this claim is partly supported" in out
 
 
 def test_cli_stages_stops_at_refusal_and_clarification(capsys):
@@ -68,4 +68,4 @@ def test_cli_stages_stops_at_refusal_and_clarification(capsys):
 
 def test_cli_company_answers_clarification(capsys):
     cli_main(["run", "Its revenue growth is just getting started.", "--cutoff", "2025-07-31", "--company", "CMPX"])
-    assert "Status: COMPLETED" in capsys.readouterr().out
+    assert "Overall, this claim is" in capsys.readouterr().out

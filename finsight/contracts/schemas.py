@@ -19,7 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field
 #      raw_thesis -> raw_claim); the parts it is split into are "sub-claims" (Claim -> SubClaim,
 #      ClaimType -> SubClaimType, ClaimResult -> SubClaimResult, claim_id -> sub_claim_id,
 #      claim_type -> sub_claim_type, claim_results -> sub_claim_results).
-SCHEMA_VERSION = "0.3"
+# 0.4: FinalAssessment.claim + summary, SubClaimResult.explanation (plain-language output; all optional).
+SCHEMA_VERSION = "0.4"
 
 
 class _Strict(BaseModel):
@@ -209,15 +210,20 @@ class SubClaimResult(_Strict):
     highest_tier_used: SourceTier | None = None
     supporting: list[EvidenceItem] = Field(default_factory=list)
     challenging: list[EvidenceItem] = Field(default_factory=list)
-    rationale: str
+    rationale: str = Field(description="Technical: audit outcome, numeric / citation checks (for the log)")
     retries_used: int = 0
     capped_by: str | None = None
+    explanation: str | None = Field(
+        default=None, description="Plain-language reason for the verdict, for end users (built by rule, no LLM)")
 
 
 class FinalAssessment(_Strict):
     schema_version: str = SCHEMA_VERSION
     request_id: str
     status: AssessmentStatus
+    claim: str | None = Field(default=None, description="The claim as the user submitted it")
+    summary: str | None = Field(
+        default=None, description="Plain-language overall summary shown before the details (built by rule, no LLM)")
     overall_verdict: Verdict | None = None
     sub_claim_results: list[SubClaimResult] = Field(default_factory=list)
     evidence_gaps: list[str] = Field(default_factory=list)

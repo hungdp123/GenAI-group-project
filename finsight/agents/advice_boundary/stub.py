@@ -24,9 +24,13 @@ class StubAdviceBoundary:
     name = "advice_boundary_stub"
 
     def check(self, text: str, stage: AdviceStage) -> AdviceDecision:
+        # `reason` is shown to end users, so keep it plain-English (no regexes or internal terms).
         patterns = _INPUT_PATTERNS if stage is AdviceStage.INPUT else _OUTPUT_PATTERNS
         for pattern in patterns:
             if re.search(pattern, text, flags=re.IGNORECASE):
-                return AdviceDecision(stage=stage, flagged=True,
-                                      reason=f"Personalized investment advice detected (pattern: {pattern}).")
+                reason = ("This asks what you personally should buy, sell or invest in. FinSight checks the "
+                          "evidence behind a claim, but doesn't give personal investment advice."
+                          if stage is AdviceStage.INPUT else
+                          "The answer contained wording that could read as personal investment advice.")
+                return AdviceDecision(stage=stage, flagged=True, reason=reason)
         return AdviceDecision(stage=stage, flagged=False)

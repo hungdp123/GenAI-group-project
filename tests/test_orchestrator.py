@@ -281,7 +281,8 @@ def test_clarification_rendered_for_cli():
     from finsight.agents.orchestrator.render import render_assessment
 
     fa = execute("It will keep growing.", DEMO_CUTOFF).assessment
-    assert "Question: Which company" in render_assessment(fa)
+    text = render_assessment(fa)
+    assert "needs a bit more information" in text and "Which company" in text
 
 
 # -- diagram: auditor "source tier: enough?" + re-plan on retry -------------------------------
@@ -330,7 +331,7 @@ def test_missing_cutoff_defaults_to_corpus_as_of_and_is_stated():
     claim = "Company X's revenue growth is driven by AI demand."
     fa = execute(claim).assessment
     assert fa.as_of_date == get_settings().corpus_as_of_date and fa.cutoff_was_defaulted
-    assert "defaulted to the corpus as-of date" in render_assessment(fa)
+    assert "no date was given, so the latest available data was used" in render_assessment(fa)
 
 
 def test_cutoff_parsed_from_claim_text():
