@@ -15,7 +15,7 @@ from typing import Any
 from finsight.config import CORPUS_COMPANIES
 from finsight.contracts.schemas import SourceTier, Stance
 
-# Each entry: an evidence chunk plus the claim topics it bears on, with a stance per topic.
+# Each entry: an evidence chunk plus the sub-claim topics it bears on, with a stance per topic.
 NARRATIVE_CHUNKS: list[dict[str, Any]] = [
     {
         "evidence_id": "CMPX-10Q-2025Q2-MDA-DC",

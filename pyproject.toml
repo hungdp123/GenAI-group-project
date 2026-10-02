@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "finsight"
 version = "0.1.0"
-description = "FinSight: multi-agent stress test for company-level investment theses"
+description = "FinSight: multi-agent stress test for company-level investment claims"
 requires-python = ">=3.11"
 dependencies = ["pydantic>=2.6", "langgraph>=0.2", "pyyaml>=6"]
 

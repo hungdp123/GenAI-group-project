@@ -6,7 +6,7 @@
     python -m finsight.eval.run_eval --freeze                              # lock the heldout file (once)
 
 Outputs results/{timestamp}/: raw/{system}/{item_id}.json, logs/ (FinSight decision logs),
-records.jsonl, claims.csv and summary.md.
+records.jsonl, sub_claims.csv and summary.md.
 """
 
 from __future__ import annotations
@@ -29,13 +29,13 @@ from finsight.baselines.direct_llm import run_direct_llm
 from finsight.config import FINAL_REPORT_MODEL, get_settings
 from finsight.contracts.schemas import AssessmentStatus, FinalAssessment, Verdict
 from finsight.eval.metrics import (
-    GoldClaim,
-    PredictedClaim,
+    GoldSubClaim,
+    PredictedSubClaim,
     RunRecord,
     summarize,
     summary_markdown,
     task_success,
-    write_claims_csv,
+    write_sub_claims_csv,
 )
 
 SYSTEMS = ("direct", "rag", "finsight")
@@ -47,10 +47,10 @@ class EvalItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     item_id: str
-    thesis: str
+    claim: str
     cutoff_date: date | None = None
     split: Literal["dev", "heldout"]
-    gold_claims: list[GoldClaim] = Field(default_factory=list)
+    gold_sub_claims: list[GoldSubClaim] = Field(default_factory=list)
     expect_refusal: bool = False
     expect_clarification: bool = False  # unclear or missing info: the system should ask a question
     category: Literal["normal", "adversarial_advice", "out_of_scope", "injection", "temporal",
@@ -84,9 +84,9 @@ def validate_datasets() -> list[str]:
             items[split] = []
     ids = [i.item_id for split_items in items.values() for i in split_items]
     problems += [f"duplicate item_id {i}" for i in sorted({i for i in ids if ids.count(i) > 1})]
-    dev_theses = {i.thesis.strip().lower() for i in items["dev"]}
-    problems += [f"{i.item_id}: thesis also appears in dev (leak)" for i in items["heldout"]
-                 if i.thesis.strip().lower() in dev_theses]
+    dev_claims = {i.claim.strip().lower() for i in items["dev"]}
+    problems += [f"{i.item_id}: claim also appears in dev (leak)" for i in items["heldout"]
+                 if i.claim.strip().lower() in dev_claims]
     for split, split_items in items.items():
         for i in split_items:
             if i.split != split:
@@ -94,10 +94,10 @@ def validate_datasets() -> list[str]:
             stops = i.expect_refusal or i.expect_clarification
             if i.expect_refusal and i.expect_clarification:
                 problems.append(f"{i.item_id}: expect_refusal and expect_clarification cannot both be true")
-            if stops and i.gold_claims:
-                problems.append(f"{i.item_id}: refusal/clarification items must not have gold_claims")
-            if not stops and not i.gold_claims:
-                problems.append(f"{i.item_id}: items that are analyzed need gold_claims")
+            if stops and i.gold_sub_claims:
+                problems.append(f"{i.item_id}: refusal/clarification items must not have gold_sub_claims")
+            if not stops and not i.gold_sub_claims:
+                problems.append(f"{i.item_id}: items that are analyzed need gold_sub_claims")
     if HELDOUT_LOCK.exists() and HELDOUT_LOCK.read_text().strip() != file_sha256(dataset_path("heldout")):
         problems.append("heldout file changed after it was frozen (hash mismatch with claims_heldout.lock)")
     return problems
@@ -112,7 +112,7 @@ def freeze_heldout() -> str:
 def _base(item: EvalItem, system: str) -> dict:
     return {"system": system, "item_id": item.item_id, "split": item.split, "category": item.category,
             "expect_refusal": item.expect_refusal, "expect_clarification": item.expect_clarification,
-            "gold_claims": item.gold_claims}
+            "gold_sub_claims": item.gold_sub_claims}
 
 
 def _success(completed: bool, valid: bool, have_verdicts: bool, refused: bool, clarified: bool,
@@ -123,7 +123,7 @@ def _success(completed: bool, valid: bool, have_verdicts: bool, refused: bool, c
 
 def run_finsight_item(item: EvalItem, out_dir: Path) -> tuple[RunRecord, str]:
     settings = dataclasses.replace(get_settings(), logs_dir=out_dir / "logs")
-    run = execute(item.thesis, item.cutoff_date, settings=settings)
+    run = execute(item.claim, item.cutoff_date, settings=settings)
     fa, log = run.assessment, run.decision_log
     raw = fa.model_dump_json(indent=2)
     try:
@@ -134,18 +134,18 @@ def run_finsight_item(item: EvalItem, out_dir: Path) -> tuple[RunRecord, str]:
     refused = fa.status is AssessmentStatus.REFUSED
     clarified = fa.status is AssessmentStatus.NEEDS_CLARIFICATION
     completed = fa.status is not AssessmentStatus.FAILED
-    have_verdicts = refused or clarified or (bool(fa.claim_results) and all(r.verdict for r in fa.claim_results))
-    retried = {r.claim_id for r in log.retries if not r.exhausted}
+    have_verdicts = refused or clarified or (bool(fa.sub_claim_results) and all(r.verdict for r in fa.sub_claim_results))
+    retried = {r.sub_claim_id for r in log.retries if not r.exhausted}
     record = RunRecord(
-        **_base(item, "finsight"), completed=completed, schema_valid=valid, all_claims_have_verdict=have_verdicts,
+        **_base(item, "finsight"), completed=completed, schema_valid=valid, all_sub_claims_have_verdict=have_verdicts,
         refused=refused, clarified=clarified,
         task_success=_success(completed, valid, have_verdicts, refused, clarified, item),
         agent_calls=len(log.agent_calls), tool_calls=sum(c.tool_calls for c in log.agent_calls),
         latency_ms=log.total_latency_ms, input_tokens=sum(c.input_tokens for c in log.agent_calls),
         output_tokens=sum(c.output_tokens for c in log.agent_calls), cost_usd=log.total_cost_usd,
-        claims_assessed=len(fa.claim_results), claims_retried=len(retried),
+        sub_claims_assessed=len(fa.sub_claim_results), sub_claims_retried=len(retried),
         downgraded_after_retry=sum(r.exhausted for r in log.retries), overall_verdict=fa.overall_verdict,
-        predicted_claims=[PredictedClaim(text=r.claim.text, verdict=r.verdict) for r in fa.claim_results],
+        predicted_sub_claims=[PredictedSubClaim(text=r.sub_claim.text, verdict=r.verdict) for r in fa.sub_claim_results],
         error=fa.refusal_reason if fa.status is AssessmentStatus.FAILED else None,
     )
     return record, raw
@@ -153,7 +153,7 @@ def run_finsight_item(item: EvalItem, out_dir: Path) -> tuple[RunRecord, str]:
 
 def run_baseline_item(system: str, item: EvalItem) -> tuple[RunRecord, str]:
     try:
-        result = (run_direct_llm if system == "direct" else run_basic_rag)(item.thesis, item.cutoff_date)
+        result = (run_direct_llm if system == "direct" else run_basic_rag)(item.claim, item.cutoff_date)
     except Exception as exc:  # noqa: BLE001 - a crashing baseline is a failed item, not a failed eval
         result = BaselineResult(system=system, cutoff_date=item.cutoff_date or get_settings().corpus_as_of_date,
                                 error=f"{type(exc).__name__}: {exc}")
@@ -161,18 +161,18 @@ def run_baseline_item(system: str, item: EvalItem) -> tuple[RunRecord, str]:
     completed = result.error is None
     clarified = result.clarification_question is not None
     stopped = result.refused or clarified
-    valid = completed and (stopped or bool(result.claims))
-    have_verdicts = stopped or (bool(result.claims) and all(c.verdict for c in result.claims))
+    valid = completed and (stopped or bool(result.sub_claims))
+    have_verdicts = stopped or (bool(result.sub_claims) and all(c.verdict for c in result.sub_claims))
     calls = result.agent_calls
     record = RunRecord(
-        **_base(item, system), completed=completed, schema_valid=valid, all_claims_have_verdict=have_verdicts,
+        **_base(item, system), completed=completed, schema_valid=valid, all_sub_claims_have_verdict=have_verdicts,
         refused=result.refused, clarified=clarified,
         task_success=_success(completed, valid, have_verdicts, result.refused, clarified, item),
         agent_calls=len(calls), tool_calls=sum(c.tool_calls for c in calls), latency_ms=result.latency_ms,
         input_tokens=sum(c.input_tokens for c in calls), output_tokens=sum(c.output_tokens for c in calls),
-        cost_usd=sum(c.cost_usd for c in calls), claims_assessed=len(result.claims),
+        cost_usd=sum(c.cost_usd for c in calls), sub_claims_assessed=len(result.sub_claims),
         overall_verdict=result.overall_verdict,
-        predicted_claims=[PredictedClaim(text=c.text, verdict=c.verdict) for c in result.claims],
+        predicted_sub_claims=[PredictedSubClaim(text=c.text, verdict=c.verdict) for c in result.sub_claims],
         error=result.error,
     )
     return record, raw
@@ -195,7 +195,7 @@ def run_eval(systems: list[str], split: str, out_root: Path = Path("results"),
                   f"overall={record.overall_verdict.value if record.overall_verdict else '-'}")
 
     (out_dir / "records.jsonl").write_text("\n".join(r.model_dump_json() for r in records) + "\n", encoding="utf-8")
-    write_claims_csv(records, out_dir / "claims.csv")
+    write_sub_claims_csv(records, out_dir / "sub_claims.csv")
     summaries = {s: summarize([r for r in records if r.system == s]) for s in systems}
     settings = get_settings()
     header = (f"# FinSight evaluation: split={split}, {len(items)} items\n\n"

@@ -1,51 +1,51 @@
 # FinSight knowledge layer. Schema owned by Person 5 (Hung); CONTENT owned by Person 4 (Irine).
 # Schema = finsight.contracts.schemas.KnowledgeRule. Keep field names stable.
 #   collectors:            subset of [financial, narrative], called on the first attempt
-#   retry_collectors:      extra collectors added when the orchestrator re-plans a claim for its retry
+#   retry_collectors:      extra collectors added when the orchestrator re-plans a sub-claim for its retry
 #                          (the audit failed, or no evidence came from a required tier)
 #   highest_verdict:       verdict cap (null only when refuse: true)
 #   tier_requirement:      tiers whose SUPPORTING evidence can justify a positive verdict
 #   counter_evidence_only: evidence can only block SUPPORTED
 #   refuse:                do not analyze; refuse the whole request
-# Claim types not listed here (and OTHER) fall back to `fallback` below.
-version: "0.2"
+# Sub-claim types not listed here (and OTHER) fall back to `fallback` below.
+version: "0.3"
 
-# DECISION: retry_collectors seed values (Irine to confirm): numeric claims can also be backed by
-# MD&A / earnings-release text, and narrative claims by segment or balance-sheet numbers.
+# DECISION: retry_collectors seed values (Irine to confirm): numeric sub-claims can also be backed by
+# MD&A / earnings-release text, and narrative sub-claims by segment or balance-sheet numbers.
 # CONTINUATION gets none: past numbers cannot show that growth will continue.
 
 rules:
-  - claim_type: HISTORICAL_GROWTH
+  - sub_claim_type: HISTORICAL_GROWTH
     collectors: [financial]
     retry_collectors: [narrative]
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1]
 
-  - claim_type: PROFITABILITY_CASH_LEVERAGE
+  - sub_claim_type: PROFITABILITY_CASH_LEVERAGE
     collectors: [financial]
     retry_collectors: [narrative]
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1]
 
-  - claim_type: DEMAND_ATTRIBUTION
+  - sub_claim_type: DEMAND_ATTRIBUTION
     collectors: [narrative]
     retry_collectors: [financial]
     highest_verdict: PARTIALLY_SUPPORTED
     tier_requirement: [TIER_1, TIER_2]
 
-  - claim_type: CONTINUATION
+  - sub_claim_type: CONTINUATION
     collectors: [narrative]
     retry_collectors: []
     highest_verdict: PARTIALLY_SUPPORTED
     tier_requirement: [TIER_2]
 
-  - claim_type: COMPARATIVE
+  - sub_claim_type: COMPARATIVE
     collectors: []
     highest_verdict: INSUFFICIENT_EVIDENCE
     tier_requirement: []
-    note: "Peer comparison is out of scope: the corpus holds no peer filings, so 'biggest winner' style claims cannot be verified."
+    note: "Peer comparison is out of scope: the corpus holds no peer filings, so 'biggest winner' style sub-claims cannot be verified."
 
-  - claim_type: BUSINESS_RISK
+  - sub_claim_type: BUSINESS_RISK
     collectors: [narrative]
     retry_collectors: [financial]
     # DECISION: "counter-evidence only, can block SUPPORTED" -> cap SUPPORTED, but any eligible
@@ -54,7 +54,7 @@ rules:
     tier_requirement: [TIER_1, TIER_2]
     counter_evidence_only: true
 
-  - claim_type: PERSONALIZED_ADVICE
+  - sub_claim_type: PERSONALIZED_ADVICE
     collectors: []
     highest_verdict: null
     tier_requirement: []
@@ -62,8 +62,8 @@ rules:
     note: "Personalized investment advice is out of scope; FinSight does not analyze it."
 
 fallback:
-  claim_type: OTHER
+  sub_claim_type: OTHER
   collectors: [financial, narrative]
   highest_verdict: PARTIALLY_SUPPORTED
   tier_requirement: [TIER_1, TIER_2]
-  note: "Unclassified claim: routed to both collectors and capped at PARTIALLY_SUPPORTED."
+  note: "Unclassified sub-claim: routed to both collectors and capped at PARTIALLY_SUPPORTED."

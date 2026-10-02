@@ -1,4 +1,4 @@
-"""FinSight: multi-agent stress test for company-level investment theses."""
+"""FinSight: multi-agent stress test for company-level investment claims."""
 
 from finsight.agents.orchestrator.graph import execute, run_finsight
 

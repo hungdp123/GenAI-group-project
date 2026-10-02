@@ -14,7 +14,7 @@ class _FakeCompletions:
 
     def create(self, **kwargs):
         _FakeCompletions.calls.append(kwargs)
-        msg = types.SimpleNamespace(content="CLAIM: x | VERDICT: Supported")
+        msg = types.SimpleNamespace(content="SUB-CLAIM: x | VERDICT: Supported")
         return types.SimpleNamespace(
             choices=[types.SimpleNamespace(message=msg, finish_reason="stop")],
             usage=types.SimpleNamespace(prompt_tokens=1_000, completion_tokens=2_000),

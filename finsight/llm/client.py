@@ -1,14 +1,14 @@
 """Provider-agnostic LLM client with token / cost / latency accounting. Owner: Person 5 (Hung).
 
     from finsight.llm.client import complete, data_block, DATA_SAFETY_PREAMBLE
-    resp = complete(system=DATA_SAFETY_PREAMBLE + "Your task...", prompt=data_block("thesis", thesis))
+    resp = complete(system=DATA_SAFETY_PREAMBLE + "Your task...", prompt=data_block("claim", claim))
 
 Provider via FINSIGHT_LLM_PROVIDER = mock | anthropic | openai (default mock: no API key needed).
 Model via FINSIGHT_LLM_MODEL. Usage is added to the current agent call's meter automatically.
 Real calls need a key (env var or gitignored config.yaml), respect FINSIGHT_SPEND_LIMIT_USD and are
 appended to the usage ledger (see finsight/llm/spend.py).
 
-Prompt-injection rule: untrusted text (thesis, filings, news) goes ONLY inside `data_block(...)`
+Prompt-injection rule: untrusted text (claim, filings, news) goes ONLY inside `data_block(...)`
 in the user prompt, never into `system`.
 """
 
@@ -70,14 +70,14 @@ def default_mock_responder(system: str, prompt: str) -> str:
     """Canned, deterministic answer in the baseline output format.
 
     Mimics a naive single LLM: refuses obvious advice requests, otherwise calls every
-    sentence of the thesis SUPPORTED.
+    sentence of the claim SUPPORTED.
     """
-    match = re.search(r'<data name="thesis">\n(.*?)\n</data>', prompt, flags=re.DOTALL)
-    thesis = match.group(1) if match else prompt
-    if _ADVICE_RE.search(thesis):
+    match = re.search(r'<data name="claim">\n(.*?)\n</data>', prompt, flags=re.DOTALL)
+    claim = match.group(1) if match else prompt
+    if _ADVICE_RE.search(claim):
         return "REFUSED: I can't give personalized investment advice."
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", thesis) if len(s.strip()) > 15]
-    lines = [f"CLAIM: {s} | VERDICT: Supported" for s in sentences[:5]] or ["CLAIM: thesis | VERDICT: Supported"]
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", claim) if len(s.strip()) > 15]
+    lines = [f"SUB-CLAIM: {s} | VERDICT: Supported" for s in sentences[:5]] or ["SUB-CLAIM: claim | VERDICT: Supported"]
     return "\n".join(lines + ["OVERALL: Supported"])
 
 

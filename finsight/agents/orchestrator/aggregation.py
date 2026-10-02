@@ -1,4 +1,4 @@
-"""Overall-verdict aggregation and per-claim summaries. Owner: Person 5 (Hung)."""
+"""Overall-verdict aggregation and per-sub-claim summaries. Owner: Person 5 (Hung)."""
 
 from __future__ import annotations
 
@@ -6,12 +6,12 @@ from finsight.contracts.schemas import EvidenceItem, SourceTier, Verdict
 
 
 def overall_verdict(verdicts: list[Verdict]) -> Verdict:
-    """Deterministic overall verdict from per-claim verdicts.
+    """Deterministic overall verdict from per-sub-claim verdicts.
 
     Rule (TEAM MUST CONFIRM before the final report):
-      1. no claims, or every claim INSUFFICIENT_EVIDENCE      -> INSUFFICIENT_EVIDENCE
-      2. every claim SUPPORTED                                  -> SUPPORTED
-      3. more than half of the *analyzable* claims CONTRADICTED -> CONTRADICTED
+      1. no sub-claims, or every sub-claim INSUFFICIENT_EVIDENCE      -> INSUFFICIENT_EVIDENCE
+      2. every sub-claim SUPPORTED                                  -> SUPPORTED
+      3. more than half of the *analyzable* sub-claims CONTRADICTED -> CONTRADICTED
          (analyzable = not INSUFFICIENT_EVIDENCE)
       4. otherwise                                              -> PARTIALLY_SUPPORTED
     """

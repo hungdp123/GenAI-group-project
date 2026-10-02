@@ -1,6 +1,6 @@
 """Command-line entry point. Owner: Person 5 (Hung).
 
-    finsight run "thesis text" --cutoff 2025-07-31     # print the assessment table
+    finsight run "claim text" --cutoff 2025-07-31     # print the assessment table
     finsight trace <request_id>                         # print the decision log
     finsight eval --system all --split dev              # run the evaluation
     finsight graph                                      # regenerate docs/orchestrator_graph.md
@@ -23,7 +23,7 @@ from finsight.logging.decision_log import format_trace, load_log
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    out = execute(args.thesis, date.fromisoformat(args.cutoff) if args.cutoff else None)
+    out = execute(args.claim, date.fromisoformat(args.cutoff) if args.cutoff else None)
     if args.json:
         print(out.assessment.model_dump_json(indent=2))
     else:
@@ -84,12 +84,12 @@ def _cmd_mode(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="finsight", description="Stress-test a company-level investment thesis.")
+    parser = argparse.ArgumentParser(prog="finsight", description="Stress-test a company-level investment claim.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run = sub.add_parser("run", help="evaluate a thesis")
-    run.add_argument("thesis")
-    run.add_argument("--cutoff", help="YYYY-MM-DD (default: from the thesis text, else the corpus as-of date)")
+    run = sub.add_parser("run", help="evaluate a claim")
+    run.add_argument("claim")
+    run.add_argument("--cutoff", help="YYYY-MM-DD (default: from the claim text, else the corpus as-of date)")
     run.add_argument("--json", action="store_true", help="print the FinalAssessment JSON")
     run.add_argument("--no-evidence", action="store_true", help="hide evidence lines")
     run.set_defaults(func=_cmd_run)

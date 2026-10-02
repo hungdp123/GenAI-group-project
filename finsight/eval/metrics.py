@@ -1,4 +1,4 @@
-"""System-level metrics (Person 5) + per-claim CSV export for Person 3's Accuracy / Macro-F1."""
+"""System-level metrics (Person 5) + per-sub-claim CSV export for Person 3's Accuracy / Macro-F1."""
 
 from __future__ import annotations
 
@@ -9,19 +9,19 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from finsight.contracts.schemas import ClaimType, Verdict
+from finsight.contracts.schemas import SubClaimType, Verdict
 
 
-class GoldClaim(BaseModel):
+class GoldSubClaim(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str
     gold_verdict: Verdict
-    claim_type: ClaimType | None = None
+    sub_claim_type: SubClaimType | None = None
     evidence: list[str] = Field(default_factory=list, description="Citations that justify the gold label")
 
 
-class PredictedClaim(BaseModel):
+class PredictedSubClaim(BaseModel):
     text: str
     verdict: Verdict | None
 
@@ -35,7 +35,7 @@ class RunRecord(BaseModel):
     category: str
     completed: bool
     schema_valid: bool
-    all_claims_have_verdict: bool
+    all_sub_claims_have_verdict: bool
     refused: bool
     expect_refusal: bool
     task_success: bool
@@ -47,18 +47,18 @@ class RunRecord(BaseModel):
     input_tokens: int
     output_tokens: int
     cost_usd: float
-    claims_assessed: int = 0
-    claims_retried: int = 0
+    sub_claims_assessed: int = 0
+    sub_claims_retried: int = 0
     downgraded_after_retry: int = 0
     overall_verdict: Verdict | None = None
-    predicted_claims: list[PredictedClaim] = Field(default_factory=list)
-    gold_claims: list[GoldClaim] = Field(default_factory=list)
+    predicted_sub_claims: list[PredictedSubClaim] = Field(default_factory=list)
+    gold_sub_claims: list[GoldSubClaim] = Field(default_factory=list)
     error: str | None = None
 
 
 def task_success(completed: bool, schema_valid: bool, all_have_verdict: bool, refused: bool,
                  expect_refusal: bool, clarified: bool = False, expect_clarification: bool = False) -> bool:
-    """Run completed, output validates, every claim has a verdict, and refusal and clarification
+    """Run completed, output validates, every sub-claim has a verdict, and refusal and clarification
     behaviour is as expected."""
     return (completed and schema_valid and all_have_verdict
             and refused == expect_refusal and clarified == expect_clarification)
@@ -82,7 +82,7 @@ def summarize(records: list[RunRecord]) -> dict[str, float]:
     """Aggregate metrics for one system."""
     n = len(records) or 1
     latencies = [r.latency_ms for r in records]
-    assessed = sum(r.claims_assessed for r in records)
+    assessed = sum(r.sub_claims_assessed for r in records)
     return {
         "items": len(records),
         "task_success_rate": sum(r.task_success for r in records) / n,
@@ -94,23 +94,23 @@ def summarize(records: list[RunRecord]) -> dict[str, float]:
         "latency_mean_ms": statistics.fmean(latencies) if latencies else 0.0,
         "avg_tokens": sum(r.input_tokens + r.output_tokens for r in records) / n,
         "avg_cost_usd": sum(r.cost_usd for r in records) / n,
-        # DECISION: retry rate = claims retried at least once / claims assessed.
-        "retry_rate": sum(r.claims_retried for r in records) / assessed if assessed else 0.0,
+        # DECISION: retry rate = sub-claims retried at least once / sub-claims assessed.
+        "retry_rate": sum(r.sub_claims_retried for r in records) / assessed if assessed else 0.0,
         "downgraded_after_retry": sum(r.downgraded_after_retry for r in records),
     }
 
 
-# -- per-claim alignment for Accuracy / Macro-F1 ------------------------------------------
+# -- per-sub-claim alignment for Accuracy / Macro-F1 ------------------------------------------
 
 
 def _tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower())) - {"the", "a", "is", "s", "its", "of", "from", "by"}
 
 
-def align_claims(gold: list[GoldClaim], predicted: list[PredictedClaim]) -> list[tuple[GoldClaim, PredictedClaim | None, float]]:
-    """Greedy one-to-one match of gold to predicted claims by token Jaccard similarity.
+def align_sub_claims(gold: list[GoldSubClaim], predicted: list[PredictedSubClaim]) -> list[tuple[GoldSubClaim, PredictedSubClaim | None, float]]:
+    """Greedy one-to-one match of gold to predicted sub-claims by token Jaccard similarity.
 
-    # DECISION: unmatched gold claims are scored as predicted "MISSING" (counts as wrong).
+    # DECISION: unmatched gold sub-claims are scored as predicted "MISSING" (counts as wrong).
     """
     pairs = sorted(
         ((len(_tokens(g.text) & _tokens(p.text)) / (len(_tokens(g.text) | _tokens(p.text)) or 1), gi, pi)
@@ -125,16 +125,16 @@ def align_claims(gold: list[GoldClaim], predicted: list[PredictedClaim]) -> list
     return [(g, *match.get(gi, (None, 0.0))) for gi, g in enumerate(gold)]
 
 
-CLAIM_CSV_FIELDS = ["system", "item_id", "split", "category", "gold_idx", "gold_text", "gold_verdict",
+SUB_CLAIM_CSV_FIELDS = ["system", "item_id", "split", "category", "gold_idx", "gold_text", "gold_verdict",
                     "predicted_text", "predicted_verdict", "match_score"]
 
 
-def write_claims_csv(records: list[RunRecord], path: Path) -> None:
+def write_sub_claims_csv(records: list[RunRecord], path: Path) -> None:
     with path.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=CLAIM_CSV_FIELDS)
+        writer = csv.DictWriter(fh, fieldnames=SUB_CLAIM_CSV_FIELDS)
         writer.writeheader()
         for r in records:
-            for idx, (gold, pred, score) in enumerate(align_claims(r.gold_claims, r.predicted_claims)):
+            for idx, (gold, pred, score) in enumerate(align_sub_claims(r.gold_sub_claims, r.predicted_sub_claims)):
                 writer.writerow({
                     "system": r.system, "item_id": r.item_id, "split": r.split, "category": r.category,
                     "gold_idx": idx, "gold_text": gold.text, "gold_verdict": gold.gold_verdict.value,
@@ -155,8 +155,8 @@ _ROWS = [
     ("Latency mean (ms)", "latency_mean_ms", "{:.0f}"),
     ("Avg tokens / query", "avg_tokens", "{:.0f}"),
     ("Avg cost / query (USD)", "avg_cost_usd", "${:.5f}"),
-    ("Retry rate (claims)", "retry_rate", "{:.0%}"),
-    ("Claims downgraded after retry", "downgraded_after_retry", "{:.0f}"),
+    ("Retry rate (sub-claims)", "retry_rate", "{:.0%}"),
+    ("Sub-claims downgraded after retry", "downgraded_after_retry", "{:.0f}"),
 ]
 
 
@@ -165,6 +165,6 @@ def summary_markdown(summaries: dict[str, dict[str, float]], header: str) -> str
     lines = [header, "", "| Metric | " + " | ".join(systems) + " |", "|---|" + "---|" * len(systems)]
     for label, key, fmt in _ROWS:
         lines.append(f"| {label} | " + " | ".join(fmt.format(summaries[s][key]) for s in systems) + " |")
-    lines += ["", "Per-claim predicted vs gold verdicts: `claims.csv` (for Accuracy / Macro-F1).",
+    lines += ["", "Per-sub-claim predicted vs gold verdicts: `sub_claims.csv` (for Accuracy / Macro-F1).",
               "Retry metrics apply to FinSight only (baselines make a single LLM call)."]
     return "\n".join(lines) + "\n"

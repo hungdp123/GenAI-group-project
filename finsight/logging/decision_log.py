@@ -29,7 +29,7 @@ def _now() -> datetime:
 
 
 def tracked_call(
-    agent: str, fn: Callable[..., Any], *args: Any, claim_id: str | None = None, **kwargs: Any
+    agent: str, fn: Callable[..., Any], *args: Any, sub_claim_id: str | None = None, **kwargs: Any
 ) -> tuple[Any, AgentCall, Exception | None]:
     """Run `fn`, never raising. Returns (result or None, AgentCall record, exception or None).
 
@@ -46,7 +46,7 @@ def tracked_call(
         agent=agent, started_at=started, latency_ms=round((time.perf_counter() - t0) * 1000, 3),
         input_tokens=meter.input_tokens, output_tokens=meter.output_tokens,
         cost_usd=round(meter.cost_usd, 6), tool_calls=meter.tool_calls,
-        success=error is None, error=f"{type(error).__name__}: {error}" if error else None, claim_id=claim_id,
+        success=error is None, error=f"{type(error).__name__}: {error}" if error else None, sub_claim_id=sub_claim_id,
     )
     return result, call, error
 
@@ -128,20 +128,20 @@ def format_trace(log: DecisionLog) -> str:
         "Gates:",
         *[f"  {g.gate:<14} {'FLAGGED' if g.flagged else 'pass'}  {g.reason or ''}" for g in log.gate_decisions],
         "Routing plan:",
-        *[f"  {p.claim_id:<4} {p.claim_type.value:<28} collectors={p.collectors or '-'} "
+        *[f"  {p.sub_claim_id:<4} {p.sub_claim_type.value:<28} collectors={p.collectors or '-'} "
           f"cap={p.verdict_cap.value if p.verdict_cap else '-'}" for p in log.routing_plan],
         "Agent calls:",
-        *[f"  {c.started_at:%H:%M:%S.%f} {c.agent:<16} claim={c.claim_id or '-':<4} {c.latency_ms:>8.1f} ms "
+        *[f"  {c.started_at:%H:%M:%S.%f} {c.agent:<16} sub-claim={c.sub_claim_id or '-':<4} {c.latency_ms:>8.1f} ms "
           f"tok={c.input_tokens + c.output_tokens:<6} tools={c.tool_calls} {'ok' if c.success else 'ERROR ' + (c.error or '')}"
           for c in log.agent_calls],
         "Audits:",
-        *[f"  {a.claim_id:<4} passed={a.passed} verdict={a.verdict.value} {'; '.join(a.failure_reasons)}"
+        *[f"  {a.sub_claim_id:<4} passed={a.passed} verdict={a.verdict.value} {'; '.join(a.failure_reasons)}"
           for a in log.audit_results],
         "Retries:",
-        *[f"  {r.claim_id:<4} attempt={r.attempt} {'EXHAUSTED' if r.exhausted else 'retry'} {r.feedback or ''}"
+        *[f"  {r.sub_claim_id:<4} attempt={r.attempt} {'EXHAUSTED' if r.exhausted else 'retry'} {r.feedback or ''}"
           for r in log.retries],
         "Temporal violations:",
-        *[f"  {v.claim_id:<4} dropped {v.evidence_id} published {v.publication_date} > cutoff {v.cutoff_date}"
+        *[f"  {v.sub_claim_id:<4} dropped {v.evidence_id} published {v.publication_date} > cutoff {v.cutoff_date}"
           for v in log.temporal_violations],
         "Events:",
         *[f"  [{e.node}] {e.message}" for e in log.events],

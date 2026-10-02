@@ -1,4 +1,4 @@
-"""Direct LLM baseline: thesis + XBRL facts as text -> one LLM call. Owner: Person 5 (Hung)."""
+"""Direct LLM baseline: claim + XBRL facts as text -> one LLM call. Owner: Person 5 (Hung)."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ from finsight.llm.client import complete, data_block
 from finsight.logging.decision_log import tracked_call
 
 
-def run_direct_llm(thesis: str, cutoff: date | None = None) -> BaselineResult:
+def run_direct_llm(claim: str, cutoff: date | None = None) -> BaselineResult:
     t0 = time.perf_counter()
-    cutoff, _ = resolve_cutoff(cutoff, thesis, get_settings().corpus_as_of_date)
+    cutoff, _ = resolve_cutoff(cutoff, claim, get_settings().corpus_as_of_date)
     prompt = "\n\n".join([
         f"As-of date: {cutoff.isoformat()}",
-        data_block("thesis", thesis),
+        data_block("claim", claim),
         data_block("xbrl_facts", xbrl_facts_as_text(cutoff)),
     ])
     resp, call, error = tracked_call("llm", complete, prompt, system=baseline_system_prompt(cutoff))

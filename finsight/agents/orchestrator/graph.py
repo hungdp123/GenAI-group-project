@@ -6,10 +6,10 @@ Mirrors the team architecture diagram:
            -> decompose -> plan                           (orchestrator: decompose, plan evidence needs)
            -> gather_evidence -> audit -> retry_or_accept (specialists in parallel; auditor checks,
                    ^                          |            "source tier: enough?")
-                   +---- re-plan + retry -----+            (max 1 retry per claim; still failing -> INSUFFICIENT)
+                   +---- re-plan + retry -----+            (max 1 retry per sub-claim; still failing -> INSUFFICIENT)
            -> apply_tier_policy -> assemble -> advice_gate_output -> finalize
-Refusals jump straight to finalize. Unclear or missing info (no thesis, no company, no checkable
-claim) goes to `clarification`, which returns a question to the user.
+Refusals jump straight to finalize. Unclear or missing info (no claim, no company, no checkable
+sub-claim) goes to `clarification`, which returns a question to the user.
 """
 
 from __future__ import annotations
@@ -56,12 +56,12 @@ def _continue_or_stop(next_node: str):
 
 
 def route_after_plan(state: FinSightState) -> str:
-    return "gather_evidence" if state.pending_claim_ids else "apply_tier_policy"
+    return "gather_evidence" if state.pending_sub_claim_ids else "apply_tier_policy"
 
 
 def route_after_retry_check(state: FinSightState) -> str:
-    """retry_or_accept leaves only claims to retry in pending_claim_ids."""
-    return "gather_evidence" if state.pending_claim_ids else "apply_tier_policy"
+    """retry_or_accept leaves only sub-claims to retry in pending_sub_claim_ids."""
+    return "gather_evidence" if state.pending_sub_claim_ids else "apply_tier_policy"
 
 
 def build_graph(ctx: RunContext):
@@ -108,7 +108,7 @@ def _coerce_date(value: date | str | None) -> date | None:
 
 
 def execute(
-    thesis: str,
+    claim: str,
     cutoff: date | str | None = None,
     *,
     registry: AgentRegistry | None = None,
@@ -123,19 +123,19 @@ def execute(
         # Inside the try: a mis-registered agent or bad knowledge layer must return FAILED, not crash the UI.
         ctx.registry = registry or AgentRegistry.from_config()
         ctx.kb = kb or default_knowledge_layer()
-        initial = FinSightState(raw_input=thesis or "", cutoff_input=_coerce_date(cutoff),
+        initial = FinSightState(raw_input=claim or "", cutoff_input=_coerce_date(cutoff),
                                 company_hint=company_ticker)
         out = build_graph(ctx).invoke(initial, config={"recursion_limit": 40 + 6 * settings.max_retries})
         return RunOutput(FinalAssessment.model_validate(out["final"]),
                          DecisionLog.model_validate(out["decision_log"]))
     except Exception as exc:  # noqa: BLE001 - last line of defence: the caller always gets an assessment
-        return _crash_output(ctx, thesis, exc)
+        return _crash_output(ctx, claim, exc)
 
 
-def _crash_output(ctx: RunContext, thesis: str, exc: Exception) -> RunOutput:
+def _crash_output(ctx: RunContext, claim: str, exc: Exception) -> RunOutput:
     rec = ctx.recorder
     if rec.log is None:
-        rec.start(new_request_id(), thesis or "", None)
+        rec.start(new_request_id(), claim or "", None)
     rec.event("orchestrator", f"unhandled {type(exc).__name__}: {exc}")
     log = rec.finish(AssessmentStatus.FAILED, {})
     write_log(log, ctx.settings.logs_dir)
@@ -145,14 +145,14 @@ def _crash_output(ctx: RunContext, thesis: str, exc: Exception) -> RunOutput:
     return RunOutput(final, log)
 
 
-def run_finsight(thesis: str, cutoff: date | None = None, company_ticker: str | None = None,
+def run_finsight(claim: str, cutoff: date | None = None, company_ticker: str | None = None,
                  **kwargs) -> FinalAssessment:
-    """Public API for the UI (Person 4): evaluate `thesis` as of `cutoff` (None -> corpus as-of date).
+    """Public API for the UI (Person 4): evaluate `claim` as of `cutoff` (None -> corpus as-of date).
 
     If the result has status NEEDS_CLARIFICATION, show `clarification_question` to the user and call
-    again with their answer: an edited thesis, or `company_ticker=` for "which company?".
+    again with their answer: an edited claim, or `company_ticker=` for "which company?".
     """
-    return execute(thesis, cutoff, company_ticker=company_ticker, **kwargs).assessment
+    return execute(claim, cutoff, company_ticker=company_ticker, **kwargs).assessment
 
 
 def export_mermaid(path: str | Path = "docs/orchestrator_graph.md") -> Path:

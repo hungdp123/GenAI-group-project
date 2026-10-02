@@ -1,4 +1,4 @@
-"""Basic RAG baseline: whole-thesis top-k retrieval -> one LLM call. Owner: Person 5 (Hung) (wiring only).
+"""Basic RAG baseline: whole-claim top-k retrieval -> one LLM call. Owner: Person 5 (Hung) (wiring only).
 
 The retriever is Person 2's, reached through the `Retriever` Protocol via the agent registry.
 """
@@ -24,19 +24,19 @@ def _context(items: list[EvidenceItem]) -> str:
     )
 
 
-def run_basic_rag(thesis: str, cutoff: date | None = None, *, retriever: Retriever | None = None,
+def run_basic_rag(claim: str, cutoff: date | None = None, *, retriever: Retriever | None = None,
                   top_k: int | None = None) -> BaselineResult:
     t0 = time.perf_counter()
     settings = get_settings()
-    cutoff, _ = resolve_cutoff(cutoff, thesis, settings.corpus_as_of_date)
+    cutoff, _ = resolve_cutoff(cutoff, claim, settings.corpus_as_of_date)
     retriever = retriever or AgentRegistry.from_config().retriever
     result = BaselineResult(system="rag", cutoff_date=cutoff)
 
-    items, call, error = tracked_call("retriever", retriever.retrieve, thesis, top_k or settings.rag_top_k, cutoff)
+    items, call, error = tracked_call("retriever", retriever.retrieve, claim, top_k or settings.rag_top_k, cutoff)
     result.agent_calls.append(call)
     if error:
         items = []  # DECISION: a retriever failure degrades to no context rather than aborting the baseline
-    prompt = "\n\n".join([f"As-of date: {cutoff.isoformat()}", data_block("thesis", thesis),
+    prompt = "\n\n".join([f"As-of date: {cutoff.isoformat()}", data_block("claim", claim),
                           "Retrieved documents:", _context(items or [])])
     resp, call, error = tracked_call("llm", complete, prompt, system=baseline_system_prompt(cutoff))
     result.agent_calls.append(call)

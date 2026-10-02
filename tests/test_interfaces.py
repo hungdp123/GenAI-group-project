@@ -2,12 +2,12 @@ from datetime import date
 
 from finsight.config import get_settings
 from finsight.contracts.interfaces import Decomposer, FinancialAgent, Retriever
-from finsight.contracts.schemas import Claim, ClaimType
+from finsight.contracts.schemas import SubClaim, SubClaimType
 
 
 class _Dec:
-    def decompose(self, thesis: str, cutoff_date: date) -> list[Claim]:
-        return [Claim(claim_id="c1", text=thesis, claim_type=ClaimType.OTHER)]
+    def decompose(self, claim: str, cutoff_date: date) -> list[SubClaim]:
+        return [SubClaim(sub_claim_id="sc1", text=claim, sub_claim_type=SubClaimType.OTHER)]
 
 
 def test_protocol_structural_match():

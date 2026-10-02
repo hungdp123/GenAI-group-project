@@ -59,7 +59,7 @@ _PROTOCOLS: dict[str, type] = {
     "tier_policy": TierPolicy,
 }
 
-# Companies in the frozen corpus: ticker -> aliases matched (case-insensitively) in the thesis.
+# Companies in the frozen corpus: ticker -> aliases matched (case-insensitively) in the claim.
 # DECISION: placeholder corpus with the demo company only; Person 2 / Person 4 extend it.
 CORPUS_COMPANIES: dict[str, list[str]] = {
     "CMPX": ["Company X", "CMPX"],
@@ -90,7 +90,7 @@ FINAL_REPORT_MODEL = "gpt-5.4"
 COURSE_BUDGET_USD = 150.0
 
 BOUNDARY_DISCLAIMER = (
-    "This evaluates the evidence for the stated thesis. "
+    "This evaluates the evidence for the stated claim. "
     "It is not a personalized investment recommendation."
 )
 
@@ -106,7 +106,7 @@ class Settings:
     corpus_companies: dict[str, list[str]] = field(default_factory=lambda: dict(CORPUS_COMPANIES))
     logs_dir: Path = Path("logs")
     max_workers: int = 4
-    max_thesis_chars: int = 5000
+    max_claim_chars: int = 5000
     rag_top_k: int = 5
 
 

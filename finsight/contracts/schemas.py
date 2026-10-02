@@ -15,7 +15,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # 0.2: NEEDS_CLARIFICATION status + FinalAssessment.clarification_question, KnowledgeRule.retry_collectors,
 #      "clarification" gate.
-SCHEMA_VERSION = "0.2"
+# 0.3: BREAKING rename. The user's input is now the "claim" (ThesisRequest -> ClaimRequest,
+#      raw_thesis -> raw_claim); the parts it is split into are "sub-claims" (Claim -> SubClaim,
+#      ClaimType -> SubClaimType, ClaimResult -> SubClaimResult, claim_id -> sub_claim_id,
+#      claim_type -> sub_claim_type, claim_results -> sub_claim_results).
+SCHEMA_VERSION = "0.3"
 
 
 class _Strict(BaseModel):
@@ -50,7 +54,7 @@ class Verdict(str, Enum):
 
     @property
     def support_rank(self) -> int:
-        """How much the verdict endorses the claim. Used for caps ("never raise above X").
+        """How much the verdict endorses the sub-claim. Used for caps ("never raise above X").
 
         # DECISION: CONTRADICTED ranks lowest so a cap never turns a contradiction
         # into something else; INSUFFICIENT_EVIDENCE sits just above it.
@@ -67,7 +71,7 @@ class Verdict(str, Enum):
         return self in (Verdict.SUPPORTED, Verdict.PARTIALLY_SUPPORTED)
 
 
-class ClaimType(str, Enum):
+class SubClaimType(str, Enum):
     HISTORICAL_GROWTH = "HISTORICAL_GROWTH"
     PROFITABILITY_CASH_LEVERAGE = "PROFITABILITY_CASH_LEVERAGE"
     DEMAND_ATTRIBUTION = "DEMAND_ATTRIBUTION"
@@ -93,8 +97,8 @@ class AssessmentStatus(str, Enum):
     COMPLETED = "COMPLETED"
     REFUSED = "REFUSED"
     FAILED = "FAILED"
-    # The thesis is unclear or missing information: show `clarification_question` to the user and
-    # resubmit with their answer (e.g. run_finsight(thesis, company_ticker="CMPX")).
+    # The claim is unclear or missing information: show `clarification_question` to the user and
+    # resubmit with their answer (e.g. run_finsight(claim, company_ticker="CMPX")).
     NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
 
 
@@ -102,29 +106,29 @@ CollectorName = Literal["financial", "narrative"]
 
 
 # ---------------------------------------------------------------------------
-# Request / claims / evidence
+# Request / sub-claims / evidence
 # ---------------------------------------------------------------------------
 
 
-class ThesisRequest(_Strict):
+class ClaimRequest(_Strict):
     request_id: str
-    raw_thesis: str
+    raw_claim: str
     company_ticker: str | None = None
     cutoff_date: date
     cutoff_was_defaulted: bool = False
 
 
-class Claim(_Strict):
-    claim_id: str
+class SubClaim(_Strict):
+    sub_claim_id: str
     text: str
-    claim_type: ClaimType
+    sub_claim_type: SubClaimType
     company_ticker: str | None = None
     is_quantitative: bool = False
 
 
 class EvidenceItem(_Strict):
     evidence_id: str
-    claim_id: str
+    sub_claim_id: str
     stance: Stance
     content: str
     source_tier: SourceTier
@@ -157,7 +161,7 @@ class CitationCheck(_Strict):
 
 
 class AuditResult(_Strict):
-    claim_id: str
+    sub_claim_id: str
     passed: bool
     verdict: Verdict
     failure_reasons: list[str] = Field(default_factory=list)
@@ -175,7 +179,7 @@ class AdviceDecision(_Strict):
 class KnowledgeRule(_Strict):
     """One row of the knowledge layer (knowledge/knowledge_layer.yaml). Content owned by Person 4."""
 
-    claim_type: ClaimType
+    sub_claim_type: SubClaimType
     collectors: list[CollectorName] = Field(default_factory=list)
     highest_verdict: Verdict | None = Field(
         default=None, description="Verdict cap. None only when refuse=True."
@@ -189,7 +193,7 @@ class KnowledgeRule(_Strict):
     refuse: bool = Field(default=False, description="Do not analyze; refuse the request.")
     retry_collectors: list[CollectorName] = Field(
         default_factory=list,
-        description="Extra collectors the orchestrator adds when it re-plans a claim for its retry.",
+        description="Extra collectors the orchestrator adds when it re-plans a sub-claim for its retry.",
     )
     note: str | None = None
 
@@ -199,8 +203,8 @@ class KnowledgeRule(_Strict):
 # ---------------------------------------------------------------------------
 
 
-class ClaimResult(_Strict):
-    claim: Claim
+class SubClaimResult(_Strict):
+    sub_claim: SubClaim
     verdict: Verdict
     highest_tier_used: SourceTier | None = None
     supporting: list[EvidenceItem] = Field(default_factory=list)
@@ -215,7 +219,7 @@ class FinalAssessment(_Strict):
     request_id: str
     status: AssessmentStatus
     overall_verdict: Verdict | None = None
-    claim_results: list[ClaimResult] = Field(default_factory=list)
+    sub_claim_results: list[SubClaimResult] = Field(default_factory=list)
     evidence_gaps: list[str] = Field(default_factory=list)
     as_of_date: date | None = None
     # DECISION: added so a defaulted cut-off is stated in the output, not only the log.
@@ -241,7 +245,7 @@ class AgentCall(_Strict):
     tool_calls: int = 0
     success: bool
     error: str | None = None
-    claim_id: str | None = None  # DECISION: added so per-claim cost can be traced
+    sub_claim_id: str | None = None  # DECISION: added so per-sub-claim cost can be traced
 
 
 class GateDecision(_Strict):
@@ -253,8 +257,8 @@ class GateDecision(_Strict):
 
 
 class RoutePlanEntry(_Strict):
-    claim_id: str
-    claim_type: ClaimType
+    sub_claim_id: str
+    sub_claim_type: SubClaimType
     collectors: list[CollectorName]
     verdict_cap: Verdict | None
     tier_requirement: list[SourceTier]
@@ -262,14 +266,14 @@ class RoutePlanEntry(_Strict):
 
 
 class RetryRecord(_Strict):
-    claim_id: str
+    sub_claim_id: str
     attempt: int
     feedback: str | None = None
-    exhausted: bool = Field(default=False, description="True when no retries remain and the claim is downgraded")
+    exhausted: bool = Field(default=False, description="True when no retries remain and the sub-claim is downgraded")
 
 
 class TemporalViolation(_Strict):
-    claim_id: str
+    sub_claim_id: str
     evidence_id: str
     publication_date: date
     cutoff_date: date
@@ -318,20 +322,20 @@ class FinSightState(_Strict):
     cutoff_input: date | None = None
     company_hint: str | None = None
     # progress
-    request: ThesisRequest | None = None
+    request: ClaimRequest | None = None
     status: AssessmentStatus | None = None  # set only when the run stops early
     refusal_reason: str | None = None
     clarification_question: str | None = None  # set by a gate; the clarification node then stops the run
     advice_decisions: list[AdviceDecision] = Field(default_factory=list)
-    claims: list[Claim] = Field(default_factory=list)
+    sub_claims: list[SubClaim] = Field(default_factory=list)
     routing_plan: dict[str, RoutePlanEntry] = Field(default_factory=dict)
-    pending_claim_ids: list[str] = Field(default_factory=list)
+    pending_sub_claim_ids: list[str] = Field(default_factory=list)
     feedback: dict[str, str] = Field(default_factory=dict)
     retries_used: dict[str, int] = Field(default_factory=dict)
     evidence: dict[str, list[EvidenceItem]] = Field(default_factory=dict)
     audits: dict[str, AuditResult] = Field(default_factory=dict)
     insufficient_reasons: dict[str, str] = Field(default_factory=dict)
-    tier_shortfalls: dict[str, str] = Field(default_factory=dict)  # claims whose evidence tier is not enough
+    tier_shortfalls: dict[str, str] = Field(default_factory=dict)  # sub-claims whose evidence tier is not enough
     final_verdicts: dict[str, Verdict] = Field(default_factory=dict)
     capped_by: dict[str, str] = Field(default_factory=dict)
     # outputs
