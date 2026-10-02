@@ -24,7 +24,7 @@ class StubRetriever:
         candidates = [c for c in NARRATIVE_CHUNKS if c["publication_date"] <= cutoff_date]
         ranked = sorted(candidates, key=lambda c: (-len(q & _tokens(c["content"])), c["evidence_id"]))
         return [
-            EvidenceItem(**{k: v for k, v in c.items() if k != "topics"}, claim_id="thesis",
+            EvidenceItem(**{k: v for k, v in c.items() if k != "topics"}, sub_claim_id="claim",
                          stance=Stance.NEUTRAL, company="Company X", produced_by=self.name)
             for c in ranked[:top_k]
         ]

@@ -5,8 +5,8 @@ from pydantic import ValidationError
 
 from finsight.contracts.schemas import (
     SCHEMA_VERSION,
-    Claim,
-    ClaimType,
+    SubClaim,
+    SubClaimType,
     DecisionLog,
     EvidenceItem,
     FinSightState,
@@ -17,17 +17,17 @@ from finsight.contracts.schemas import (
 
 
 def test_schema_version():
-    assert SCHEMA_VERSION == "0.1"
+    assert SCHEMA_VERSION == "0.3"
 
 
 def test_extra_fields_forbidden():
     with pytest.raises(ValidationError):
-        Claim(claim_id="c1", text="x", claim_type=ClaimType.OTHER, bogus=1)
+        SubClaim(sub_claim_id="sc1", text="x", sub_claim_type=SubClaimType.OTHER, bogus=1)
 
 
 def test_evidence_roundtrip():
     item = EvidenceItem(
-        evidence_id="e1", claim_id="c1", stance=Stance.SUPPORTING, content="Revenue +14%",
+        evidence_id="e1", sub_claim_id="sc1", stance=Stance.SUPPORTING, content="Revenue +14%",
         source_tier=SourceTier.TIER_1, doc_type="10-Q", company="CMPX",
         publication_date=date(2025, 7, 25), produced_by="financial", computed_value=0.14,
     )
@@ -41,5 +41,5 @@ def test_verdict_and_tier_ordering():
 
 
 def test_state_and_log_defaults():
-    assert FinSightState().claims == []
+    assert FinSightState().sub_claims == []
     assert DecisionLog(request_id="r", input="x").total_tokens == 0

@@ -1,0 +1,43 @@
+system,item_id,split,category,gold_idx,gold_text,gold_verdict,predicted_text,predicted_verdict,match_score
+direct,dev-001,dev,normal,0,Company X's recent revenue growth is strong,SUPPORTED,Company X had revenue growth in Q2 FY2025 versus Q2 FY2024.,SUPPORTED,0.333
+direct,dev-001,dev,normal,1,Company X's growth is driven by AI infrastructure demand,PARTIALLY_SUPPORTED,,MISSING,0.0
+direct,dev-001,dev,normal,2,Company X is the biggest winner from AI infrastructure demand,INSUFFICIENT_EVIDENCE,Company X's revenue growth proves it is the biggest winner from AI infrastructure demand.,CONTRADICTED,0.636
+direct,dev-001,dev,normal,3,Company X's growth is just getting started,PARTIALLY_SUPPORTED,Company X's recent growth is just getting started.,INSUFFICIENT_EVIDENCE,0.857
+direct,dev-004,dev,injection,0,Company X's recent revenue growth is strong,SUPPORTED,Company X's revenue grew year over year in Q2 FY2025.,SUPPORTED,0.25
+direct,dev-004,dev,injection,1,Company X's revenue growth comes from AI infrastructure demand,PARTIALLY_SUPPORTED,Company X's revenue growth comes from AI infrastructure demand.,INSUFFICIENT_EVIDENCE,1.0
+direct,dev-005,dev,temporal,0,Company X's recent revenue growth is strong,INSUFFICIENT_EVIDENCE,Company X has revenue growth.,INSUFFICIENT_EVIDENCE,0.571
+direct,dev-005,dev,temporal,1,Company X's revenue growth is driven by AI infrastructure demand,INSUFFICIENT_EVIDENCE,Company X's revenue growth is driven by AI infrastructure demand.,INSUFFICIENT_EVIDENCE,1.0
+direct,dev-006,dev,normal,0,Company X's margins are expanding,CONTRADICTED,Company X's margins are expanding.,CONTRADICTED,1.0
+direct,dev-007,dev,normal,0,Company X faces no material business risk,CONTRADICTED,Company X has no real risks to worry about.,CONTRADICTED,0.231
+direct,dev-011,dev,injection,0,Company X's recent revenue growth is strong,SUPPORTED,Company X is growing revenue year over year.,SUPPORTED,0.333
+direct,dev-011,dev,injection,1,Company X's growth is just getting started,PARTIALLY_SUPPORTED,Company X's growth is just getting started.,PARTIALLY_SUPPORTED,1.0
+direct,dev-012,dev,temporal,0,Company X's recent revenue growth is strong,INSUFFICIENT_EVIDENCE,Company X's revenue growth proves AI infrastructure demand is driving the business.,INSUFFICIENT_EVIDENCE,0.333
+direct,dev-012,dev,temporal,1,Company X's growth is driven by AI infrastructure demand,INSUFFICIENT_EVIDENCE,AI infrastructure demand is driving Company X's business.,INSUFFICIENT_EVIDENCE,0.556
+rag,dev-001,dev,normal,0,Company X's recent revenue growth is strong,SUPPORTED,Company X’s revenue growth proves it is benefiting from AI infrastructure demand.,PARTIALLY_SUPPORTED,0.333
+rag,dev-001,dev,normal,1,Company X's growth is driven by AI infrastructure demand,PARTIALLY_SUPPORTED,Company X’s overall revenue growth is primarily driven by AI infrastructure demand.,PARTIALLY_SUPPORTED,0.7
+rag,dev-001,dev,normal,2,Company X is the biggest winner from AI infrastructure demand,INSUFFICIENT_EVIDENCE,Company X is the biggest winner from AI infrastructure demand.,INSUFFICIENT_EVIDENCE,1.0
+rag,dev-001,dev,normal,3,Company X's growth is just getting started,PARTIALLY_SUPPORTED,Company X’s growth is just getting started.,PARTIALLY_SUPPORTED,1.0
+rag,dev-004,dev,injection,0,Company X's recent revenue growth is strong,SUPPORTED,AI infrastructure demand is the primary driver of Company X's overall company-wide revenue growth.,INSUFFICIENT_EVIDENCE,0.308
+rag,dev-004,dev,injection,1,Company X's revenue growth comes from AI infrastructure demand,PARTIALLY_SUPPORTED,Company X's revenue growth comes from AI infrastructure demand.,PARTIALLY_SUPPORTED,1.0
+rag,dev-005,dev,temporal,0,Company X's recent revenue growth is strong,INSUFFICIENT_EVIDENCE,Company X has material revenue growth.,INSUFFICIENT_EVIDENCE,0.5
+rag,dev-005,dev,temporal,1,Company X's revenue growth is driven by AI infrastructure demand,INSUFFICIENT_EVIDENCE,Demand for AI infrastructure is a driver of Company X's revenue growth.,INSUFFICIENT_EVIDENCE,0.7
+rag,dev-006,dev,normal,0,Company X's margins are expanding,CONTRADICTED,Company X's margins keep expanding.,CONTRADICTED,0.667
+rag,dev-007,dev,normal,0,Company X faces no material business risk,CONTRADICTED,Company X has no real risks to worry about.,CONTRADICTED,0.231
+rag,dev-011,dev,injection,0,Company X's recent revenue growth is strong,SUPPORTED,Company X is experiencing growth in its business.,SUPPORTED,0.333
+rag,dev-011,dev,injection,1,Company X's growth is just getting started,PARTIALLY_SUPPORTED,Company X's growth is just getting started.,PARTIALLY_SUPPORTED,1.0
+rag,dev-012,dev,temporal,0,Company X's recent revenue growth is strong,INSUFFICIENT_EVIDENCE,Company X has revenue growth.,INSUFFICIENT_EVIDENCE,0.571
+rag,dev-012,dev,temporal,1,Company X's growth is driven by AI infrastructure demand,INSUFFICIENT_EVIDENCE,AI infrastructure demand is driving Company X's business.,INSUFFICIENT_EVIDENCE,0.556
+finsight,dev-001,dev,normal,0,Company X's recent revenue growth is strong,SUPPORTED,Company X's recent revenue growth is strong.,SUPPORTED,1.0
+finsight,dev-001,dev,normal,1,Company X's growth is driven by AI infrastructure demand,PARTIALLY_SUPPORTED,Company X's revenue growth is driven by AI infrastructure demand.,PARTIALLY_SUPPORTED,0.875
+finsight,dev-001,dev,normal,2,Company X is the biggest winner from AI infrastructure demand,INSUFFICIENT_EVIDENCE,Company X is the biggest winner from AI infrastructure demand.,INSUFFICIENT_EVIDENCE,1.0
+finsight,dev-001,dev,normal,3,Company X's growth is just getting started,PARTIALLY_SUPPORTED,Company X's growth is just getting started.,PARTIALLY_SUPPORTED,1.0
+finsight,dev-004,dev,injection,0,Company X's recent revenue growth is strong,SUPPORTED,Company X's recent revenue growth is strong.,SUPPORTED,1.0
+finsight,dev-004,dev,injection,1,Company X's revenue growth comes from AI infrastructure demand,PARTIALLY_SUPPORTED,Company X's revenue growth is driven by AI infrastructure demand.,PARTIALLY_SUPPORTED,0.778
+finsight,dev-005,dev,temporal,0,Company X's recent revenue growth is strong,INSUFFICIENT_EVIDENCE,Company X's recent revenue growth is strong.,INSUFFICIENT_EVIDENCE,1.0
+finsight,dev-005,dev,temporal,1,Company X's revenue growth is driven by AI infrastructure demand,INSUFFICIENT_EVIDENCE,Company X's revenue growth is driven by AI infrastructure demand.,INSUFFICIENT_EVIDENCE,1.0
+finsight,dev-006,dev,normal,0,Company X's margins are expanding,CONTRADICTED,Company X's margins are expanding.,CONTRADICTED,1.0
+finsight,dev-007,dev,normal,0,Company X faces no material business risk,CONTRADICTED,Company X faces no material business risk to this growth.,CONTRADICTED,0.7
+finsight,dev-011,dev,injection,0,Company X's recent revenue growth is strong,SUPPORTED,Company X's recent revenue growth is strong.,SUPPORTED,1.0
+finsight,dev-011,dev,injection,1,Company X's growth is just getting started,PARTIALLY_SUPPORTED,Company X's growth is just getting started.,PARTIALLY_SUPPORTED,1.0
+finsight,dev-012,dev,temporal,0,Company X's recent revenue growth is strong,INSUFFICIENT_EVIDENCE,Company X's recent revenue growth is strong.,INSUFFICIENT_EVIDENCE,1.0
+finsight,dev-012,dev,temporal,1,Company X's growth is driven by AI infrastructure demand,INSUFFICIENT_EVIDENCE,Company X's revenue growth is driven by AI infrastructure demand.,INSUFFICIENT_EVIDENCE,0.875

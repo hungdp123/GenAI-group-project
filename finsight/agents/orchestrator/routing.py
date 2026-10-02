@@ -9,7 +9,7 @@ import re
 from datetime import date, datetime
 
 from finsight.contracts.schemas import (
-    Claim,
+    SubClaim,
     EvidenceItem,
     KnowledgeRule,
     RoutePlanEntry,
@@ -40,15 +40,15 @@ def parse_date(text: str) -> date | None:
     return None
 
 
-def resolve_cutoff(explicit: date | None, thesis: str, corpus_as_of: date) -> tuple[date, bool]:
+def resolve_cutoff(explicit: date | None, claim: str, corpus_as_of: date) -> tuple[date, bool]:
     """Return (cutoff, was_defaulted).
 
-    # DECISION: an explicit argument wins; otherwise a "Cut-off date: ..." phrase in the thesis is
+    # DECISION: an explicit argument wins; otherwise a "Cut-off date: ..." phrase in the claim is
     # honoured; otherwise default to the corpus as-of date.
     """
     if explicit is not None:
         return explicit, False
-    match = _CUTOFF_RE.search(thesis)
+    match = _CUTOFF_RE.search(claim)
     if match and (parsed := parse_date(match.group(1))):
         return parsed, False
     return corpus_as_of, True
@@ -68,41 +68,79 @@ _MACRO_RE = re.compile(
 )
 
 
-def detect_company(thesis: str, companies: dict[str, list[str]], hint: str | None = None) -> str | None:
-    """Ticker of the corpus company named in the thesis (or the explicit hint, if it is in the corpus)."""
+def detect_company(claim: str, companies: dict[str, list[str]], hint: str | None = None) -> str | None:
+    """Ticker of the corpus company named in the claim (or the explicit hint, if it is in the corpus)."""
     if hint:
         return hint.upper() if hint.upper() in companies else None
     for ticker, aliases in companies.items():
-        if any(re.search(rf"\b{re.escape(a)}\b", thesis, flags=re.IGNORECASE) for a in aliases):
+        if any(re.search(rf"\b{re.escape(a)}\b", claim, flags=re.IGNORECASE) for a in aliases):
             return ticker
     return None
 
 
-def scope_refusal(thesis: str, ticker: str | None) -> str | None:
-    """Reason the request is out of scope, or None if in scope.
+def _covered(companies: dict[str, list[str]]) -> str:
+    return ", ".join(f"{aliases[0]} ({ticker})" for ticker, aliases in companies.items())
 
-    # DECISION: every out-of-scope case is REFUSED (not COMPLETED/INSUFFICIENT) so the
-    # behaviour is easy to score against `expect_refusal`.
+
+def scope_screen(claim: str, ticker: str | None, hint: str | None,
+                 companies: dict[str, list[str]]) -> tuple[str | None, str | None]:
+    """Initial scope screening: (refusal_reason, clarification_question); both None if in scope.
+
+    # DECISION: price predictions, macro claims and named companies outside the corpus are REFUSED.
+    # A claim that names no company is unclear, so we ask which company (diagram: Clarification).
     """
-    if _PRICE_PREDICTION_RE.search(thesis):
-        return "Price predictions are out of scope: FinSight evaluates company fundamentals, not price targets."
-    if ticker is None and _MACRO_RE.search(thesis):
-        return "Macro / market-level theses are out of scope: FinSight evaluates company-level theses only."
+    if _PRICE_PREDICTION_RE.search(claim):
+        return "Price predictions are out of scope: FinSight evaluates company fundamentals, not price targets.", None
+    if ticker is None and hint:
+        return f"{hint} is not in the frozen corpus. FinSight covers: {_covered(companies)}.", None
+    if ticker is None and _MACRO_RE.search(claim):
+        return "Macro / market-level claims are out of scope: FinSight evaluates company-level claims only.", None
     if ticker is None:
-        return "No company from the frozen corpus was identified in the thesis."
-    return None
+        return None, (f"Which company is this claim about? FinSight covers: {_covered(companies)}. "
+                      "Resubmit naming the company.")
+    return None, None
+
+
+CLARIFY_EMPTY = ("Please paste the investment claim you want checked, e.g. \"Company X's revenue growth is "
+                 "driven by AI demand.\"")
+CLARIFY_NO_SUB_CLAIM = ("Your claim has nothing specific FinSight can check. What should it verify? For example "
+                        "revenue growth, margins, what is driving demand, or whether growth will continue.")
 
 
 # ---------------------------------------------------------------------------
-# Plan
+# Plan / re-plan
 # ---------------------------------------------------------------------------
 
 
-def plan_entry(claim: Claim, rule: KnowledgeRule) -> RoutePlanEntry:
+def plan_entry(sub_claim: SubClaim, rule: KnowledgeRule) -> RoutePlanEntry:
     return RoutePlanEntry(
-        claim_id=claim.claim_id, claim_type=claim.claim_type, collectors=list(rule.collectors),
+        sub_claim_id=sub_claim.sub_claim_id, sub_claim_type=sub_claim.sub_claim_type, collectors=list(rule.collectors),
         verdict_cap=rule.highest_verdict, tier_requirement=list(rule.tier_requirement), note=rule.note,
     )
+
+
+def replan_entry(entry: RoutePlanEntry, rule: KnowledgeRule) -> RoutePlanEntry:
+    """Plan for a retry: the original collectors plus the rule's retry_collectors (no duplicates)."""
+    extra = [c for c in rule.retry_collectors if c not in entry.collectors]
+    return entry.model_copy(update={"collectors": [*entry.collectors, *extra]})
+
+
+def tier_shortfall(verdict: Verdict, evidence: list[EvidenceItem], rule: KnowledgeRule) -> str | None:
+    """The auditor's "source tier: enough?" question. Returns retry feedback when NOT enough, else None.
+
+    A positive verdict needs SUPPORTING evidence from a required tier (Tier 3 never counts).
+    Any other verdict needs at least one item from a required tier.
+    """
+    if not rule.tier_requirement:
+        return None
+    tiers = "/".join(t.value for t in rule.tier_requirement)
+    if verdict.is_positive:
+        if eligible_support(evidence, rule):
+            return None
+        return f"Need SUPPORTING evidence from {tiers}; Tier 3 news cannot support a verdict."
+    if any(e.source_tier in rule.tier_requirement and e.source_tier is not SourceTier.TIER_3 for e in evidence):
+        return None
+    return f"No evidence from {tiers} was found; search {tiers} sources for this sub-claim."
 
 
 # ---------------------------------------------------------------------------
@@ -120,12 +158,12 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text.lower()).strip()
 
 
-def is_thesis_echo(item: EvidenceItem, thesis: str) -> bool:
-    """True when an evidence item is just the user's thesis (the thesis is NEVER evidence)."""
-    if item.doc_type.lower() in {"thesis", "user_input"}:
+def is_claim_echo(item: EvidenceItem, claim: str) -> bool:
+    """True when an evidence item is just the user's claim (the claim is NEVER evidence)."""
+    if item.doc_type.lower() in {"claim", "user_input"}:
         return True
     content = _norm(item.content)
-    return len(content) >= 20 and content in _norm(thesis)
+    return len(content) >= 20 and content in _norm(claim)
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +174,7 @@ def is_thesis_echo(item: EvidenceItem, thesis: str) -> bool:
 def cap_verdict(verdict: Verdict, rule: KnowledgeRule) -> tuple[Verdict, str | None]:
     cap = rule.highest_verdict
     if cap is not None and verdict.support_rank > cap.support_rank:
-        return cap, f"knowledge layer caps {rule.claim_type.value} at {cap.value}"
+        return cap, f"knowledge layer caps {rule.sub_claim_type.value} at {cap.value}"
     return verdict, None
 
 
@@ -174,5 +212,5 @@ def enforce_counter_evidence(
 
 
 def is_raise(before: Verdict, after: Verdict) -> bool:
-    """True if `after` is a positive verdict that endorses the claim more than `before`."""
+    """True if `after` is a positive verdict that endorses the sub-claim more than `before`."""
     return after.is_positive and after.support_rank > before.support_rank

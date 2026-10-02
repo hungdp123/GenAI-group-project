@@ -20,16 +20,18 @@ def render_assessment(fa: FinalAssessment, *, show_evidence: bool = True) -> str
     ]
     if fa.refusal_reason:
         lines.append(f"Reason: {fa.refusal_reason}")
+    if fa.clarification_question:
+        lines.append(f"Question: {fa.clarification_question}")
     if fa.overall_verdict:
         lines.append(f"Overall verdict: {fa.overall_verdict.value}")
-    if fa.claim_results:
-        lines += ["", f"{'ID':<4} {'TYPE':<28} {'VERDICT':<22} {'TIER':<7} {'RETRY':<5} CLAIM"]
-        for r in fa.claim_results:
+    if fa.sub_claim_results:
+        lines += ["", f"{'ID':<4} {'TYPE':<28} {'VERDICT':<22} {'TIER':<7} {'RETRY':<5} SUB-CLAIM"]
+        for r in fa.sub_claim_results:
             tier = r.highest_tier_used.value if r.highest_tier_used else "-"
-            lines.append(f"{r.claim.claim_id:<4} {r.claim.claim_type.value:<28} {r.verdict.value:<22} "
-                         f"{tier:<7} {r.retries_used:<5} {r.claim.text}")
-        for r in fa.claim_results:
-            lines += ["", f"{r.claim.claim_id}: {r.rationale}"]
+            lines.append(f"{r.sub_claim.sub_claim_id:<4} {r.sub_claim.sub_claim_type.value:<28} {r.verdict.value:<22} "
+                         f"{tier:<7} {r.retries_used:<5} {r.sub_claim.text}")
+        for r in fa.sub_claim_results:
+            lines += ["", f"{r.sub_claim.sub_claim_id}: {r.rationale}"]
             if r.capped_by:
                 lines.append(f"  capped by: {r.capped_by}")
             if show_evidence:

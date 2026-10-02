@@ -13,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from finsight.contracts.interfaces import (
     AdviceBoundary,
     Auditor,
@@ -23,7 +25,20 @@ from finsight.contracts.interfaces import (
     TierPolicy,
 )
 
-# slot -> "module:Class". Env override: FINSIGHT_IMPL_<SLOT upper>.
+# The placeholder stubs. Never edit this when you swap in your agent: the end-to-end tests pin to these
+# so demo expectations stay stable while real agents come in one at a time.
+STUB_IMPLEMENTATIONS: dict[str, str] = {
+    "decomposer": "finsight.agents.decomposition.stub:StubDecomposer",
+    "financial": "finsight.agents.financial.stub:StubFinancialAgent",
+    "narrative": "finsight.agents.narrative.stub:StubNarrativeAgent",
+    "retriever": "finsight.agents.narrative.retriever_stub:StubRetriever",
+    "auditor": "finsight.agents.auditor.stub:StubAuditor",
+    "advice_boundary": "finsight.agents.advice_boundary.stub:StubAdviceBoundary",
+    "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",
+}
+
+# What the app actually runs: slot -> "module:Class". Env override: FINSIGHT_IMPL_<SLOT upper>.
+# SWAP YOUR AGENT HERE: change only your own line(s), so merges never conflict.
 DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
     "decomposer": "finsight.agents.decomposition.stub:StubDecomposer",  # Person 3
     "financial": "finsight.agents.financial.stub:StubFinancialAgent",  # Person 1
@@ -44,26 +59,38 @@ _PROTOCOLS: dict[str, type] = {
     "tier_policy": TierPolicy,
 }
 
-# Companies in the frozen corpus: ticker -> aliases matched (case-insensitively) in the thesis.
+# Companies in the frozen corpus: ticker -> aliases matched (case-insensitively) in the claim.
 # DECISION: placeholder corpus with the demo company only; Person 2 / Person 4 extend it.
 CORPUS_COMPANIES: dict[str, list[str]] = {
     "CMPX": ["Company X", "CMPX"],
 }
 
-# USD per 1M tokens (input, output).
-# DECISION: placeholder prices; check the provider pricing pages before reporting cost numbers.
+# USD per 1M tokens (input, output), standard tier. Real calls to a model missing here are refused.
+# OpenAI prices checked against https://developers.openai.com/api/docs/pricing on 2026-10-02.
+# Anthropic prices are UNVERIFIED placeholders: check before using that provider for reported numbers.
 PRICE_TABLE: dict[str, tuple[float, float]] = {
     "mock-model": (0.0, 0.0),
+    "gpt-5.4": (2.50, 15.00),
+    "gpt-5.4-mini": (0.75, 4.50),
+    "gpt-5.4-nano": (0.20, 1.25),
+    "gpt-5.5": (5.00, 30.00),
+    "gpt-5-mini": (0.25, 2.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4o-mini": (0.15, 0.60),
     "claude-sonnet-5-5": (3.0, 15.0),
     "claude-haiku-4-5-20251001": (1.0, 5.0),
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4o": (2.50, 10.0),
 }
 
-DEFAULT_MODELS = {"mock": "mock-model", "anthropic": "claude-sonnet-5-5", "openai": "gpt-4o-mini"}
+# DECISION: testing defaults to the cheapest model of the course model's family (gpt-5.4-nano, ~12x cheaper).
+# Final reported runs must opt in to the course model explicitly: FINSIGHT_LLM_MODEL=gpt-5.4.
+DEFAULT_MODELS = {"mock": "mock-model", "anthropic": "claude-sonnet-5-5", "openai": "gpt-5.4-nano"}
+FINAL_REPORT_MODEL = "gpt-5.4"
+
+# Total course credit, for `finsight usage`.
+COURSE_BUDGET_USD = 150.0
 
 BOUNDARY_DISCLAIMER = (
-    "This evaluates the evidence for the stated thesis. "
+    "This evaluates the evidence for the stated claim. "
     "It is not a personalized investment recommendation."
 )
 
@@ -79,15 +106,45 @@ class Settings:
     corpus_companies: dict[str, list[str]] = field(default_factory=lambda: dict(CORPUS_COMPANIES))
     logs_dir: Path = Path("logs")
     max_workers: int = 4
-    max_thesis_chars: int = 5000
+    max_claim_chars: int = 5000
     rag_top_k: int = 5
 
 
+def local_config_path() -> Path:
+    """The gitignored local config file (API keys + LLM mode). See config.example.yaml."""
+    return Path(os.getenv("FINSIGHT_SECRETS_FILE", "config.yaml"))
+
+
+def read_local_config() -> dict[str, Any]:
+    path = local_config_path()
+    if not path.exists():
+        return {}
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def set_llm_mode(paid: bool, model: str | None = None, provider: str = "openai") -> Path:
+    """Switch the LLM mode in config.yaml (keeps API keys). paid=False -> mock (free)."""
+    if model is not None and model not in PRICE_TABLE:
+        raise ValueError(f"No price for {model!r} in PRICE_TABLE")
+    local = read_local_config()
+    local["llm_provider"] = provider if paid else "mock"
+    if model is not None:
+        local["llm_model"] = model
+    path = local_config_path()
+    path.write_text("# Local settings + secrets. Gitignored. Never commit.\n"
+                    "# llm_provider: mock = free canned responses; openai = paid API calls.\n"
+                    + yaml.safe_dump(local, sort_keys=False), encoding="utf-8")
+    return path
+
+
 def get_settings() -> Settings:
-    provider = os.getenv("FINSIGHT_LLM_PROVIDER", "mock").lower()
+    """Settings for this run. LLM mode precedence: env var > config.yaml > mock (free)."""
+    local = read_local_config()
+    provider = (os.getenv("FINSIGHT_LLM_PROVIDER") or local.get("llm_provider") or "mock").lower()
+    model = os.getenv("FINSIGHT_LLM_MODEL") or (local.get("llm_model") if provider != "mock" else None)
     return Settings(
         llm_provider=provider,
-        llm_model=os.getenv("FINSIGHT_LLM_MODEL", DEFAULT_MODELS.get(provider, "mock-model")),
+        llm_model=model or DEFAULT_MODELS.get(provider, "mock-model"),
         max_retries=int(os.getenv("FINSIGHT_MAX_RETRIES", "1")),
         corpus_as_of_date=date.fromisoformat(os.getenv("FINSIGHT_CORPUS_AS_OF", "2025-07-31")),
         logs_dir=Path(os.getenv("FINSIGHT_LOGS_DIR", "logs")),

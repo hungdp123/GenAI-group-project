@@ -12,22 +12,28 @@ from pydantic import BaseModel, Field
 from finsight.contracts.schemas import AgentCall, Verdict
 from finsight.llm.client import DATA_SAFETY_PREAMBLE
 
+# DECISION: baselines get the same refusal and scope policy as FinSight, so the comparison measures
+# the architecture rather than which system was told the rules.
 BASELINE_INSTRUCTIONS = (
-    "You evaluate a company-level investment thesis using only information available on or before {cutoff}. "
-    "Do NOT give personalized investment advice. If the user asks what they personally should buy, sell or "
-    "invest, reply with exactly one line: 'REFUSED: <reason>'.\n"
-    "Otherwise split the thesis into its distinct claims and output one line per claim:\n"
-    "CLAIM: <claim> | VERDICT: <Supported | Partially Supported | Contradicted | Insufficient Evidence>\n"
+    "You evaluate a company-level investment claim using only information available on or before {cutoff}. "
+    "Do NOT give personalized investment advice. Reply with exactly one line 'REFUSED: <reason>' and nothing "
+    "else if the user asks what they personally should buy, sell or invest, if the claim is a stock price "
+    "prediction, or if it is about the macro economy or a market index rather than a specific company.\n"
+    "If the claim does not say which company it is about, or contains no checkable sub-claim, reply with exactly "
+    "one line 'CLARIFY: <one question for the user>' and nothing else.\n"
+    "Otherwise split the claim into atomic sub-claims (one checkable statement each, including sub-claims the "
+    "claim implies) and output one line per sub-claim:\n"
+    "SUB-CLAIM: <sub-claim> | VERDICT: <Supported | Partially Supported | Contradicted | Insufficient Evidence>\n"
     "then one line 'OVERALL: <verdict>', then a short explanation citing the provided data."
 )
 
 
 def baseline_system_prompt(cutoff: date) -> str:
-    """Trusted instructions only. The thesis and documents go in data blocks in the user prompt."""
+    """Trusted instructions only. The claim and documents go in data blocks in the user prompt."""
     return DATA_SAFETY_PREAMBLE + BASELINE_INSTRUCTIONS.format(cutoff=cutoff.isoformat())
 
 
-class ParsedClaim(BaseModel):
+class ParsedSubClaim(BaseModel):
     text: str
     verdict: Verdict | None
 
@@ -38,7 +44,8 @@ class BaselineResult(BaseModel):
     raw_output: str = ""
     refused: bool = False
     refusal_reason: str | None = None
-    claims: list[ParsedClaim] = Field(default_factory=list)
+    clarification_question: str | None = None
+    sub_claims: list[ParsedSubClaim] = Field(default_factory=list)
     overall_verdict: Verdict | None = None
     agent_calls: list[AgentCall] = Field(default_factory=list)
     latency_ms: float = 0.0
@@ -46,7 +53,7 @@ class BaselineResult(BaseModel):
 
 
 _VERDICT_WORDS = [  # order matters: check the more specific phrase first
-    (r"partial", Verdict.PARTIALLY_SUPPORTED),
+    (r"partial|mixed", Verdict.PARTIALLY_SUPPORTED),
     (r"insufficient|not enough|unclear|cannot (be )?(verified|determined)", Verdict.INSUFFICIENT_EVIDENCE),
     (r"contradict|refuted|false|unsupported", Verdict.CONTRADICTED),
     (r"support|true|confirmed", Verdict.SUPPORTED),
@@ -60,21 +67,34 @@ def parse_verdict(text: str) -> Verdict | None:
     return None
 
 
-def parse_output(text: str) -> tuple[bool, str | None, list[ParsedClaim], Verdict | None]:
-    """Light parser: (refused, refusal_reason, claims, overall). Tolerates free-form output."""
+def parse_output(text: str) -> tuple[bool, str | None, list[ParsedSubClaim], Verdict | None]:
+    """Light parser: (refused, refusal_reason, sub-claims, overall). Tolerates free-form output."""
     refusal = re.search(r"^\s*REFUSED:\s*(.*)$", text, flags=re.IGNORECASE | re.MULTILINE)
     if refusal:
         return True, refusal.group(1).strip(), [], None
-    claims = [ParsedClaim(text=m.group(1).strip(), verdict=parse_verdict(m.group(2)))
-              for m in re.finditer(r"CLAIM:\s*(.+?)\s*\|\s*VERDICT:\s*(.+)", text, flags=re.IGNORECASE)]
+    sub_claims = [ParsedSubClaim(text=m.group(1).strip(), verdict=parse_verdict(m.group(2)))
+              for m in re.finditer(r"(?:SUB-)?CLAIM:\s*(.+?)\s*\|\s*VERDICT:\s*(.+)", text, flags=re.IGNORECASE)]
     overall_match = re.search(r"OVERALL:\s*(.+)", text, flags=re.IGNORECASE)
     overall = parse_verdict(overall_match.group(1)) if overall_match else None
-    if not claims:
-        # Fallback for free-form answers: any line that names a verdict becomes a claim.
+    if not sub_claims:
+        # Fallback for free-form answers: any line that names a verdict becomes a sub-claim.
         for line in text.splitlines():
             if (v := parse_verdict(line)) and len(line.strip()) > 10:
-                claims.append(ParsedClaim(text=line.strip()[:200], verdict=v))
-    return False, None, claims, overall
+                sub_claims.append(ParsedSubClaim(text=line.strip()[:200], verdict=v))
+    return False, None, sub_claims, overall
+
+
+def parse_clarification(text: str) -> str | None:
+    match = re.search(r"^\s*CLARIFY:\s*(.*)$", text, flags=re.IGNORECASE | re.MULTILINE)
+    return match.group(1).strip() if match else None
+
+
+def apply_output(result: BaselineResult, text: str) -> None:
+    """Fill `result` from the model's raw text (shared by both baselines)."""
+    result.raw_output = text
+    result.clarification_question = parse_clarification(text)
+    if result.clarification_question is None:
+        result.refused, result.refusal_reason, result.sub_claims, result.overall_verdict = parse_output(text)
 
 
 def xbrl_facts_as_text(cutoff: date) -> str:

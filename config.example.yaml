@@ -1,0 +1,7 @@
+# Copy to config.yaml (gitignored) and fill in. Never commit real keys.
+# llm_provider: mock = free canned responses (default); openai = paid API calls.
+# Switch with `finsight mode mock` / `finsight mode paid [--model gpt-5.4]`.
+llm_provider: mock
+# llm_model: gpt-5.4-nano       # paid testing default; use gpt-5.4 for final reported runs
+openai_api_key: "sk-..."
+# anthropic_api_key: "sk-ant-..."

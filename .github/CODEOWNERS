@@ -1,0 +1,6 @@
+# Changes to these paths automatically request a review from Hung (Person 5).
+# They are shared by every agent: a silent change can break the whole team.
+/finsight/contracts/            @hungdp123
+/finsight/agents/orchestrator/  @hungdp123
+/finsight/config.py             @hungdp123
+/.github/                       @hungdp123
