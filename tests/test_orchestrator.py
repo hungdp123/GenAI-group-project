@@ -51,6 +51,21 @@ def test_happy_path_demo():
     assert results[ClaimType.CONTINUATION].challenging, "challenging evidence must be surfaced"
 
 
+def test_pinned_to_stubs_when_a_teammate_swaps_their_agent(monkeypatch):
+    from finsight import config
+
+    # Simulate Person 1 registering a different financial agent in config.py.
+    monkeypatch.setitem(config.DEFAULT_IMPLEMENTATIONS, "financial", "tests_fake_module:DoesNotExist")
+    out = execute(DEMO_THESIS, DEMO_CUTOFF)
+    assert _by_type(out.assessment)[ClaimType.HISTORICAL_GROWTH].supporting[0].computed_value == 0.14
+
+
+def test_misregistered_agent_returns_failed_not_crash(monkeypatch):
+    monkeypatch.setenv("FINSIGHT_IMPL_FINANCIAL", "finsight.agents.financial.typo:Nope")
+    fa = execute(DEMO_THESIS, DEMO_CUTOFF).assessment
+    assert fa.status is AssessmentStatus.FAILED and "typo" in fa.refusal_reason
+
+
 def test_run_finsight_public_api():
     from finsight import run_finsight
 

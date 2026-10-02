@@ -102,10 +102,13 @@ def execute(
 ) -> RunOutput:
     """Run the full pipeline and return the assessment plus its decision log. Never raises."""
     settings = settings or get_settings()
-    ctx = RunContext(registry=registry or AgentRegistry.from_config(), settings=settings,
-                     kb=kb or default_knowledge_layer())
-    initial = FinSightState(raw_input=thesis or "", cutoff_input=_coerce_date(cutoff), company_hint=company_ticker)
+    ctx = RunContext(registry=registry, settings=settings, kb=kb)  # type: ignore[arg-type]
     try:
+        # Inside the try: a mis-registered agent or bad knowledge layer must return FAILED, not crash the UI.
+        ctx.registry = registry or AgentRegistry.from_config()
+        ctx.kb = kb or default_knowledge_layer()
+        initial = FinSightState(raw_input=thesis or "", cutoff_input=_coerce_date(cutoff),
+                                company_hint=company_ticker)
         out = build_graph(ctx).invoke(initial, config={"recursion_limit": 40 + 6 * settings.max_retries})
         return RunOutput(FinalAssessment.model_validate(out["final"]),
                          DecisionLog.model_validate(out["decision_log"]))
@@ -121,7 +124,7 @@ def _crash_output(ctx: RunContext, thesis: str, exc: Exception) -> RunOutput:
     log = rec.finish(AssessmentStatus.FAILED, {})
     write_log(log, ctx.settings.logs_dir)
     final = FinalAssessment(request_id=log.request_id, status=AssessmentStatus.FAILED, as_of_date=log.cutoff_date,
-                            refusal_reason=f"Internal error: {type(exc).__name__}",
+                            refusal_reason=f"Internal error: {type(exc).__name__}: {exc}",
                             boundary_disclaimer=BOUNDARY_DISCLAIMER)
     return RunOutput(final, log)
 

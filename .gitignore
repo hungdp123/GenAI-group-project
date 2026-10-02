@@ -10,3 +10,6 @@ __pycache__/
 # Local secrets (API keys). Never commit. See config.example.yaml.
 config.yaml
 secrets.yaml
+
+# Large corpus files and vector indexes (share via the team drive; see README "Data files").
+/data/

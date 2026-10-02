@@ -25,7 +25,20 @@ from finsight.contracts.interfaces import (
     TierPolicy,
 )
 
-# slot -> "module:Class". Env override: FINSIGHT_IMPL_<SLOT upper>.
+# The placeholder stubs. Never edit this when you swap in your agent: the end-to-end tests pin to these
+# so demo expectations stay stable while real agents come in one at a time.
+STUB_IMPLEMENTATIONS: dict[str, str] = {
+    "decomposer": "finsight.agents.decomposition.stub:StubDecomposer",
+    "financial": "finsight.agents.financial.stub:StubFinancialAgent",
+    "narrative": "finsight.agents.narrative.stub:StubNarrativeAgent",
+    "retriever": "finsight.agents.narrative.retriever_stub:StubRetriever",
+    "auditor": "finsight.agents.auditor.stub:StubAuditor",
+    "advice_boundary": "finsight.agents.advice_boundary.stub:StubAdviceBoundary",
+    "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",
+}
+
+# What the app actually runs: slot -> "module:Class". Env override: FINSIGHT_IMPL_<SLOT upper>.
+# SWAP YOUR AGENT HERE: change only your own line(s), so merges never conflict.
 DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
     "decomposer": "finsight.agents.decomposition.stub:StubDecomposer",  # Person 3
     "financial": "finsight.agents.financial.stub:StubFinancialAgent",  # Person 1

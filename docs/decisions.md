@@ -22,6 +22,8 @@ option and marked `# DECISION:` in the code. Rows marked **Team** need group sig
 | D13 | Duplicate claim IDs from the decomposer are renumbered, not treated as an error | Robustness; logged as an event | `nodes.py: decompose` | Done |
 | D14 | NEUTRAL evidence is kept and counts toward `highest_tier_used`, but is listed under neither supporting nor challenging | Schema only has the two lists | `nodes.py: assemble` | Done |
 | D15 | Thesis text is dropped if it comes back as evidence (`doc_type` thesis, or content contained verbatim in the thesis) | Spec: the pasted thesis is never evidence | `routing.py: is_thesis_echo` | Done |
+| D17 | End-to-end tests are pinned to the stubs (`STUB_IMPLEMENTATIONS`); only the contract tests run the registered agents | Real agents can merge one at a time without breaking demo expectations | `config.py`, `tests/conftest.py` | Done |
+| D18 | Building the agent registry happens inside `execute`'s error handling | A mis-registered agent returns FAILED with the reason instead of crashing the UI | `orchestrator/graph.py` | Done |
 | D16 | BUSINESS_RISK: no cap, but any Tier 1–2 challenging evidence lowers SUPPORTED to PARTIALLY_SUPPORTED | Reading of "counter-evidence only, can block SUPPORTED" | `knowledge_layer.yaml` | **Team** (Irine) |
 
 ## Schema additions (all in `contracts/schemas.py`, version 0.1)
