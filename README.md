@@ -238,27 +238,9 @@ Dataset format and labeling rules are in [docs/eval_dataset_guide.md](docs/eval_
 
 ## Architecture
 
-The code follows the team architecture diagram:
+The code follows the team architecture diagram ([docs/architecture.svg](docs/architecture.svg), editable SVG):
 
-```mermaid
-graph LR
-  user([User: claim + cut-off]) --> screen[Initial screening<br/>advice_gate_input + scope_check]
-  screen -->|advice request / out of scope| refuse1[Refuse with reason, logged]
-  screen -->|unclear or missing info| clarify[Clarification:<br/>ask for company / claim]
-  clarify -.->|user answers, resubmits| user
-  screen --> orch[Orchestrator:<br/>decompose + plan]
-  orch -->|no checkable sub-claim| clarify
-  orch --> fin[Financial Analysis Agent]
-  orch --> nar[Narrative Evidence Agent]
-  fin --> aud{Auditor: number + citation checks,<br/>source tier enough?}
-  nar --> aud
-  aud -.->|No: re-plan + retrieve more, max 1 retry| orch
-  aud -->|Yes, or still failing = Insufficient Evidence| tier[Tier policy + caps]
-  tier --> overall[Overall assessment]
-  overall --> final{Advice Boundary:<br/>final check}
-  final -->|pass| report([User report])
-  final -->|flag| refuse2[Refuse with reason, logged]
-```
+![FinSight architecture](docs/architecture.svg)
 
 How the diagram's boxes map to the code (`finsight/agents/orchestrator/`):
 
@@ -289,7 +271,9 @@ Safety rules enforced by the orchestrator:
 
 | Document | Read it when |
 |---|---|
+| [docs/progress_report.md](docs/progress_report.md) | You want to know what is built, what is next, and what is waiting on you |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | You are replacing your stub or opening a PR |
+| [docs/architecture.svg](docs/architecture.svg) | You need the architecture diagram (for the report or slides) |
 | [docs/decisions.md](docs/decisions.md) | You need the design decisions, the ones awaiting team sign-off, and known limitations |
 | [docs/eval_dataset_guide.md](docs/eval_dataset_guide.md) | You are writing or labeling evaluation items |
 | [docs/orchestrator_graph.md](docs/orchestrator_graph.md) | You need the exact pipeline graph |

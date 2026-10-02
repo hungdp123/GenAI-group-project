@@ -1,0 +1,168 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1640 570" width="1640" height="570"
+     font-family="Helvetica, Arial, sans-serif">
+  <title>FinSight architecture (claim / sub-claim terminology, schema v0.3)</title>
+  <defs>
+    <marker id="a-dark" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3c4650"/>
+    </marker>
+    <marker id="a-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2a74b0"/>
+    </marker>
+    <marker id="a-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c62828"/>
+    </marker>
+    <marker id="a-retry" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c4571b"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#000" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .title { font-size: 21px; font-weight: 700; fill: #1f2933; }
+      .h { font-size: 14.5px; font-weight: 700; fill: #1f2933; text-anchor: middle; }
+      .s { font-size: 12px; fill: #52606d; text-anchor: middle; }
+      .lbl { font-size: 12.5px; font-weight: 700; fill: #3c4650; }
+      .lbl-r { font-size: 12.5px; font-weight: 700; fill: #3c4650; text-anchor: end; }
+      .lbl-m { font-size: 12.5px; font-weight: 700; fill: #3c4650; text-anchor: middle; }
+      .leg { font-size: 12.5px; fill: #3c4650; }
+      .note { font-size: 12.5px; fill: #616e7c; text-anchor: end; }
+      .dark { stroke: #3c4650; stroke-width: 1.6; fill: none; marker-end: url(#a-dark); }
+      .blue { stroke: #2a74b0; stroke-width: 1.8; fill: none; marker-end: url(#a-blue); }
+      .red { stroke: #c62828; stroke-width: 1.8; fill: none; marker-end: url(#a-red); }
+      .retry { stroke: #c4571b; stroke-width: 1.6; fill: none; stroke-dasharray: 6 5; marker-end: url(#a-retry); }
+      .guard { fill: #fdf3d7; stroke: #e2a93b; stroke-width: 1.6; }
+      .coord { fill: #e8f0fc; stroke: #3d7be0; stroke-width: 1.6; }
+      .spec { fill: #e5f6e8; stroke: #3cb35a; stroke-width: 1.6; }
+      .verif { fill: #f1e8fc; stroke: #9050e0; stroke-width: 1.6; }
+      .clar { fill: #e4f0fa; stroke: #2a74b0; stroke-width: 1.6; }
+      .refuse { fill: #fde6e6; stroke: #d64545; stroke-width: 1.6; }
+      .neutral { fill: #f4f6f8; stroke: #7b8794; stroke-width: 1.6; }
+      .user { fill: #f4f6f8; stroke: #7b8794; stroke-width: 1.6; }
+    </style>
+  </defs>
+
+  <rect width="1640" height="570" fill="#ffffff"/>
+  <text x="18" y="30" class="title">FinSight architecture</text>
+
+  <!-- ===== arrows (drawn first so boxes sit on top) ===== -->
+  <!-- user -> initial screening -> orchestrator -->
+  <path d="M125,252 L161,252" class="dark"/>
+  <path d="M338,252 L374,252" class="dark"/>
+  <!-- clarification loop -->
+  <path d="M250,209 L250,141" class="blue"/>
+  <text x="262" y="180" class="lbl">Unclear or missing info</text>
+  <path d="M178,109 L71,109 L71,220" class="blue"/>
+  <text x="95" y="101" class="lbl">Asks user</text>
+  <!-- refusal at input -->
+  <path d="M250,295 L250,376" class="red"/>
+  <text x="262" y="339" class="lbl">Advice request</text>
+  <path d="M178,405 L71,405 L71,284" class="red"/>
+  <text x="86" y="422" class="lbl">Explains why</text>
+  <!-- orchestrator -> specialists -> auditor -->
+  <path d="M551,232 C575,232 572,140 596,140" class="dark"/>
+  <path d="M551,272 C575,272 572,363 596,363" class="dark"/>
+  <path d="M803,140 C827,140 824,232 848,232" class="dark"/>
+  <path d="M803,363 C827,363 824,272 848,272" class="dark"/>
+  <!-- auditor yes -> overall -> final gate -->
+  <path d="M1025,252 L1081,252" class="dark"/>
+  <text x="1042" y="241" class="lbl">Yes</text>
+  <path d="M1228,252 L1265,252" class="dark"/>
+  <!-- final gate outcomes -->
+  <path d="M1442,232 C1466,232 1464,179 1488,179" class="dark"/>
+  <text x="1482" y="166" class="lbl-r">Pass</text>
+  <path d="M1442,272 C1466,272 1464,325 1488,325" class="red"/>
+  <text x="1482" y="349" class="lbl-r">Flag</text>
+  <!-- retry: auditor "No" -> orchestrator re-plans -->
+  <path d="M938,208 L938,52 L463,52 L463,206" class="retry"/>
+  <text x="700" y="43" class="lbl-m">No: Orchestrator re-plans / retrieves more (max 1 retry per sub-claim)</text>
+  <!-- still failing -> overall -->
+  <path d="M938,296 L938,476 L1156,476 L1156,293" class="retry"/>
+  <text x="1047" y="497" class="lbl-m">Still failing: sub-claim = Insufficient Evidence</text>
+
+  <!-- ===== boxes ===== -->
+  <!-- User -->
+  <rect x="18" y="222" width="107" height="60" rx="30" class="user" filter="url(#shadow)"/>
+  <text x="71" y="248" class="h">User</text>
+  <text x="71" y="266" class="s">claim + cut-off</text>
+
+  <!-- Clarification -->
+  <rect x="178" y="79" width="145" height="60" rx="8" class="clar" filter="url(#shadow)"/>
+  <text x="250.5" y="104" class="h">Clarification</text>
+  <text x="250.5" y="123" class="s">ask for company / claim</text>
+
+  <!-- Advice Boundary: initial screening -->
+  <rect x="163" y="209" width="175" height="86" rx="8" class="guard" filter="url(#shadow)"/>
+  <text x="250.5" y="238" class="h">Advice Boundary Agent</text>
+  <text x="250.5" y="259" class="s">initial screening</text>
+  <text x="250.5" y="276" class="s">(advice + scope)</text>
+
+  <!-- Refuse (input) -->
+  <rect x="178" y="378" width="145" height="54" rx="8" class="refuse" filter="url(#shadow)"/>
+  <text x="250.5" y="400" class="h">Refuse</text>
+  <text x="250.5" y="419" class="s">with reason, logged</text>
+
+  <!-- Orchestrator -->
+  <rect x="376" y="208" width="175" height="88" rx="8" class="coord" filter="url(#shadow)"/>
+  <text x="463.5" y="235" class="h">Orchestrator Agent</text>
+  <text x="463.5" y="255" class="s">decompose claim</text>
+  <text x="463.5" y="271" class="s">into sub-claims</text>
+  <text x="463.5" y="287" class="s">plan evidence needs</text>
+
+  <!-- Financial Analysis -->
+  <rect x="598" y="97" width="205" height="87" rx="8" class="spec" filter="url(#shadow)"/>
+  <text x="700.5" y="126" class="h">Financial Analysis Agent</text>
+  <text x="700.5" y="147" class="s">SEC / XBRL data</text>
+  <text x="700.5" y="164" class="s">metrics computed in Python</text>
+
+  <!-- Narrative Evidence -->
+  <rect x="598" y="320" width="205" height="87" rx="8" class="spec" filter="url(#shadow)"/>
+  <text x="700.5" y="349" class="h">Narrative Evidence Agent</text>
+  <text x="700.5" y="370" class="s">agentic RAG over filings</text>
+  <text x="700.5" y="387" class="s">support + counter-evidence</text>
+
+  <!-- Auditor -->
+  <rect x="850" y="208" width="175" height="88" rx="8" class="verif" filter="url(#shadow)"/>
+  <text x="937.5" y="235" class="h">Auditor Agent</text>
+  <text x="937.5" y="255" class="s">per sub-claim: number +</text>
+  <text x="937.5" y="271" class="s">citation checks</text>
+  <text x="937.5" y="287" class="s">source tier · enough?</text>
+
+  <!-- Overall assessment -->
+  <rect x="1083" y="213" width="145" height="78" rx="8" class="neutral" filter="url(#shadow)"/>
+  <text x="1155.5" y="240" class="h">Overall</text>
+  <text x="1155.5" y="258" class="h">assessment</text>
+  <text x="1155.5" y="277" class="s">sub-claim verdicts</text>
+
+  <!-- Advice Boundary: final check -->
+  <rect x="1267" y="209" width="175" height="86" rx="8" class="guard" filter="url(#shadow)"/>
+  <text x="1354.5" y="238" class="h">Advice Boundary Agent</text>
+  <text x="1354.5" y="259" class="s">final check</text>
+  <text x="1354.5" y="276" class="s">before release</text>
+
+  <!-- User report -->
+  <rect x="1490" y="150" width="125" height="58" rx="29" class="user" filter="url(#shadow)"/>
+  <text x="1552.5" y="175" class="h">User</text>
+  <text x="1552.5" y="193" class="s">report</text>
+
+  <!-- Refuse (output) -->
+  <rect x="1490" y="296" width="125" height="58" rx="8" class="refuse" filter="url(#shadow)"/>
+  <text x="1552.5" y="320" class="h">Refuse</text>
+  <text x="1552.5" y="339" class="s">with reason, logged</text>
+
+  <!-- ===== legend ===== -->
+  <g transform="translate(18,528)">
+    <rect x="0" y="0" width="14" height="14" rx="3" class="guard"/>
+    <text x="21" y="12" class="leg">Guardrail</text>
+    <rect x="105" y="0" width="14" height="14" rx="3" class="coord"/>
+    <text x="126" y="12" class="leg">Coordination</text>
+    <rect x="232" y="0" width="14" height="14" rx="3" class="spec"/>
+    <text x="253" y="12" class="leg">Specialist agent</text>
+    <rect x="380" y="0" width="14" height="14" rx="3" class="verif"/>
+    <text x="401" y="12" class="leg">Verification</text>
+    <rect x="492" y="0" width="14" height="14" rx="3" class="clar"/>
+    <text x="513" y="12" class="leg">Clarification</text>
+    <path d="M620,7 L660,7" stroke="#c4571b" stroke-width="1.6" stroke-dasharray="6 5"/>
+    <text x="668" y="12" class="leg">Retry / fallback path</text>
+  </g>
+  <text x="1615" y="540" class="note">Every step is written to the decision log</text>
+</svg>
