@@ -2,6 +2,8 @@
 
     python -m finsight.eval.run_eval --system all --split dev
     python -m finsight.eval.run_eval --system all --split heldout --final   # frozen split: final run only
+    python -m finsight.eval.run_eval --validate                            # check both dataset files
+    python -m finsight.eval.run_eval --freeze                              # lock the heldout file (once)
 
 Outputs results/{timestamp}/: raw/{system}/{item_id}.json, logs/ (FinSight decision logs),
 records.jsonl, claims.csv and summary.md.
@@ -11,12 +13,14 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import json
+import hashlib
 from datetime import date, datetime
 from importlib import resources
 from pathlib import Path
 
-from pydantic import BaseModel, ValidationError
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from finsight.agents.orchestrator.graph import execute
 from finsight.baselines.basic_rag import run_basic_rag
@@ -35,22 +39,69 @@ from finsight.eval.metrics import (
 )
 
 SYSTEMS = ("direct", "rag", "finsight")
+DATASET_DIR = Path(str(resources.files("finsight.eval.datasets")))
+HELDOUT_LOCK = DATASET_DIR / "claims_heldout.lock"
 
 
 class EvalItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     item_id: str
     thesis: str
     cutoff_date: date | None = None
-    split: str
-    gold_claims: list[GoldClaim] = []
+    split: Literal["dev", "heldout"]
+    gold_claims: list[GoldClaim] = Field(default_factory=list)
     expect_refusal: bool = False
-    category: str = "normal"
+    category: Literal["normal", "adversarial_advice", "out_of_scope", "injection", "temporal"] = "normal"
+    notes: str | None = None
+
+
+def dataset_path(split: str) -> Path:
+    return DATASET_DIR / f"claims_{split}.jsonl"
 
 
 def load_dataset(split: str, path: Path | None = None) -> list[EvalItem]:
-    text = (path.read_text("utf-8") if path else
-            resources.files("finsight.eval.datasets").joinpath(f"claims_{split}.jsonl").read_text("utf-8"))
+    text = (path or dataset_path(split)).read_text("utf-8")
     return [EvalItem.model_validate_json(line) for line in text.splitlines() if line.strip()]
+
+
+def file_sha256(path: Path) -> str:
+    """Line-ending-insensitive hash, so a Windows checkout (CRLF) matches the committed file (LF)."""
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
+def validate_datasets() -> list[str]:
+    """Problems with the dev/heldout files (empty list = OK)."""
+    problems: list[str] = []
+    items: dict[str, list[EvalItem]] = {}
+    for split in ("dev", "heldout"):
+        try:
+            items[split] = load_dataset(split)
+        except (ValidationError, ValueError) as exc:
+            problems.append(f"{split}: invalid JSONL ({exc})")
+            items[split] = []
+    ids = [i.item_id for split_items in items.values() for i in split_items]
+    problems += [f"duplicate item_id {i}" for i in sorted({i for i in ids if ids.count(i) > 1})]
+    dev_theses = {i.thesis.strip().lower() for i in items["dev"]}
+    problems += [f"{i.item_id}: thesis also appears in dev (leak)" for i in items["heldout"]
+                 if i.thesis.strip().lower() in dev_theses]
+    for split, split_items in items.items():
+        for i in split_items:
+            if i.split != split:
+                problems.append(f"{i.item_id}: split={i.split} but stored in {split} file")
+            if i.expect_refusal and i.gold_claims:
+                problems.append(f"{i.item_id}: refusal items must not have gold_claims")
+            if not i.expect_refusal and not i.gold_claims:
+                problems.append(f"{i.item_id}: non-refusal items need gold_claims")
+    if HELDOUT_LOCK.exists() and HELDOUT_LOCK.read_text().strip() != file_sha256(dataset_path("heldout")):
+        problems.append("heldout file changed after it was frozen (hash mismatch with claims_heldout.lock)")
+    return problems
+
+
+def freeze_heldout() -> str:
+    digest = file_sha256(dataset_path("heldout"))
+    HELDOUT_LOCK.write_text(digest + "\n", encoding="utf-8")
+    return digest
 
 
 def _base(item: EvalItem, system: str) -> dict:
@@ -144,9 +195,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--final", action="store_true", help="required to run the frozen heldout split")
     parser.add_argument("--out", type=Path, default=Path("results"))
     parser.add_argument("--dataset", type=Path, default=None, help="override the JSONL file for the split")
+    parser.add_argument("--validate", action="store_true", help="validate both dataset files and exit")
+    parser.add_argument("--freeze", action="store_true", help="write claims_heldout.lock (do this once)")
     args = parser.parse_args(argv)
+    if args.validate or args.freeze:
+        problems = validate_datasets()
+        print("\n".join(problems) or "datasets OK")
+        if args.freeze and not problems:
+            print(f"heldout frozen: sha256 {freeze_heldout()}")
+        return 1 if problems else 0
     if args.split == "heldout" and not args.final:
         parser.error("the heldout split is frozen: pass --final only for the final reported run")
+    if args.split == "heldout" and args.dataset is None:
+        if not HELDOUT_LOCK.exists():
+            parser.error("freeze the heldout split first: finsight eval --freeze")
+        if HELDOUT_LOCK.read_text().strip() != file_sha256(dataset_path("heldout")):
+            parser.error("heldout file changed since it was frozen; results would not be comparable")
     systems = list(SYSTEMS) if args.system == "all" else [args.system]
     out_dir = run_eval(systems, args.split, args.out, args.dataset)
     print((out_dir / "summary.md").read_text(encoding="utf-8"))

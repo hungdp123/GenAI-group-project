@@ -4,6 +4,7 @@
     finsight trace <request_id>                         # print the decision log
     finsight eval --system all --split dev              # run the evaluation
     finsight graph                                      # regenerate docs/orchestrator_graph.md
+    finsight usage                                      # real-LLM spend so far vs the course credit
 """
 
 from __future__ import annotations
@@ -40,14 +41,27 @@ def _cmd_trace(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_eval(args: argparse.Namespace) -> int:
-    from finsight.eval.run_eval import main as eval_main
-
-    return eval_main(args.rest)
-
-
 def _cmd_graph(args: argparse.Namespace) -> int:
     print(f"wrote {export_mermaid(args.out)}")
+    return 0
+
+
+def _cmd_usage(args: argparse.Namespace) -> int:
+    from finsight.config import COURSE_BUDGET_USD
+    from finsight.llm.spend import ledger_path, ledger_summary
+
+    totals = ledger_summary()
+    if not totals:
+        print(f"No real LLM calls recorded in {ledger_path()}")
+        return 0
+    print(f"{'MODEL':<22} {'CALLS':>6} {'IN TOK':>10} {'OUT TOK':>10} {'COST USD':>10}")
+    for model, t in sorted(totals.items(), key=lambda kv: kv[0] == "ALL"):
+        print(f"{model:<22} {t['calls']:>6.0f} {t['input_tokens']:>10.0f} {t['output_tokens']:>10.0f} "
+              f"{t['cost_usd']:>10.4f}")
+    spent = totals["ALL"]["cost_usd"]
+    print(f"\nSpent ${spent:.4f} of ${COURSE_BUDGET_USD:.2f} course credit "
+          f"(${COURSE_BUDGET_USD - spent:.2f} left, ledger: {ledger_path()}).")
+    print("This ledger covers runs on this machine only; check the OpenAI dashboard for the shared total.")
     return 0
 
 
@@ -68,14 +82,21 @@ def main(argv: list[str] | None = None) -> int:
     trace.add_argument("--json", action="store_true")
     trace.set_defaults(func=_cmd_trace)
 
-    ev = sub.add_parser("eval", help="run the evaluation (args passed to finsight.eval.run_eval)")
-    ev.add_argument("rest", nargs=argparse.REMAINDER)
-    ev.set_defaults(func=_cmd_eval)
+    # `eval` forwards everything after it to finsight.eval.run_eval (see main below).
+    sub.add_parser("eval", help="run the evaluation: finsight eval --system all --split dev", add_help=False)
 
     graph = sub.add_parser("graph", help="export the orchestrator graph as Mermaid")
     graph.add_argument("--out", default="docs/orchestrator_graph.md")
     graph.set_defaults(func=_cmd_graph)
 
+    usage = sub.add_parser("usage", help="real-LLM spend recorded in the usage ledger")
+    usage.set_defaults(func=_cmd_usage)
+
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["eval"]:
+        from finsight.eval.run_eval import main as eval_main
+
+        return eval_main(argv[1:])
     args = parser.parse_args(argv)
     return args.func(args)
 

@@ -43,3 +43,8 @@ def test_parser_structured_and_free_form():
     assert [c.verdict for c in claims] == [Verdict.SUPPORTED, Verdict.INSUFFICIENT_EVIDENCE]
     _, _, free, _ = parse_output("The growth claim is partially supported by the 10-Q.")
     assert free[0].verdict is Verdict.PARTIALLY_SUPPORTED
+
+
+def test_parser_maps_mixed_to_partial():
+    _, _, _, overall = parse_output("CLAIM: a | VERDICT: Supported\nOVERALL: Mixed")
+    assert overall is Verdict.PARTIALLY_SUPPORTED

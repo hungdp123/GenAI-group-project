@@ -50,17 +50,27 @@ CORPUS_COMPANIES: dict[str, list[str]] = {
     "CMPX": ["Company X", "CMPX"],
 }
 
-# USD per 1M tokens (input, output).
-# DECISION: placeholder prices; check the provider pricing pages before reporting cost numbers.
+# USD per 1M tokens (input, output), standard tier. Real calls to a model missing here are refused.
+# OpenAI prices checked against https://developers.openai.com/api/docs/pricing on 2026-10-02.
+# Anthropic prices are UNVERIFIED placeholders: check before using that provider for reported numbers.
 PRICE_TABLE: dict[str, tuple[float, float]] = {
     "mock-model": (0.0, 0.0),
+    "gpt-5.4": (2.50, 15.00),
+    "gpt-5.4-mini": (0.75, 4.50),
+    "gpt-5.4-nano": (0.20, 1.25),
+    "gpt-5.5": (5.00, 30.00),
+    "gpt-5-mini": (0.25, 2.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4o-mini": (0.15, 0.60),
     "claude-sonnet-5-5": (3.0, 15.0),
     "claude-haiku-4-5-20251001": (1.0, 5.0),
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4o": (2.50, 10.0),
 }
 
-DEFAULT_MODELS = {"mock": "mock-model", "anthropic": "claude-sonnet-5-5", "openai": "gpt-4o-mini"}
+# DECISION: gpt-5.4 is the course template's model; use gpt-5.4-mini for cheap dev iteration.
+DEFAULT_MODELS = {"mock": "mock-model", "anthropic": "claude-sonnet-5-5", "openai": "gpt-5.4"}
+
+# Total course credit, for `finsight usage`.
+COURSE_BUDGET_USD = 150.0
 
 BOUNDARY_DISCLAIMER = (
     "This evaluates the evidence for the stated thesis. "

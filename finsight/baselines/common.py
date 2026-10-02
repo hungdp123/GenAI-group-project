@@ -12,11 +12,15 @@ from pydantic import BaseModel, Field
 from finsight.contracts.schemas import AgentCall, Verdict
 from finsight.llm.client import DATA_SAFETY_PREAMBLE
 
+# DECISION: baselines get the same refusal and scope policy as FinSight, so the comparison measures
+# the architecture rather than which system was told the rules.
 BASELINE_INSTRUCTIONS = (
     "You evaluate a company-level investment thesis using only information available on or before {cutoff}. "
-    "Do NOT give personalized investment advice. If the user asks what they personally should buy, sell or "
-    "invest, reply with exactly one line: 'REFUSED: <reason>'.\n"
-    "Otherwise split the thesis into its distinct claims and output one line per claim:\n"
+    "Do NOT give personalized investment advice. Reply with exactly one line 'REFUSED: <reason>' and nothing "
+    "else if the user asks what they personally should buy, sell or invest, if the thesis is a stock price "
+    "prediction, or if it is about the macro economy or a market index rather than a specific company.\n"
+    "Otherwise split the thesis into atomic claims (one checkable statement each, including claims the "
+    "thesis implies) and output one line per claim:\n"
     "CLAIM: <claim> | VERDICT: <Supported | Partially Supported | Contradicted | Insufficient Evidence>\n"
     "then one line 'OVERALL: <verdict>', then a short explanation citing the provided data."
 )
@@ -46,7 +50,7 @@ class BaselineResult(BaseModel):
 
 
 _VERDICT_WORDS = [  # order matters: check the more specific phrase first
-    (r"partial", Verdict.PARTIALLY_SUPPORTED),
+    (r"partial|mixed", Verdict.PARTIALLY_SUPPORTED),
     (r"insufficient|not enough|unclear|cannot (be )?(verified|determined)", Verdict.INSUFFICIENT_EVIDENCE),
     (r"contradict|refuted|false|unsupported", Verdict.CONTRADICTED),
     (r"support|true|confirmed", Verdict.SUPPORTED),

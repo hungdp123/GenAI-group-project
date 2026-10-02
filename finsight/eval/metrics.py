@@ -7,14 +7,18 @@ import re
 import statistics
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from finsight.contracts.schemas import Verdict
+from finsight.contracts.schemas import ClaimType, Verdict
 
 
 class GoldClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     text: str
     gold_verdict: Verdict
+    claim_type: ClaimType | None = None
+    evidence: list[str] = Field(default_factory=list, description="Citations that justify the gold label")
 
 
 class PredictedClaim(BaseModel):

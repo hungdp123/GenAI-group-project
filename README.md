@@ -41,6 +41,32 @@ pipeline runs today.
 | `FINSIGHT_LOGS_DIR` | `logs` | where decision logs are written |
 | `FINSIGHT_IMPL_<SLOT>` | stub | swap an agent, e.g. `FINSIGHT_IMPL_FINANCIAL=pkg.module:Class` |
 | `FINSIGHT_STUB_FAIL_CLAIMS` | empty | stub auditor: `c1` fails once, `c1:2` fails twice (retry testing) |
+| `FINSIGHT_SPEND_LIMIT_USD` | `2.00` | a process stops making real LLM calls after spending this much |
+| `FINSIGHT_USAGE_LEDGER` | `logs/llm_usage.jsonl` | append-only record of every real LLM call |
+| `FINSIGHT_SECRETS_FILE` | `config.yaml` | gitignored file holding `openai_api_key` |
+| `FINSIGHT_REASONING_EFFORT` | unset | optional `reasoning_effort` for GPT-5 / o-series models |
+
+## Real LLM (OpenAI)
+
+```bash
+pip install -e ".[dev,openai]"
+cp config.example.yaml config.yaml        # then paste your key; config.yaml is gitignored
+```
+
+Run any command with the provider switched on:
+
+```bash
+FINSIGHT_LLM_PROVIDER=openai FINSIGHT_LLM_MODEL=gpt-5.4-mini finsight eval --system direct --split dev
+finsight usage                            # spend so far vs the $150 course credit
+```
+
+On Windows PowerShell, set the variables first with `$env:FINSIGHT_LLM_PROVIDER="openai"`.
+
+- **Default model:** `gpt-5.4` (the course template). Use `gpt-5.4-mini` while iterating.
+- **Prices:** in `config.PRICE_TABLE`, checked 2026-10-02. A model missing from the table is refused rather than reported as $0.
+- **Spend limit:** each process stops at `FINSIGHT_SPEND_LIMIT_USD`.
+- **Ledger:** `finsight usage` only counts this machine. Check the OpenAI dashboard for the team-wide total.
+- **Tests never spend money:** `pytest` always runs in mock mode.
 
 ## Run the demo
 
@@ -73,6 +99,10 @@ Results go to `results/{timestamp}/`:
 - `summary.md`: comparison table for direct LLM, basic RAG and FinSight
 - `claims.csv`: per-claim predicted vs gold verdicts (for Accuracy / Macro-F1)
 - `records.jsonl`, `raw/`, `logs/`
+
+Dataset format, labeling rules and the heldout freeze workflow are in
+[docs/eval_dataset_guide.md](docs/eval_dataset_guide.md). Design decisions and known limitations
+are in [docs/decisions.md](docs/decisions.md).
 
 ## Architecture
 
