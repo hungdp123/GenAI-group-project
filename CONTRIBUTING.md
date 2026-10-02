@@ -142,13 +142,13 @@ New fields get a default value where possible, so existing code keeps working.
 
 ## Pull request checklist
 
-Copy this into your PR description:
+GitHub pre-fills this checklist when you open a PR (`.github/pull_request_template.md`):
 
 ```markdown
 - [ ] Branched from the latest `main` and merged `main` again just before opening the PR
 - [ ] Only my own folders changed (+ my own line in `DEFAULT_IMPLEMENTATIONS`, if swapping a stub)
 - [ ] No changes to `finsight/contracts/` (or agreed with Hung)
-- [ ] `pytest` passes locally
+- [ ] `pytest` passes locally, and the CI checks on this PR are green
 - [ ] `finsight eval --validate` says "datasets OK"
 - [ ] `git status` shows no config.yaml, logs/, results/ or data/ files, and no API keys anywhere
 - [ ] New dependencies added to `pyproject.toml` and listed here: ...

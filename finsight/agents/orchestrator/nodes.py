@@ -173,7 +173,8 @@ class Nodes:
             if entry.collectors:
                 pending.append(sub_claim.sub_claim_id)
             else:
-                insufficient[sub_claim.sub_claim_id] = rule.note or f"No evidence collector for {sub_claim.sub_claim_type.value}."
+                insufficient[sub_claim.sub_claim_id] = (
+                    rule.note or f"No evidence collector for {sub_claim.sub_claim_type.value}.")
         return {"routing_plan": plan, "pending_sub_claim_ids": pending, "insufficient_reasons": insufficient,
                 "retries_used": {c.sub_claim_id: 0 for c in state.sub_claims}}
 
@@ -222,9 +223,11 @@ class Nodes:
         screened = []
         for item in kept:
             if routing.is_claim_echo(item, req.raw_claim):
-                self.rec.event("gather_evidence", f"{sub_claim_id}: dropped {item.evidence_id} (claim text is not evidence)")
+                self.rec.event("gather_evidence",
+                               f"{sub_claim_id}: dropped {item.evidence_id} (claim text is not evidence)")
             elif item.sub_claim_id != sub_claim_id:
-                self.rec.event("gather_evidence", f"{sub_claim_id}: dropped {item.evidence_id} (sub_claim_id {item.sub_claim_id})")
+                self.rec.event("gather_evidence",
+                               f"{sub_claim_id}: dropped {item.evidence_id} (sub_claim_id {item.sub_claim_id})")
             else:
                 screened.append(item)
         return screened
@@ -311,7 +314,8 @@ class Nodes:
             if cid in state.insufficient_reasons or cid not in state.audits:
                 verdicts[cid] = Verdict.INSUFFICIENT_EVIDENCE
                 if not rule.collectors:
-                    capped[cid] = f"knowledge layer: {rule.note or sub_claim.sub_claim_type.value + ' has no collector'}"
+                    note = rule.note or f"{sub_claim.sub_claim_type.value} has no collector"
+                    capped[cid] = f"knowledge layer: {note}"
                 elif cid in state.tier_shortfalls:
                     capped[cid] = f"tier rule: {state.tier_shortfalls[cid]}"
                 continue
@@ -411,7 +415,8 @@ class Nodes:
         if decision.flagged:
             update |= {"final": None} | _stop(
                 AssessmentStatus.REFUSED,
-                f"The generated response was withheld because it contained advice-like language. {decision.reason or ''}".strip())
+                ("The generated response was withheld because it contained advice-like language. "
+                 f"{decision.reason or ''}").strip())
         return update
 
     # -- 12. finalize -------------------------------------------------------

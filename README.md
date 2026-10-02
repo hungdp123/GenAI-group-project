@@ -162,6 +162,21 @@ PowerShell: `$env:NAME="value"`. bash: `export NAME=value`, or put `NAME=value` 
 4. **Open a PR into `main`** and ask one teammate to review. Use the checklist in
    [CONTRIBUTING.md](CONTRIBUTING.md#pull-request-checklist). Never push directly to `main`.
 
+### Continuous integration (GitHub Actions)
+
+Every push and every PR into `main` runs [.github/workflows/ci.yml](.github/workflows/ci.yml).
+The results show on the PR and in the repo's **Actions** tab. A PR should only be merged when all checks are green.
+
+| Check | What it does | If it fails |
+|---|---|---|
+| Lint (ruff) | Catches unused imports, undefined names, lines over 120 chars | Run `ruff check finsight tests --fix`, fix the rest |
+| No secrets committed | Fails if `config.yaml` / `.env` is tracked or an API key appears in any file | Remove the file (`git rm --cached config.yaml`) and **rotate the key** |
+| Tests (Ubuntu 3.11 + 3.12, Windows 3.12) | `pytest`, `finsight eval --validate`, a demo run, and the graph doc is current | Run the same command locally; for the graph doc run `finsight graph` and commit |
+
+CI always runs in **mock mode**: it never uses an API key and never spends OpenAI credit.
+Changes to `finsight/contracts/`, the orchestrator, `config.py` or `.github/` automatically request
+Hung's review ([.github/CODEOWNERS](.github/CODEOWNERS)).
+
 Files that conflict most often, and how to avoid it:
 
 | File | Rule |

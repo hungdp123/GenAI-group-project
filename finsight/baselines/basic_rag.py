@@ -19,7 +19,8 @@ from finsight.logging.decision_log import tracked_call
 
 def _context(items: list[EvidenceItem]) -> str:
     return "\n\n".join(
-        data_block(f"doc{i + 1}", f"[{e.source_tier.value} {e.doc_type} {e.publication_date} {e.url or ''}]\n{e.content}")
+        data_block(f"doc{i + 1}",
+                   f"[{e.source_tier.value} {e.doc_type} {e.publication_date} {e.url or ''}]\n{e.content}")
         for i, e in enumerate(items)
     )
 

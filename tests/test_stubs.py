@@ -15,7 +15,8 @@ def _sub_claims():
 def test_demo_decomposition():
     sub_claims = _sub_claims()
     assert [c.sub_claim_type for c in sub_claims] == [
-        SubClaimType.HISTORICAL_GROWTH, SubClaimType.DEMAND_ATTRIBUTION, SubClaimType.COMPARATIVE, SubClaimType.CONTINUATION,
+        SubClaimType.HISTORICAL_GROWTH, SubClaimType.DEMAND_ATTRIBUTION,
+        SubClaimType.COMPARATIVE, SubClaimType.CONTINUATION,
     ]
     assert sub_claims[0].is_quantitative and all(c.company_ticker == "CMPX" for c in sub_claims)
 

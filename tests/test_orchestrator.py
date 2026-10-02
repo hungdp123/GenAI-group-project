@@ -316,7 +316,8 @@ def test_failed_audit_retry_is_replanned(monkeypatch):
 def test_no_evidence_retries_once_then_insufficient():
     out = execute(DEMO_CLAIM, date(2025, 1, 31))  # every document is after this cut-off
     assert out.assessment.overall_verdict is Verdict.INSUFFICIENT_EVIDENCE
-    analyzed = [r for r in out.assessment.sub_claim_results if r.sub_claim.sub_claim_type is not SubClaimType.COMPARATIVE]
+    analyzed = [r for r in out.assessment.sub_claim_results
+                if r.sub_claim.sub_claim_type is not SubClaimType.COMPARATIVE]
     assert all(r.retries_used == 1 for r in analyzed)
 
 

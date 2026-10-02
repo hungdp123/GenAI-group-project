@@ -27,7 +27,7 @@ from finsight.baselines.basic_rag import run_basic_rag
 from finsight.baselines.common import BaselineResult
 from finsight.baselines.direct_llm import run_direct_llm
 from finsight.config import FINAL_REPORT_MODEL, get_settings
-from finsight.contracts.schemas import AssessmentStatus, FinalAssessment, Verdict
+from finsight.contracts.schemas import AssessmentStatus, FinalAssessment
 from finsight.eval.metrics import (
     GoldSubClaim,
     PredictedSubClaim,
@@ -134,7 +134,8 @@ def run_finsight_item(item: EvalItem, out_dir: Path) -> tuple[RunRecord, str]:
     refused = fa.status is AssessmentStatus.REFUSED
     clarified = fa.status is AssessmentStatus.NEEDS_CLARIFICATION
     completed = fa.status is not AssessmentStatus.FAILED
-    have_verdicts = refused or clarified or (bool(fa.sub_claim_results) and all(r.verdict for r in fa.sub_claim_results))
+    results = fa.sub_claim_results
+    have_verdicts = refused or clarified or (bool(results) and all(r.verdict for r in results))
     retried = {r.sub_claim_id for r in log.retries if not r.exhausted}
     record = RunRecord(
         **_base(item, "finsight"), completed=completed, schema_valid=valid, all_sub_claims_have_verdict=have_verdicts,
@@ -145,7 +146,7 @@ def run_finsight_item(item: EvalItem, out_dir: Path) -> tuple[RunRecord, str]:
         output_tokens=sum(c.output_tokens for c in log.agent_calls), cost_usd=log.total_cost_usd,
         sub_claims_assessed=len(fa.sub_claim_results), sub_claims_retried=len(retried),
         downgraded_after_retry=sum(r.exhausted for r in log.retries), overall_verdict=fa.overall_verdict,
-        predicted_sub_claims=[PredictedSubClaim(text=r.sub_claim.text, verdict=r.verdict) for r in fa.sub_claim_results],
+        predicted_sub_claims=[PredictedSubClaim(text=r.sub_claim.text, verdict=r.verdict) for r in results],
         error=fa.refusal_reason if fa.status is AssessmentStatus.FAILED else None,
     )
     return record, raw

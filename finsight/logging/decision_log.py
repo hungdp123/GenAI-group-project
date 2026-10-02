@@ -132,7 +132,8 @@ def format_trace(log: DecisionLog) -> str:
           f"cap={p.verdict_cap.value if p.verdict_cap else '-'}" for p in log.routing_plan],
         "Agent calls:",
         *[f"  {c.started_at:%H:%M:%S.%f} {c.agent:<16} sub-claim={c.sub_claim_id or '-':<4} {c.latency_ms:>8.1f} ms "
-          f"tok={c.input_tokens + c.output_tokens:<6} tools={c.tool_calls} {'ok' if c.success else 'ERROR ' + (c.error or '')}"
+          f"tok={c.input_tokens + c.output_tokens:<6} tools={c.tool_calls} "
+          f"{'ok' if c.success else 'ERROR ' + (c.error or '')}"
           for c in log.agent_calls],
         "Audits:",
         *[f"  {a.sub_claim_id:<4} passed={a.passed} verdict={a.verdict.value} {'; '.join(a.failure_reasons)}"

@@ -107,7 +107,9 @@ def _tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower())) - {"the", "a", "is", "s", "its", "of", "from", "by"}
 
 
-def align_sub_claims(gold: list[GoldSubClaim], predicted: list[PredictedSubClaim]) -> list[tuple[GoldSubClaim, PredictedSubClaim | None, float]]:
+def align_sub_claims(
+    gold: list[GoldSubClaim], predicted: list[PredictedSubClaim]
+) -> list[tuple[GoldSubClaim, PredictedSubClaim | None, float]]:
     """Greedy one-to-one match of gold to predicted sub-claims by token Jaccard similarity.
 
     # DECISION: unmatched gold sub-claims are scored as predicted "MISSING" (counts as wrong).

@@ -12,7 +12,7 @@ dependencies = ["pydantic>=2.6", "langgraph>=0.2", "pyyaml>=6"]
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.40"]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
 finsight = "finsight.cli:main"
@@ -26,3 +26,13 @@ include = ["finsight*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E741"]  # S, P, C, I verdict shorthands in tests
