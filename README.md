@@ -27,13 +27,13 @@ end to end today. Each teammate replaces their own stub; see [CONTRIBUTING.md](C
 
 ## Team and ownership
 
-| Person | Owns | Folder(s) |
-|---|---|---|
-| Person 1, Venes | Financial Analysis Agent + deterministic XBRL tools | `finsight/agents/financial/`, `finsight/data/xbrl_facts.json` |
-| Person 2, Stella | Narrative Evidence Agent, vector DB, Basic RAG retriever | `finsight/agents/narrative/` |
-| Person 3, Amelia | Claim Decomposition + Verification/Auditor Agent; Accuracy / Macro-F1 | `finsight/agents/decomposition/`, `finsight/agents/auditor/` |
-| Person 4, Irine | Source-tier rules, knowledge-layer content, Advice Boundary Agent, UI | `finsight/agents/tier_policy/`, `finsight/agents/advice_boundary/`, `finsight/knowledge/knowledge_layer.yaml`, UI |
-| Person 5, Hung | Orchestrator, shared contracts, repo, LLM client, decision log, baselines, evaluation | everything else |
+| Person | Owns | Folder(s) | Status |
+|---|---|---|---|
+| Person 1, Venes | Financial Analysis Agent + deterministic XBRL tools | `finsight/agents/financial/`, `finsight/data/xbrl_facts.json` | ⏳ Placeholder stub in place; replace with the real agent |
+| Person 2, Stella | Narrative Evidence Agent, vector DB, Basic RAG retriever | `finsight/agents/narrative/` | ⏳ Placeholder stubs in place; replace with the real agent + retriever |
+| Person 3, Amelia | Claim Decomposition + Verification/Auditor Agent; Accuracy / Macro-F1 | `finsight/agents/decomposition/`, `finsight/agents/auditor/` | ⏳ Placeholder stubs in place; replace with the real agents |
+| Person 4, Irine | Source-tier rules, knowledge-layer content, Advice Boundary Agent, UI | `finsight/agents/tier_policy/`, `finsight/agents/advice_boundary/`, `finsight/knowledge/knowledge_layer.yaml`, UI | ⏳ Placeholder stubs in place; replace them, confirm the knowledge layer, build the UI |
+| Person 5, Hung | Orchestrator, shared contracts, repo, LLM client, decision log, baselines, evaluation | everything else | ✅ **Done:** orchestrator (matches the architecture diagram), contracts v0.3, LLM client with mock / paid modes and spend tracking, decision log, Direct LLM + Basic RAG baselines, evaluation harness, CI pipeline, docs<br>⏳ **Remaining:** turn on branch protection; build and freeze the real heldout set (with Amelia); review and merge teammates' PRs; final `gpt-5.4` evaluation run and results write-up |
 
 **Shared files you must not change without telling Hung:** `finsight/contracts/schemas.py`,
 `finsight/contracts/interfaces.py`, and `finsight/agents/orchestrator/`. Everyone imports the
