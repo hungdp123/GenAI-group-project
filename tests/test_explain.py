@@ -62,6 +62,22 @@ def test_refusal_and_clarification_summaries_are_readable():
     assert asked.summary.startswith("FinSight needs a bit more information") and "Which company" in asked.summary
 
 
+def test_overall_sentence_reads_naturally_for_every_verdict():
+    cutoff_before_filing = execute("Company X's revenue growth is driven by AI demand.", date(2025, 7, 24))
+    assert cutoff_before_filing.assessment.summary.startswith(
+        "Overall, this claim can't be confirmed from the available evidence.")
+    single = execute("Company X is getting more profitable: its margins keep expanding.", DEMO_CUTOFF).assessment
+    assert single.summary == ("Overall, the evidence contradicts this claim. "
+                              "FinSight checked it against company filings and reports.")
+    assert "claim is can't" not in cutoff_before_filing.assessment.summary
+    assert "checked each" not in single.summary  # one point: "checked it"
+
+
+def test_company_given_separately_is_not_shown_as_unknown():
+    fa = execute("Its revenue growth is just getting started.", DEMO_CUTOFF, company_ticker="CMPX").assessment
+    assert fa.sub_claim_results and not any("UNKNOWN" in r.sub_claim.text for r in fa.sub_claim_results)
+
+
 def test_labels():
     assert verdict_label(Verdict.PARTIALLY_SUPPORTED) == "Partly supported"
     assert verdict_label(None) == "Not assessed"

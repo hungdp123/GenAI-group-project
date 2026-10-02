@@ -115,8 +115,19 @@ def summary(results: list[SubClaimResult], overall: Verdict | None) -> str:
                                                  Verdict.CONTRADICTED, Verdict.INSUFFICIENT_EVIDENCE)]
     breakdown = ", ".join(f"{counts[k]} {k}" for k in order if k in counts)
     n = len(results)
-    return (f"Overall, this claim is {verdict_label(overall).lower()}. FinSight split it into {n} "
-            f"point{'s' if n != 1 else ''} and checked each against company filings and reports: {breakdown}.")
+    headline = _OVERALL_SENTENCES.get(overall, "Overall, FinSight couldn't reach a verdict on this claim.")
+    if n == 1:
+        return f"{headline} FinSight checked it against company filings and reports."
+    return (f"{headline} FinSight split it into {n} points and checked each against company filings "
+            f"and reports: {breakdown}.")
+
+
+_OVERALL_SENTENCES = {
+    Verdict.SUPPORTED: "Overall, this claim is supported.",
+    Verdict.PARTIALLY_SUPPORTED: "Overall, this claim is partly supported.",
+    Verdict.CONTRADICTED: "Overall, the evidence contradicts this claim.",
+    Verdict.INSUFFICIENT_EVIDENCE: "Overall, this claim can't be confirmed from the available evidence.",
+}
 
 
 def stop_summary(status: AssessmentStatus, reason: str | None, question: str | None) -> str:

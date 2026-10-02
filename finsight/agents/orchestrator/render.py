@@ -59,6 +59,8 @@ def render_assessment(fa: FinalAssessment, *, show_evidence: bool = True, techni
 
     if fa.sub_claim_results:
         lines += ["", "DETAILS"]
+        if not show_evidence:
+            lines.append("(evidence hidden; run without --no-evidence to see the sources)")
         for i, r in enumerate(fa.sub_claim_results, start=1):
             lines += [""] + _wrap(f"{i}. {r.sub_claim.text}  ->  {verdict_label(r.verdict)}", indent="   ")
             if r.explanation:

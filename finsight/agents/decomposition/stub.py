@@ -33,7 +33,9 @@ class StubDecomposer:
 
     def decompose(self, claim: str, cutoff_date: date) -> list[SubClaim]:
         ticker = detect_ticker(claim)
-        name = company_name(ticker)
+        # The claim may not name the company (the user answered "which company?" separately).
+        # The orchestrator attaches the ticker afterwards; the text just says "The company".
+        name = company_name(ticker) if ticker else "The company"
         sub_claims: list[SubClaim] = []
         for sub_claim_type, pattern, template, quantitative in _RULES:
             if re.search(pattern, claim, flags=re.IGNORECASE):
