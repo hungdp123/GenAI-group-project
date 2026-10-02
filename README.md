@@ -34,7 +34,7 @@ pipeline runs today.
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `FINSIGHT_LLM_PROVIDER` | `mock` | `mock`, `anthropic` or `openai` |
+| `FINSIGHT_LLM_PROVIDER` | `mock` | `mock`, `anthropic` or `openai`; overrides `llm_provider` in config.yaml |
 | `FINSIGHT_LLM_MODEL` | per provider | model name (prices in `config.PRICE_TABLE`) |
 | `FINSIGHT_MAX_RETRIES` | `1` | evidence re-gathers per claim after a failed audit |
 | `FINSIGHT_CORPUS_AS_OF` | `2025-07-31` | default cut-off when none is given |
@@ -53,7 +53,16 @@ pip install -e ".[dev,openai]"
 cp config.example.yaml config.yaml        # then paste your key; config.yaml is gitignored
 ```
 
-Run any command with the provider switched on:
+Switch between free mock mode and paid API calls with one command. The setting is saved in `config.yaml`:
+
+```bash
+finsight mode                         # show the current mode
+finsight mode paid                    # OpenAI, gpt-5.4-nano (cheap testing)
+finsight mode paid --model gpt-5.4    # OpenAI, course model (final reported runs)
+finsight mode mock                    # back to free
+```
+
+For a one-off run you can also override the saved mode with environment variables:
 
 ```bash
 FINSIGHT_LLM_PROVIDER=openai finsight eval --system direct --split dev                    # testing: gpt-5.4-nano

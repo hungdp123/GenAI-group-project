@@ -15,7 +15,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-import yaml
+from finsight.config import local_config_path, read_local_config
 
 _KEY_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
 
@@ -33,13 +33,10 @@ def api_key(provider: str) -> str:
     env_name = _KEY_ENV[provider]
     if os.getenv(env_name):
         return os.environ[env_name]
-    path = Path(os.getenv("FINSIGHT_SECRETS_FILE", "config.yaml"))
-    if path.exists():
-        key = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get(f"{provider}_api_key")
-        if key:
-            return key
-    raise MissingAPIKey(f"No {provider} key: set {env_name} or add {provider}_api_key to {path} "
-                        "(copy config.example.yaml)")
+    if key := read_local_config().get(f"{provider}_api_key"):
+        return key
+    raise MissingAPIKey(f"No {provider} key: set {env_name} or add {provider}_api_key to "
+                        f"{local_config_path()} (copy config.example.yaml)")
 
 
 class SpendGuard:

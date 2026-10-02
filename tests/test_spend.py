@@ -82,6 +82,28 @@ def test_unpriced_model_refused(fake_openai):
     assert fake_openai.calls == []
 
 
+def test_mode_switch_in_config_file(monkeypatch, tmp_path, capsys):
+    from finsight.config import get_settings, read_local_config
+
+    monkeypatch.delenv("FINSIGHT_LLM_PROVIDER")  # conftest forces mock via env; test the file instead
+    secrets = tmp_path / "config.yaml"
+    secrets.write_text('openai_api_key: "sk-test"\n')
+    monkeypatch.setenv("FINSIGHT_SECRETS_FILE", str(secrets))
+    assert get_settings().llm_provider == "mock"  # no mode set -> free
+
+    assert cli_main(["mode", "paid"]) == 0
+    assert (get_settings().llm_provider, get_settings().llm_model) == ("openai", "gpt-5.4-nano")
+    assert cli_main(["mode", "paid", "--model", "gpt-5.4"]) == 0
+    assert get_settings().llm_model == "gpt-5.4"
+    assert cli_main(["mode", "mock"]) == 0
+    assert get_settings().llm_provider == "mock" and get_settings().llm_model == "mock-model"
+    assert read_local_config()["openai_api_key"] == "sk-test", "switching mode must keep the key"
+    assert "MOCK (free" in capsys.readouterr().out
+
+    monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "openai")  # env var still wins for one-off runs
+    assert get_settings().llm_provider == "openai"
+
+
 def test_mock_mode_does_not_touch_ledger():
     client.complete("x")
     assert ledger_summary() == {}

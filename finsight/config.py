@@ -13,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from finsight.contracts.interfaces import (
     AdviceBoundary,
     Auditor,
@@ -95,11 +97,41 @@ class Settings:
     rag_top_k: int = 5
 
 
+def local_config_path() -> Path:
+    """The gitignored local config file (API keys + LLM mode). See config.example.yaml."""
+    return Path(os.getenv("FINSIGHT_SECRETS_FILE", "config.yaml"))
+
+
+def read_local_config() -> dict[str, Any]:
+    path = local_config_path()
+    if not path.exists():
+        return {}
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def set_llm_mode(paid: bool, model: str | None = None, provider: str = "openai") -> Path:
+    """Switch the LLM mode in config.yaml (keeps API keys). paid=False -> mock (free)."""
+    if model is not None and model not in PRICE_TABLE:
+        raise ValueError(f"No price for {model!r} in PRICE_TABLE")
+    local = read_local_config()
+    local["llm_provider"] = provider if paid else "mock"
+    if model is not None:
+        local["llm_model"] = model
+    path = local_config_path()
+    path.write_text("# Local settings + secrets. Gitignored. Never commit.\n"
+                    "# llm_provider: mock = free canned responses; openai = paid API calls.\n"
+                    + yaml.safe_dump(local, sort_keys=False), encoding="utf-8")
+    return path
+
+
 def get_settings() -> Settings:
-    provider = os.getenv("FINSIGHT_LLM_PROVIDER", "mock").lower()
+    """Settings for this run. LLM mode precedence: env var > config.yaml > mock (free)."""
+    local = read_local_config()
+    provider = (os.getenv("FINSIGHT_LLM_PROVIDER") or local.get("llm_provider") or "mock").lower()
+    model = os.getenv("FINSIGHT_LLM_MODEL") or (local.get("llm_model") if provider != "mock" else None)
     return Settings(
         llm_provider=provider,
-        llm_model=os.getenv("FINSIGHT_LLM_MODEL", DEFAULT_MODELS.get(provider, "mock-model")),
+        llm_model=model or DEFAULT_MODELS.get(provider, "mock-model"),
         max_retries=int(os.getenv("FINSIGHT_MAX_RETRIES", "1")),
         corpus_as_of_date=date.fromisoformat(os.getenv("FINSIGHT_CORPUS_AS_OF", "2025-07-31")),
         logs_dir=Path(os.getenv("FINSIGHT_LOGS_DIR", "logs")),

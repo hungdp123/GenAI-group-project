@@ -5,6 +5,8 @@
     finsight eval --system all --split dev              # run the evaluation
     finsight graph                                      # regenerate docs/orchestrator_graph.md
     finsight usage                                      # real-LLM spend so far vs the course credit
+    finsight mode                                       # show LLM mode (mock = free, paid = OpenAI)
+    finsight mode paid [--model gpt-5.4] / finsight mode mock
 """
 
 from __future__ import annotations
@@ -65,6 +67,22 @@ def _cmd_usage(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_mode(args: argparse.Namespace) -> int:
+    import os
+
+    from finsight.config import set_llm_mode
+
+    if args.mode:
+        path = set_llm_mode(paid=args.mode == "paid", model=args.model)
+        print(f"Updated {path}")
+    s = get_settings()
+    label = "MOCK (free, no API calls)" if s.llm_provider == "mock" else f"PAID ({s.llm_provider}, {s.llm_model})"
+    print(f"LLM mode: {label}")
+    if os.getenv("FINSIGHT_LLM_PROVIDER"):
+        print("Note: FINSIGHT_LLM_PROVIDER is set in this shell and overrides config.yaml.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="finsight", description="Stress-test a company-level investment thesis.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -91,6 +109,11 @@ def main(argv: list[str] | None = None) -> int:
 
     usage = sub.add_parser("usage", help="real-LLM spend recorded in the usage ledger")
     usage.set_defaults(func=_cmd_usage)
+
+    mode = sub.add_parser("mode", help="show or switch the LLM mode (mock = free, paid = OpenAI)")
+    mode.add_argument("mode", nargs="?", choices=["mock", "paid"])
+    mode.add_argument("--model", help="paid model, e.g. gpt-5.4-nano (testing) or gpt-5.4 (final)")
+    mode.set_defaults(func=_cmd_mode)
 
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["eval"]:
