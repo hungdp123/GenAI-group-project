@@ -1,6 +1,6 @@
 # FinSight progress report: Person 5 (Hung)
 
-**As of 2 Oct 2026** · Branch `Hung` (merge into `main` via PR) · Schema **v0.3**
+**As of 2 Oct 2026** · Merged into `main` (`94b1107`) · Schema **v0.3** · CI ✅ green
 
 ## Summary
 
@@ -13,6 +13,7 @@ without breaking anyone else.
 | | |
 |---|---|
 | Automated tests | **91 passing** (mock mode, no API cost) |
+| CI pipeline | **GitHub Actions on every push and PR**: lint, secrets check, tests on Ubuntu 3.11 / 3.12 + Windows 3.12; first runs on `Hung` and `main` both ✅ (about 1 min) |
 | Dev evaluation set | **14 items**, all 6 categories |
 | Heldout set | 3 placeholder items, **not frozen yet** |
 | OpenAI spend so far | **$0.17 of $150** (one-off validation runs; now in free mock mode by default) |
@@ -96,6 +97,24 @@ started" PARTIALLY_SUPPORTED, "biggest winner" INSUFFICIENT_EVIDENCE. Overall: P
 - **[decisions.md](decisions.md):** every design decision, its reason, and which need team sign-off.
 - **[eval_dataset_guide.md](eval_dataset_guide.md):** how to write and label evaluation items.
 
+### 9. CI pipeline (`.github/`)
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push to any branch and on
+every PR into `main`. Results show on the PR and in the repo's **Actions** tab.
+
+| Check | What it does |
+|---|---|
+| **Lint (ruff)** | Unused imports, undefined names, lines over 120 characters |
+| **No secrets committed** | Fails if `config.yaml` / `.env` is committed or an API key appears in any committed file |
+| **Tests**: Ubuntu Python 3.11 + 3.12, Windows Python 3.12 | All tests, dataset validation, a demo claim run, and a check that the orchestrator graph doc is up to date |
+
+- **No spending:** CI always runs in **mock mode**. It has no API key and cannot spend OpenAI credit.
+- **Code owners** ([`.github/CODEOWNERS`](../.github/CODEOWNERS)): PRs that touch the shared contracts,
+  the orchestrator, `config.py` or `.github/` automatically request Hung's review.
+- **PR template:** new PRs open with the CONTRIBUTING checklist already filled in.
+- **Starts green:** a linter config was added and 13 existing lint issues were fixed.
+- **First results:** the first two runs passed: CI #1 on `Hung` (1m 21s) and CI #2 on `main` after the merge (1m 2s).
+  This confirms the code works on Python 3.11 and on Windows, not only on the 3.12 used for development.
+
 ## What each teammate needs to do next
 
 | Person | Next step | Where |
@@ -104,7 +123,7 @@ started" PARTIALLY_SUPPORTED, "biggest winner" INSUFFICIENT_EVIDENCE. Overall: P
 | **Stella**: Narrative + retriever | Replace the narrative stub and the Basic RAG retriever; build the vector index into the gitignored `data/` folder | `finsight/agents/narrative/` |
 | **Amelia**: Decomposition + Auditor | Replace both stubs; compute Accuracy / Macro-F1 from `sub_claims.csv`; co-own the gold labels | `finsight/agents/decomposition/`, `auditor/` |
 | **Irine**: Tier policy, Advice Boundary, knowledge layer, UI | Replace both stubs; confirm the knowledge-layer content (incl. `retry_collectors`); build the UI on `run_finsight()` and handle all 4 statuses | `finsight/agents/tier_policy/`, `advice_boundary/`, `knowledge/`, README "Calling FinSight from the UI" |
-| **Everyone** | Pull `main`, run `pytest`, read the README terminology section; replace your stub on your own branch and open a PR | README "Team workflow" |
+| **Everyone** | Pull `main`, run `pytest`, read the README terminology section; replace your stub on your own branch and open a PR, which can only be merged once CI is green | README "Team workflow" and "Continuous integration" |
 
 ## Decisions that need team sign-off
 
@@ -128,8 +147,10 @@ From [decisions.md](decisions.md):
 
 ## Next milestones
 
-1. **Merge:** merge PR `Hung` → `main`; everyone pulls (schema v0.3 is a breaking rename).
-2. **First real agent:** suggested Venes's financial agent, because it's deterministic with no LLM cost.
-3. **Real corpus:** Stella and Venes agree the company list and cut-off; update `CORPUS_COMPANIES`.
-4. **Heldout labels:** build the real heldout set with two labelers, then run `finsight eval --freeze`.
-5. **Final run:** `finsight eval --system all --split heldout --final` with `gpt-5.4`, then write up the results.
+1. ~~**Merge:** merge `Hung` → `main`~~ ✅ done; CI green on `main`. Everyone pulls (schema v0.3 is a breaking rename).
+2. **Branch protection** (Hung, GitHub settings): require a PR, Code Owner review and the 5 CI checks on `main`,
+   so nothing can be merged with failing checks.
+3. **First real agent:** suggested Venes's financial agent, because it's deterministic with no LLM cost.
+4. **Real corpus:** Stella and Venes agree the company list and cut-off; update `CORPUS_COMPANIES`.
+5. **Heldout labels:** build the real heldout set with two labelers, then run `finsight eval --freeze`.
+6. **Final run:** `finsight eval --system all --split heldout --final` with `gpt-5.4`, then write up the results.
