@@ -66,8 +66,10 @@ PRICE_TABLE: dict[str, tuple[float, float]] = {
     "claude-haiku-4-5-20251001": (1.0, 5.0),
 }
 
-# DECISION: gpt-5.4 is the course template's model; use gpt-5.4-mini for cheap dev iteration.
-DEFAULT_MODELS = {"mock": "mock-model", "anthropic": "claude-sonnet-5-5", "openai": "gpt-5.4"}
+# DECISION: testing defaults to the cheapest model of the course model's family (gpt-5.4-nano, ~12x cheaper).
+# Final reported runs must opt in to the course model explicitly: FINSIGHT_LLM_MODEL=gpt-5.4.
+DEFAULT_MODELS = {"mock": "mock-model", "anthropic": "claude-sonnet-5-5", "openai": "gpt-5.4-nano"}
+FINAL_REPORT_MODEL = "gpt-5.4"
 
 # Total course credit, for `finsight usage`.
 COURSE_BUDGET_USD = 150.0

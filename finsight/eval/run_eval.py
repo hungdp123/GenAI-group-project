@@ -26,7 +26,7 @@ from finsight.agents.orchestrator.graph import execute
 from finsight.baselines.basic_rag import run_basic_rag
 from finsight.baselines.common import BaselineResult
 from finsight.baselines.direct_llm import run_direct_llm
-from finsight.config import get_settings
+from finsight.config import FINAL_REPORT_MODEL, get_settings
 from finsight.contracts.schemas import AssessmentStatus, FinalAssessment, Verdict
 from finsight.eval.metrics import (
     GoldClaim,
@@ -206,6 +206,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if problems else 0
     if args.split == "heldout" and not args.final:
         parser.error("the heldout split is frozen: pass --final only for the final reported run")
+    settings = get_settings()
+    if args.final and settings.llm_provider == "openai" and settings.llm_model != FINAL_REPORT_MODEL:
+        parser.error(f"final runs must use {FINAL_REPORT_MODEL} (got {settings.llm_model}); "
+                     f"set FINSIGHT_LLM_MODEL={FINAL_REPORT_MODEL}")
     if args.split == "heldout" and args.dataset is None:
         if not HELDOUT_LOCK.exists():
             parser.error("freeze the heldout split first: finsight eval --freeze")

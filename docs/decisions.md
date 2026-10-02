@@ -37,7 +37,7 @@ option and marked `# DECISION:` in the code. Rows marked **Team** need group sig
 
 | # | Decision | Why | Where |
 |---|---|---|---|
-| L1 | Default OpenAI model is `gpt-5.4` (the course template's model). Use `gpt-5.4-mini` for cheap iteration via `FINSIGHT_LLM_MODEL` | Matches the course template; mini is about 3x cheaper | `config.py` |
+| L1 | Testing defaults to `gpt-5.4-nano`; reported (`--final`) runs must use `gpt-5.4`, the course template's model | Same model family and API behaviour at about 1/12 of the cost while iterating; reported numbers stay on the course model | `config.py`, `eval/run_eval.py` |
 | L2 | Prices taken from OpenAI's pricing page on 2026-10-02. A real call to a model missing from `PRICE_TABLE` is refused | Cost numbers in the report must be traceable; an unpriced model would silently report $0 | `config.py`, `llm/client.py` |
 | L3 | API keys come from an env var or the gitignored `config.yaml`, never from code | Course template convention; keys never committed | `llm/spend.py` |
 | L4 | Per-process spend limit (`FINSIGHT_SPEND_LIMIT_USD`, default $2) and an append-only usage ledger (`finsight usage`) | Protects the shared $150 credit from runaway loops | `llm/spend.py` |

@@ -72,6 +72,12 @@ def test_full_dev_eval(tmp_path):
     assert "| Task success rate | " in summary
 
 
+def test_final_run_requires_course_model(monkeypatch):
+    monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "openai")  # default model is the cheap testing one
+    with pytest.raises(SystemExit):
+        main(["--split", "heldout", "--final", "--system", "direct"])
+
+
 def test_cli_forwards_eval_flags():
     from finsight.cli import main as cli_main
 

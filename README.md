@@ -56,13 +56,15 @@ cp config.example.yaml config.yaml        # then paste your key; config.yaml is 
 Run any command with the provider switched on:
 
 ```bash
-FINSIGHT_LLM_PROVIDER=openai FINSIGHT_LLM_MODEL=gpt-5.4-mini finsight eval --system direct --split dev
+FINSIGHT_LLM_PROVIDER=openai finsight eval --system direct --split dev                    # testing: gpt-5.4-nano
+FINSIGHT_LLM_PROVIDER=openai FINSIGHT_LLM_MODEL=gpt-5.4 finsight eval --split heldout --final   # reported numbers
 finsight usage                            # spend so far vs the $150 course credit
 ```
 
 On Windows PowerShell, set the variables first with `$env:FINSIGHT_LLM_PROVIDER="openai"`.
 
-- **Default model:** `gpt-5.4` (the course template). Use `gpt-5.4-mini` while iterating.
+- **Testing model:** `gpt-5.4-nano` is the default, about 12x cheaper than the course model. Mock mode (the default provider) is free.
+- **Reported model:** final numbers use `gpt-5.4` (the course template). `--final` refuses any other OpenAI model.
 - **Prices:** in `config.PRICE_TABLE`, checked 2026-10-02. A model missing from the table is refused rather than reported as $0.
 - **Spend limit:** each process stops at `FINSIGHT_SPEND_LIMIT_USD`.
 - **Ledger:** `finsight usage` only counts this machine. Check the OpenAI dashboard for the team-wide total.
