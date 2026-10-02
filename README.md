@@ -306,6 +306,7 @@ Safety rules enforced by the orchestrator:
 | Problem | Fix |
 |---|---|
 | `finsight: command not found` | Activate the virtual environment, or use `python -m finsight` |
+| `No module named 'langgraph'` (or `pydantic`, `ruff`, …) | You're using the system Python, not the project's. Run `.venv\Scripts\Activate.ps1` (macOS: `source .venv/bin/activate`), or call `.venv\Scripts\python ...` directly |
 | PowerShell won't run `Activate.ps1` | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then retry |
 | `MissingAPIKey` | You are in paid mode without `config.yaml`. Run `finsight mode mock`, or add the key |
 | `SpendLimitExceeded` | Intended safety stop. Raise `FINSIGHT_SPEND_LIMIT_USD` only if the spend is deliberate |

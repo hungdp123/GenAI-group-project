@@ -171,6 +171,38 @@ def check_eval() -> None:
          f"{len(records) - len(failed)}/{len(records)} items" + (f"; failed: {', '.join(failed)}" if failed else ""))
 
 
+def preflight() -> bool:
+    """Fail fast with a clear message when run outside the project's virtual environment."""
+    missing = []
+    for module in ("pydantic", "langgraph", "yaml", "pytest", "ruff"):
+        try:
+            __import__(module)
+        except ImportError:
+            missing.append(module)
+    if not missing:
+        return True
+    venv_python = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    print(f"\nThis Python ({sys.executable}) is missing: {', '.join(missing)}.")
+    print("You are probably not using the project's virtual environment. Either:")
+    if os.name == "nt":
+        print("  .venv\\Scripts\\Activate.ps1          then: python scripts/check.py")
+        print("  .venv\\Scripts\\python scripts/check.py   (no activation needed)")
+    else:
+        print("  source .venv/bin/activate          then: python scripts/check.py")
+        print("  .venv/bin/python scripts/check.py      (no activation needed)")
+    if not venv_python.exists():
+        print('No .venv found: create it first (README "Setup"): python -m venv .venv, then pip install -e ".[dev]"')
+    return False
+
+
+def guarded(check) -> None:
+    """Run one section; an unexpected crash is reported as a failure instead of stopping the script."""
+    try:
+        check()
+    except Exception as exc:  # noqa: BLE001
+        step(check.__name__, False, f"crashed: {type(exc).__name__}: {exc}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--quick", action="store_true", help="skip the full pytest suite and the evaluation run")
@@ -178,17 +210,15 @@ def main() -> int:
     os.chdir(ROOT)
     sys.path.insert(0, str(ROOT))
     print(f"FinSight checks (mock mode, temp files in {TMP})")
+    if not preflight():
+        return 2
     t0 = time.perf_counter()
 
-    check_lint()
-    check_secrets()
-    if not args.quick:
-        check_tests()
-    check_datasets()
-    check_graph_doc()
-    check_scenarios()
-    if not args.quick:
-        check_eval()
+    checks = [check_lint, check_secrets, check_tests, check_datasets, check_graph_doc, check_scenarios, check_eval]
+    for check in checks:
+        if args.quick and check in (check_tests, check_eval):
+            continue
+        guarded(check)
 
     failed = [name for name, ok, _ in RESULTS if not ok]
     print(f"\n== Summary: {len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed "
