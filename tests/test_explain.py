@@ -1,0 +1,71 @@
+"""Plain-language output: summary first, readable sources, rule-built explanations (no LLM, no new numbers)."""
+
+import re
+from datetime import date
+
+from finsight import execute
+from finsight.agents.advice_boundary.stub import StubAdviceBoundary
+from finsight.agents.orchestrator.explain import source_label, verdict_label
+from finsight.agents.orchestrator.render import render_assessment
+from finsight.contracts.schemas import AdviceStage, EvidenceItem, SourceTier, Stance, Verdict
+
+from demo import DEMO_CLAIM, DEMO_CUTOFF
+
+
+def _demo():
+    return execute(DEMO_CLAIM, DEMO_CUTOFF).assessment
+
+
+def test_summary_and_claim_are_returned_for_the_ui():
+    fa = _demo()
+    assert fa.claim == DEMO_CLAIM
+    assert fa.summary == ("Overall, this claim is partly supported. FinSight split it into 4 points and checked "
+                          "each against company filings and reports: 1 supported, 2 partly supported, "
+                          "1 can't be confirmed.")
+    assert all(r.explanation for r in fa.sub_claim_results)
+
+
+def test_explanations_are_plain_and_add_no_numbers():
+    by_verdict = {r.verdict: r.explanation for r in _demo().sub_claim_results}
+    assert by_verdict[Verdict.SUPPORTED] == "Backed up by official filings (see the evidence below)."
+    assert "competitors" in by_verdict[Verdict.INSUFFICIENT_EVIDENCE]
+    for r in _demo().sub_claim_results:
+        assert not re.search(r"\d", r.explanation), "explanations must not introduce numbers"
+        assert "_" not in r.explanation, "no internal identifiers like PARTIALLY_SUPPORTED"
+
+
+def test_explanations_never_trip_the_output_advice_gate():
+    gate = StubAdviceBoundary()
+    for r in _demo().sub_claim_results:
+        assert not gate.check(r.explanation, AdviceStage.OUTPUT).flagged
+
+
+def test_reader_view_puts_summary_before_details():
+    text = render_assessment(_demo())
+    assert text.index("SUMMARY") < text.index("DETAILS") < text.index("Evidence for:")
+    assert "1. [Supported]" in text and "3. [Can't be confirmed]" in text
+    flat = " ".join(text.split())  # source lines wrap in the terminal
+    assert "Quarterly report (10-Q) filed with the SEC, 25 Jul 2025 (Tier 1: official filing, most reliable)" in flat
+    assert "[T1 10-Q" not in text, "no cryptic source codes in the reader view"
+
+
+def test_technical_view_is_still_available():
+    text = render_assessment(_demo(), technical=True)
+    assert "Overall verdict: PARTIALLY_SUPPORTED" in text and "[T1 10-Q 2025-07-25]" in text
+
+
+def test_refusal_and_clarification_summaries_are_readable():
+    refused = execute("Should I put my savings into Company X?", DEMO_CUTOFF).assessment
+    assert refused.summary.startswith("FinSight didn't analyse this request.")
+    assert "\\b" not in refused.summary and "pattern" not in refused.summary
+    asked = execute("Its revenue growth is just getting started.", DEMO_CUTOFF).assessment
+    assert asked.summary.startswith("FinSight needs a bit more information") and "Which company" in asked.summary
+
+
+def test_labels():
+    assert verdict_label(Verdict.PARTIALLY_SUPPORTED) == "Partly supported"
+    assert verdict_label(None) == "Not assessed"
+    news = EvidenceItem(evidence_id="n", sub_claim_id="sc1", stance=Stance.SUPPORTING, content="x",
+                        source_tier=SourceTier.TIER_3, doc_type="news", company="Company X",
+                        publication_date=date(2025, 7, 28), produced_by="t")
+    assert source_label(news) == "News article, 28 Jul 2025 (Tier 3: news, can't confirm a claim on its own)"

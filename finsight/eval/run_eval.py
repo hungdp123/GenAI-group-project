@@ -214,7 +214,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", type=Path, default=None, help="override the JSONL file for the split")
     parser.add_argument("--validate", action="store_true", help="validate both dataset files and exit")
     parser.add_argument("--freeze", action="store_true", help="write claims_heldout.lock (do this once)")
+    parser.add_argument("--agents", metavar="NAMES",
+                        help="evaluate agents one by one instead of the full system: 'all' or a comma list of "
+                             "decomposer, financial, narrative, retriever, auditor, advice_boundary, tier_policy")
     args = parser.parse_args(argv)
+    if args.agents:
+        from finsight.eval.agent_eval.runner import parse_names, run_agent_evals
+
+        try:
+            names = parse_names(args.agents)
+        except ValueError as exc:
+            parser.error(str(exc))
+        out_dir = run_agent_evals(names, args.out)
+        print((out_dir / "summary.md").read_text(encoding="utf-8"))
+        print(f"Results written to {out_dir}")
+        return 0
     if args.validate or args.freeze:
         problems = validate_datasets()
         print("\n".join(problems) or "datasets OK")

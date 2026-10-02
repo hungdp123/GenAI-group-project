@@ -24,6 +24,7 @@ option and marked `# DECISION:` in the code. Rows marked **Team** need group sig
 | D15 | Claim text is dropped if it comes back as evidence (`doc_type` claim, or content contained verbatim in the claim) | Spec: the pasted claim is never evidence | `routing.py: is_claim_echo` | Done |
 | D17 | End-to-end tests are pinned to the stubs (`STUB_IMPLEMENTATIONS`); only the contract tests run the registered agents | Real agents can merge one at a time without breaking demo expectations | `config.py`, `tests/conftest.py` | Done |
 | D18 | Building the agent registry happens inside `execute`'s error handling | A mis-registered agent returns FAILED with the reason instead of crashing the UI | `orchestrator/graph.py` | Done |
+| D23 | The user-facing output leads with a plain-language **summary**, then each point's verdict and a short **explanation**, then evidence with readable source names. The summary and explanations are **built by rule from the verdicts and evidence, not by an LLM** (schema v0.4: `FinalAssessment.claim` / `summary`, `SubClaimResult.explanation`) | Readers shouldn't need to decode `[T1 10-Q 2025-07-25]`. Rule-built text can't invent facts or numbers and never contains advice language. The technical view remains (`--technical`) | `orchestrator/explain.py`, `render.py` | Done |
 | D16 | BUSINESS_RISK: no cap, but any Tier 1–2 challenging evidence lowers SUPPORTED to PARTIALLY_SUPPORTED | Reading of "counter-evidence only, can block SUPPORTED" | `knowledge_layer.yaml` | **Team** (Irine) |
 
 ### Aligning the code with the architecture diagram (2026-10-02)
@@ -66,6 +67,7 @@ option and marked `# DECISION:` in the code. Rows marked **Team** need group sig
 | E4 | Heldout split is frozen by a SHA-256 lock file; `--final` refuses to run if the file is unfrozen or changed | The heldout split cannot drift after we have seen results | `eval/run_eval.py` | Done |
 | E5 | The dataset validator rejects duplicate IDs, dev→heldout claim leaks, refusal items with gold sub-claims, and items that should have gold sub-claims but don't | Catches labeling mistakes before they become results | `eval/run_eval.py` | Done |
 | E6 | Eval items can set `expect_clarification`; task success requires both refusal and clarification behaviour to match. Baselines get the same "CLARIFY: <question>" instruction | Clarification is part of the architecture, so it is scored, and fairly | `eval/`, `baselines/common.py` | Done |
+| E7 | **Per-agent evaluation** (`finsight eval --agents`) alongside the end-to-end one. Every agent is scored on its own labelled cases, always the registered implementation. The auditor is scored by **error injection** (correct evidence + 13 automatically broken variants: catch rate and false-alarm rate). Tier-policy cases are generated from the knowledge layer | End-to-end scores can't say *which* agent is wrong, and the orchestrator's safety nets hide agent mistakes (e.g. the tier-policy stub's early cap). Per-agent numbers give each owner a target, and before/after numbers for their PR and the report | `eval/agent_eval/` | Done |
 
 ## Known limitations (state these in the report)
 

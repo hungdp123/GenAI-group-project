@@ -87,6 +87,9 @@ Expected with the stubs: 4 sub-claims.
 | Command | What it does |
 |---|---|
 | `finsight run "<claim>" [--cutoff YYYY-MM-DD] [--json] [--no-evidence]` | Evaluate a claim and print the assessment |
+| `finsight run "<claim>" --stages` | Also print what each pipeline stage did, as it runs (gates, sub-claims, plan, evidence, audit, retries, verdicts) |
+| `finsight run "<claim>" --technical` | Developer view: sub-claim types, tiers, retries, audit rationale (the reader view is the default) |
+| `finsight run "<claim>" --company CMPX` | Answer a "which company?" clarification |
 | `finsight trace <request_id> [--json]` | Print the decision log of a past run (`logs/<request_id>.json`) |
 | `finsight eval --system {direct,rag,finsight,all} --split dev` | Run the evaluation (see below) |
 | `finsight eval --validate` | Check both dataset files for mistakes |
@@ -94,6 +97,7 @@ Expected with the stubs: 4 sub-claims.
 | `finsight mode [mock\|paid] [--model M]` | Show or switch the LLM mode |
 | `finsight usage` | Paid LLM spend recorded on this machine vs the $150 credit |
 | `finsight graph` | Regenerate `docs/orchestrator_graph.md` |
+| `python scripts/check.py [--quick]` | Run every check locally (same as CI + scenario smoke test), mock mode |
 
 If `finsight` is not found, activate the virtual environment, or use `python -m finsight ...`.
 
@@ -155,10 +159,16 @@ PowerShell: `$env:NAME="value"`. bash: `export NAME=value`, or put `NAME=value` 
 3. **Before opening a PR,** bring in the latest `main` and run the checks:
    ```bash
    git pull origin main
-   pytest
-   finsight eval --validate
+   python scripts/check.py               # everything CI checks + a scenario smoke test (~15 s, free)
    git status                            # config.yaml, logs/, results/, data/ must NOT appear
    ```
+   `scripts/check.py` runs, in mock mode:
+   - lint, the secrets check, the full test suite and dataset validation;
+   - a check that the graph doc is current;
+   - one smoke run per path in the architecture (demo, refusals, clarification, injection, cut-off, retry);
+   - the dev evaluation.
+
+   It ends with `All good` or a list of what failed. Use `--quick` to skip the test suite and the evaluation.
 4. **Open a PR into `main`** and ask one teammate to review. Use the checklist in
    [CONTRIBUTING.md](CONTRIBUTING.md#pull-request-checklist). Never push directly to `main`.
 
@@ -206,10 +216,14 @@ assessment = run_finsight(claim_text, cutoff=None)   # FinalAssessment (Pydantic
 assessment.status            # COMPLETED | REFUSED | FAILED | NEEDS_CLARIFICATION
 assessment.refusal_reason    # show this when REFUSED / FAILED
 assessment.clarification_question   # show this when NEEDS_CLARIFICATION, then resubmit (below)
+assessment.summary            # plain-language overall summary: show this FIRST
 assessment.overall_verdict
-assessment.sub_claim_results     # each: sub_claim, verdict, highest_tier_used, supporting, challenging, rationale, capped_by
+assessment.sub_claim_results  # each: sub_claim, verdict, explanation (plain 'why'), supporting, challenging, ...
 assessment.as_of_date, assessment.cutoff_was_defaulted, assessment.boundary_disclaimer   # always display these
-render_assessment(assessment)                          # plain-text version
+render_assessment(assessment)                          # reader view: summary, then details
+# Labels for your own layout: explain.verdict_label(v) -> "Partly supported",
+# explain.source_label(e) -> "Quarterly report (10-Q) filed with the SEC, 25 Jul 2025 (Tier 1: ...)"
+# (from finsight.agents.orchestrator import explain)
 assessment.model_dump_json()                           # JSON for a web front end
 
 run = execute(claim_text, cutoff=None)                # also returns the decision log
@@ -250,6 +264,29 @@ Two safeguards for the heldout split:
 - In paid mode, final runs must use `gpt-5.4`.
 
 Dataset format and labeling rules are in [docs/eval_dataset_guide.md](docs/eval_dataset_guide.md).
+
+### Per-agent evaluation
+
+The commands above score the **whole system**. To score **each agent on its own** (whichever
+implementation is registered, stub or real):
+
+```bash
+finsight eval --agents all                 # or e.g. --agents auditor,financial
+```
+
+| Agent | Measured on | Key metrics |
+|---|---|---|
+| decomposer | Dev claims' gold sub-claims | Type precision / recall / F1, count accuracy, advice detection |
+| financial | Sub-claims with known XBRL answers | Number accuracy, metric, stance, Tier 1 label, "no data" before filing, cut-off leaks, citations |
+| narrative | Sub-claims with known relevant passages | Evidence recall / precision, stance, finds counter-evidence, cut-off leaks, citations |
+| retriever | Queries with known relevant passages | Recall@3, MRR, cut-off leaks |
+| auditor | Correct evidence + auto-generated broken copies (13 mistake types) | Catch rate (per type), false-alarm rate |
+| advice_boundary | Labelled inputs / outputs | Recall, precision, F1 at input and output |
+| tier_policy | Cases generated from `knowledge_layer.yaml` | Agreement with the rules, illegal verdict raises |
+
+Results: `results/{timestamp}/agents/summary.md` plus `<agent>.json` listing every case.
+The cases live in `finsight/eval/agent_eval/datasets/`; each owner should add real-corpus cases.
+Scores for the stubs as of 2 Oct 2026: [docs/results/2026-10-02_agent_eval_stubs.md](docs/results/2026-10-02_agent_eval_stubs.md).
 
 ## Architecture
 
@@ -299,6 +336,7 @@ Safety rules enforced by the orchestrator:
 | Problem | Fix |
 |---|---|
 | `finsight: command not found` | Activate the virtual environment, or use `python -m finsight` |
+| `No module named 'langgraph'` (or `pydantic`, `ruff`, …) | You're using the system Python, not the project's. Run `.venv\Scripts\Activate.ps1` (macOS: `source .venv/bin/activate`), or call `.venv\Scripts\python ...` directly |
 | PowerShell won't run `Activate.ps1` | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then retry |
 | `MissingAPIKey` | You are in paid mode without `config.yaml`. Run `finsight mode mock`, or add the key |
 | `SpendLimitExceeded` | Intended safety stop. Raise `FINSIGHT_SPEND_LIMIT_USD` only if the spend is deliberate |

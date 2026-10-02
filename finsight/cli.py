@@ -23,12 +23,22 @@ from finsight.logging.decision_log import format_trace, load_log
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    out = execute(args.claim, date.fromisoformat(args.cutoff) if args.cutoff else None)
+    on_stage = None
+    if args.stages:
+        from finsight.agents.orchestrator.stages import StageReporter
+
+        print("Stages (as they run):")
+        on_stage = StageReporter()
+    out = execute(args.claim, date.fromisoformat(args.cutoff) if args.cutoff else None,
+                  company_ticker=args.company, on_stage=on_stage)
+    if args.stages and not args.json:
+        print("\nResult:")
     if args.json:
         print(out.assessment.model_dump_json(indent=2))
     else:
-        print(render_assessment(out.assessment, show_evidence=not args.no_evidence))
-        print(f"\nDecision log: {get_settings().logs_dir / (out.decision_log.request_id + '.json')}")
+        print(render_assessment(out.assessment, show_evidence=not args.no_evidence, technical=args.technical))
+        rid = out.decision_log.request_id
+        print(f"Technical log: {get_settings().logs_dir / (rid + '.json')}  (view it: finsight trace {rid})")
     return 0
 
 
@@ -92,6 +102,11 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--cutoff", help="YYYY-MM-DD (default: from the claim text, else the corpus as-of date)")
     run.add_argument("--json", action="store_true", help="print the FinalAssessment JSON")
     run.add_argument("--no-evidence", action="store_true", help="hide evidence lines")
+    run.add_argument("--stages", action="store_true",
+                     help="print what each pipeline stage did, as it runs (intake, gates, decompose, ...)")
+    run.add_argument("--technical", action="store_true",
+                     help="developer view: sub-claim types, tiers, retries, audit rationale, caps")
+    run.add_argument("--company", help="ticker, e.g. CMPX (the answer to a 'which company?' clarification)")
     run.set_defaults(func=_cmd_run)
 
     trace = sub.add_parser("trace", help="print the decision log for a request")

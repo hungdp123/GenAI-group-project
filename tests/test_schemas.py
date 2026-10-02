@@ -17,7 +17,7 @@ from finsight.contracts.schemas import (
 
 
 def test_schema_version():
-    assert SCHEMA_VERSION == "0.3"
+    assert SCHEMA_VERSION == "0.4"
 
 
 def test_extra_fields_forbidden():

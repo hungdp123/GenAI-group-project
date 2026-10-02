@@ -27,8 +27,13 @@ Setup, Git workflow and commands are in the [README](README.md).
    ```
 4. **Register it.** Change **only your own line** in `DEFAULT_IMPLEMENTATIONS` in `finsight/config.py`.
    Do not touch `STUB_IMPLEMENTATIONS`.
-5. **Run the full suite:** `pytest`. Then open a PR using the [checklist](#pull-request-checklist).
-6. **Keep `stub.py`.** The end-to-end tests and offline demos still use it.
+5. **Score your agent:** `finsight eval --agents <yours>` (`financial`, `narrative`, `retriever`, `decomposer`,
+   `auditor`, `advice_boundary`, `tier_policy`). Compare with the stub's score in
+   `docs/results/2026-10-02_agent_eval_stubs.md`, read the FAIL lines, and add real-corpus cases to
+   `finsight/eval/agent_eval/datasets/` for your agent. Put the before/after numbers in your PR description.
+6. **Run all checks:** `python scripts/check.py` (lint, secrets, tests, datasets, scenario smoke test, evaluations).
+   Then open a PR using the [checklist](#pull-request-checklist).
+7. **Keep `stub.py`.** The end-to-end tests and offline demos still use it.
 
 ### How the tests treat your agent
 
@@ -87,7 +92,7 @@ class NarrativeAgent:
 | **Person 2 (Stella)**: Narrative Evidence Agent | `agents/narrative/stub.py` | `NarrativeAgent.gather(sub_claim, cutoff_date, feedback) -> list[EvidenceItem]` (return SUPPORTING **and** CHALLENGING) | `test_narrative_contract` |
 | **Person 2 (Stella)**: Basic RAG retriever | `agents/narrative/retriever_stub.py` | `Retriever.retrieve(query, top_k, cutoff_date) -> list[EvidenceItem]` | `test_retriever_contract` |
 | **Person 3 (Amelia)**: Claim Decomposition | `agents/decomposition/stub.py` | `Decomposer.decompose(claim, cutoff_date) -> list[SubClaim]` (unique `sub_claim_id`s) | `test_decomposer_contract` |
-| **Person 3 (Amelia)**: Verification / Auditor | `agents/auditor/stub.py` | `Auditor.audit(sub_claim, evidence) -> AuditResult` (set `feedback_for_retry` when failing) | `test_auditor_contract` |
+| **Person 3 (Amelia)**: Verification / Auditor | `agents/auditor/stub.py` | `Auditor.audit(sub_claim, evidence) -> AuditResult` (set `feedback_for_retry` when failing) | `test_auditor_contract`, then the pending cases in `tests/test_auditor_checks.py` |
 | **Person 4 (Irine)**: Advice Boundary | `agents/advice_boundary/stub.py` | `AdviceBoundary.check(text, stage) -> AdviceDecision` | `test_advice_boundary_contract` |
 | **Person 4 (Irine)**: Tier Policy | `agents/tier_policy/stub.py` | `TierPolicy.apply(sub_claim, proposed, evidence, rule) -> (Verdict, reason \| None)` | `test_tier_policy_never_raises` |
 | **Person 4 (Irine)**: Knowledge layer content | `finsight/knowledge/knowledge_layer.yaml` (keep the field names) | `KnowledgeRule` in `schemas.py` | `tests/test_knowledge.py` |
@@ -112,6 +117,10 @@ class NarrativeAgent:
   - Use `SubClaimType.OTHER` only when a sub-claim really fits no type. If **every** sub-claim is OTHER (or there
     are none), the orchestrator asks the user what to check.
 - **Auditor (Amelia):**
+  - `tests/test_auditor_checks.py` lists 14 mistakes the specialists can make that your auditor must catch
+    (wrong units, wrong metric or period, numbers that contradict the sub-claim, citations that don't support
+    it, mislabelled stance or tier, missing provenance, conflicting evidence, ...). They are marked
+    `pending` (XFAIL) against the stub; when one starts passing (XPASS), delete its `@pending` line.
   - You do the diagram's "number + citation checks". The orchestrator adds "source tier: enough?" itself
     (`routing.tier_shortfall`), so don't re-implement tier rules.
   - `passed=False`, or too little evidence from the required tiers, triggers one re-planned re-gather of
@@ -128,6 +137,7 @@ class NarrativeAgent:
 - **Advice boundary (Irine):**
   - It is called at `INPUT` on the raw claim and at `OUTPUT` on the rendered text (`agents/orchestrator/render.py`).
   - If it raises an exception, the request fails closed.
+  - `AdviceDecision.reason` is shown to end users: write it in plain English (no regexes or internal terms).
   - The output text always contains the disclaimer "...not a personalized investment recommendation", so don't flag that sentence.
 
 ## Changing the shared contracts
@@ -148,7 +158,7 @@ GitHub pre-fills this checklist when you open a PR (`.github/pull_request_templa
 - [ ] Branched from the latest `main` and merged `main` again just before opening the PR
 - [ ] Only my own folders changed (+ my own line in `DEFAULT_IMPLEMENTATIONS`, if swapping a stub)
 - [ ] No changes to `finsight/contracts/` (or agreed with Hung)
-- [ ] `pytest` passes locally, and the CI checks on this PR are green
+- [ ] `python scripts/check.py` says "All good", and the CI checks on this PR are green
 - [ ] `finsight eval --validate` says "datasets OK"
 - [ ] `git status` shows no config.yaml, logs/, results/ or data/ files, and no API keys anywhere
 - [ ] New dependencies added to `pyproject.toml` and listed here: ...

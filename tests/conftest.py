@@ -4,7 +4,7 @@ from finsight.config import STUB_IMPLEMENTATIONS
 
 # These tests run against whatever agents are registered in finsight/config.py (real or stub).
 # Every other test module is pinned to the stubs so its demo expectations stay stable.
-REGISTERED_AGENT_MODULES = {"test_agent_contracts"}
+REGISTERED_AGENT_MODULES = {"test_agent_contracts", "test_auditor_checks"}
 
 
 @pytest.fixture(autouse=True)
