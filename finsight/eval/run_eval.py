@@ -1,0 +1,158 @@
+"""End-to-end evaluation runner. Owner: Person 5 (Hung).
+
+    python -m finsight.eval.run_eval --system all --split dev
+    python -m finsight.eval.run_eval --system all --split heldout --final   # frozen split: final run only
+
+Outputs results/{timestamp}/: raw/{system}/{item_id}.json, logs/ (FinSight decision logs),
+records.jsonl, claims.csv and summary.md.
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import json
+from datetime import date, datetime
+from importlib import resources
+from pathlib import Path
+
+from pydantic import BaseModel, ValidationError
+
+from finsight.agents.orchestrator.graph import execute
+from finsight.baselines.basic_rag import run_basic_rag
+from finsight.baselines.common import BaselineResult
+from finsight.baselines.direct_llm import run_direct_llm
+from finsight.config import get_settings
+from finsight.contracts.schemas import AssessmentStatus, FinalAssessment, Verdict
+from finsight.eval.metrics import (
+    GoldClaim,
+    PredictedClaim,
+    RunRecord,
+    summarize,
+    summary_markdown,
+    task_success,
+    write_claims_csv,
+)
+
+SYSTEMS = ("direct", "rag", "finsight")
+
+
+class EvalItem(BaseModel):
+    item_id: str
+    thesis: str
+    cutoff_date: date | None = None
+    split: str
+    gold_claims: list[GoldClaim] = []
+    expect_refusal: bool = False
+    category: str = "normal"
+
+
+def load_dataset(split: str, path: Path | None = None) -> list[EvalItem]:
+    text = (path.read_text("utf-8") if path else
+            resources.files("finsight.eval.datasets").joinpath(f"claims_{split}.jsonl").read_text("utf-8"))
+    return [EvalItem.model_validate_json(line) for line in text.splitlines() if line.strip()]
+
+
+def _base(item: EvalItem, system: str) -> dict:
+    return {"system": system, "item_id": item.item_id, "split": item.split, "category": item.category,
+            "expect_refusal": item.expect_refusal, "gold_claims": item.gold_claims}
+
+
+def run_finsight_item(item: EvalItem, out_dir: Path) -> tuple[RunRecord, str]:
+    settings = dataclasses.replace(get_settings(), logs_dir=out_dir / "logs")
+    run = execute(item.thesis, item.cutoff_date, settings=settings)
+    fa, log = run.assessment, run.decision_log
+    raw = fa.model_dump_json(indent=2)
+    try:
+        FinalAssessment.model_validate_json(raw)
+        valid = True
+    except ValidationError:
+        valid = False
+    refused = fa.status is AssessmentStatus.REFUSED
+    completed = fa.status is not AssessmentStatus.FAILED
+    have_verdicts = refused or (bool(fa.claim_results) and all(r.verdict for r in fa.claim_results))
+    retried = {r.claim_id for r in log.retries if not r.exhausted}
+    record = RunRecord(
+        **_base(item, "finsight"), completed=completed, schema_valid=valid, all_claims_have_verdict=have_verdicts,
+        refused=refused, task_success=task_success(completed, valid, have_verdicts, refused, item.expect_refusal),
+        agent_calls=len(log.agent_calls), tool_calls=sum(c.tool_calls for c in log.agent_calls),
+        latency_ms=log.total_latency_ms, input_tokens=sum(c.input_tokens for c in log.agent_calls),
+        output_tokens=sum(c.output_tokens for c in log.agent_calls), cost_usd=log.total_cost_usd,
+        claims_assessed=len(fa.claim_results), claims_retried=len(retried),
+        downgraded_after_retry=sum(r.exhausted for r in log.retries), overall_verdict=fa.overall_verdict,
+        predicted_claims=[PredictedClaim(text=r.claim.text, verdict=r.verdict) for r in fa.claim_results],
+        error=fa.refusal_reason if fa.status is AssessmentStatus.FAILED else None,
+    )
+    return record, raw
+
+
+def run_baseline_item(system: str, item: EvalItem) -> tuple[RunRecord, str]:
+    try:
+        result = (run_direct_llm if system == "direct" else run_basic_rag)(item.thesis, item.cutoff_date)
+    except Exception as exc:  # noqa: BLE001 - a crashing baseline is a failed item, not a failed eval
+        result = BaselineResult(system=system, cutoff_date=item.cutoff_date or get_settings().corpus_as_of_date,
+                                error=f"{type(exc).__name__}: {exc}")
+    raw = result.model_dump_json(indent=2)
+    completed = result.error is None
+    valid = completed and (result.refused or bool(result.claims))
+    have_verdicts = result.refused or (bool(result.claims) and all(c.verdict for c in result.claims))
+    calls = result.agent_calls
+    record = RunRecord(
+        **_base(item, system), completed=completed, schema_valid=valid, all_claims_have_verdict=have_verdicts,
+        refused=result.refused, task_success=task_success(completed, valid, have_verdicts, result.refused,
+                                                           item.expect_refusal),
+        agent_calls=len(calls), tool_calls=sum(c.tool_calls for c in calls), latency_ms=result.latency_ms,
+        input_tokens=sum(c.input_tokens for c in calls), output_tokens=sum(c.output_tokens for c in calls),
+        cost_usd=sum(c.cost_usd for c in calls), claims_assessed=len(result.claims),
+        overall_verdict=result.overall_verdict,
+        predicted_claims=[PredictedClaim(text=c.text, verdict=c.verdict) for c in result.claims],
+        error=result.error,
+    )
+    return record, raw
+
+
+def run_eval(systems: list[str], split: str, out_root: Path = Path("results"),
+             dataset_path: Path | None = None) -> Path:
+    items = load_dataset(split, dataset_path)
+    out_dir = out_root / datetime.now().strftime("%Y%m%d-%H%M%S")
+    records: list[RunRecord] = []
+    for system in systems:
+        raw_dir = out_dir / "raw" / system
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        for item in items:
+            record, raw = (run_finsight_item(item, out_dir) if system == "finsight"
+                           else run_baseline_item(system, item))
+            (raw_dir / f"{item.item_id}.json").write_text(raw, encoding="utf-8")
+            records.append(record)
+            print(f"[{system:<8}] {item.item_id:<8} success={record.task_success} "
+                  f"overall={record.overall_verdict.value if record.overall_verdict else '-'}")
+
+    (out_dir / "records.jsonl").write_text("\n".join(r.model_dump_json() for r in records) + "\n", encoding="utf-8")
+    write_claims_csv(records, out_dir / "claims.csv")
+    summaries = {s: summarize([r for r in records if r.system == s]) for s in systems}
+    settings = get_settings()
+    header = (f"# FinSight evaluation: split={split}, {len(items)} items\n\n"
+              f"Run {out_dir.name}, provider={settings.llm_provider}, model={settings.llm_model}")
+    (out_dir / "summary.md").write_text(summary_markdown(summaries, header), encoding="utf-8")
+    return out_dir
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="finsight-eval", description="Run the FinSight evaluation.")
+    parser.add_argument("--system", choices=[*SYSTEMS, "all"], default="all")
+    parser.add_argument("--split", choices=["dev", "heldout"], default="dev")
+    parser.add_argument("--final", action="store_true", help="required to run the frozen heldout split")
+    parser.add_argument("--out", type=Path, default=Path("results"))
+    parser.add_argument("--dataset", type=Path, default=None, help="override the JSONL file for the split")
+    args = parser.parse_args(argv)
+    if args.split == "heldout" and not args.final:
+        parser.error("the heldout split is frozen: pass --final only for the final reported run")
+    systems = list(SYSTEMS) if args.system == "all" else [args.system]
+    out_dir = run_eval(systems, args.split, args.out, args.dataset)
+    print((out_dir / "summary.md").read_text(encoding="utf-8"))
+    print(f"Results written to {out_dir}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

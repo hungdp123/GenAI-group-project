@@ -1,0 +1,13 @@
+{
+  "_comment": "PLACEHOLDER frozen XBRL facts for the demo company. Person 1 replaces this with real SEC XBRL data. Values in USD millions.",
+  "CMPX": {
+    "company": "Company X",
+    "facts": [
+      {"metric": "Revenues", "period": "Q2 FY2024", "period_end": "2024-06-30", "value": 4000.0, "unit": "USD_m", "form": "10-Q", "filed": "2024-07-26", "accession": "0000000000-24-000123"},
+      {"metric": "Revenues", "period": "Q2 FY2025", "period_end": "2025-06-30", "value": 4560.0, "unit": "USD_m", "form": "10-Q", "filed": "2025-07-25", "accession": "0000000000-25-000117"},
+      {"metric": "GrossProfit", "period": "Q2 FY2024", "period_end": "2024-06-30", "value": 2172.0, "unit": "USD_m", "form": "10-Q", "filed": "2024-07-26", "accession": "0000000000-24-000123"},
+      {"metric": "GrossProfit", "period": "Q2 FY2025", "period_end": "2025-06-30", "value": 2375.76, "unit": "USD_m", "form": "10-Q", "filed": "2025-07-25", "accession": "0000000000-25-000117"},
+      {"metric": "PaymentsToAcquirePropertyPlantAndEquipment", "period": "Q2 FY2025", "period_end": "2025-06-30", "value": 910.0, "unit": "USD_m", "form": "10-Q", "filed": "2025-07-25", "accession": "0000000000-25-000117"}
+    ]
+  }
+}
