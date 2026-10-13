@@ -1,5 +1,5 @@
-""" 
-Pulls SEC Company Facts data 
+"""
+Pulls SEC Company Facts data
 """
 
 import argparse

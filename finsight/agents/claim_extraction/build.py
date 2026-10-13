@@ -96,7 +96,14 @@ def claims_path(posts_dir: Path) -> Path:
     return posts_dir.parent / "claims" / "claims.jsonl"
 
 
-def claims_from_transcript(text: str, *, video_id: str, influencer: str, title: str = "", upload_date: str = "") -> list[dict]:
+def claims_from_transcript(
+    text: str,
+    *,
+    video_id: str,
+    influencer: str,
+    title: str = "",
+    upload_date: str = "",
+) -> list[dict]:
     """Kept sentences from one transcript. The quote is the post's words."""
     emitted: list[dict] = []
     last_start: int | None = None
@@ -211,7 +218,13 @@ def _subject(text: str, fallback: str | None) -> str | None:
 
 
 class Kind:
-    def __init__(self, claim_type: str, measure: str | None = None, reason: str | None = None, expansion: str | None = None):
+    def __init__(
+        self,
+        claim_type: str,
+        measure: str | None = None,
+        reason: str | None = None,
+        expansion: str | None = None,
+    ):
         self.type = claim_type
         self.measure = measure
         self.reason = reason
@@ -250,7 +263,15 @@ def _classify(text: str) -> Kind | None:
     return None
 
 
-def _materialize(quote: str, kind: Kind, ticker: str, video_id: str, influencer: str, title: str, upload_date: str) -> list[dict]:
+def _materialize(
+    quote: str,
+    kind: Kind,
+    ticker: str,
+    video_id: str,
+    influencer: str,
+    title: str,
+    upload_date: str,
+) -> list[dict]:
     when = _quote_time(quote)
     base = {
         "video_id": video_id,

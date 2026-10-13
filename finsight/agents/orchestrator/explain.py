@@ -168,7 +168,10 @@ _OVERALL_SENTENCES = {
 _PLAIN_TEST = {
     "profitability": "Operating margin was above zero and did not fall.",
     "cash_generation": "Free cash flow was above zero and did not fall.",
-    "liquidity": "The current ratio was at least 1 and did not fall. This is a definition, not a ranking against other companies.",
+    "liquidity": (
+        "The current ratio was at least 1 and did not fall. "
+        "This is a definition, not a ranking against other companies."
+    ),
     "leverage": "Debt-to-equity did not rise. Only the direction is tested.",
 }
 

@@ -1,4 +1,4 @@
-""" Financial Analysis Agent 
+""" Financial Analysis Agent
 
 Agent picks a metric from the sub-claim's type and wording by fixed rules,
 computes it with the tools in `tools.py`, compares it with the same period a year earlier, and

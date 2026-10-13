@@ -1,7 +1,7 @@
-""" 
-Deterministic financial tools 
+"""
+Deterministic financial tools
 
-When data is missing, they return status="insufficient_data" or "out_of_scope" (ticker not in corpus) 
+When data is missing, they return status="insufficient_data" or "out_of_scope" (ticker not in corpus)
 """
 
 from __future__ import annotations

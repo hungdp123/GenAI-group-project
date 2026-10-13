@@ -95,7 +95,6 @@ def _all_filings(client: SecClient, submissions: dict[str, Any], from_date: date
     if from_date is None:
         return result
     for shard in submissions.get("filings", {}).get("files", []):
-        shard_start = date.fromisoformat(shard["filingFrom"])
         shard_end = date.fromisoformat(shard["filingTo"])
         if shard_end < from_date:
             continue
@@ -220,7 +219,9 @@ def download_company(
         exhibit = _earnings_exhibit(client, company["cik"], filing)
         if exhibit:
             filename, url = exhibit
-            entries.append(_save_document(client, root, company, filing, "earnings_release", url, filename, corpus_folder))
+            entries.append(_save_document(
+                client, root, company, filing, "earnings_release", url, filename, corpus_folder,
+            ))
             if from_date is None:
                 break
     if not any(entry.document_type == "earnings_release" for entry in entries):

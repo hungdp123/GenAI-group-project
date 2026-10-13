@@ -144,7 +144,10 @@ def main() -> None:
     parser.add_argument(
         "--all-documents",
         action="store_true",
-        help="Process all eligible NVDA manifest records into separate NVDA_full outputs; preserve the two-document pilot.",
+        help=(
+            "Process all eligible NVDA manifest records into separate NVDA_full outputs; "
+            "preserve the two-document pilot."
+        ),
     )
     args = parser.parse_args()
     workspace = args.workspace.resolve()

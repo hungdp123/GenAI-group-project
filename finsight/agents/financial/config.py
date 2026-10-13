@@ -1,4 +1,4 @@
-""" 
+"""
 Companies in scope
 Edit: companies and period based on what the team wants
 """

@@ -1,5 +1,5 @@
-""" 
-Read-only fact store. The cut-off filter (filed <= cutoff) is used here. 
+"""
+Read-only fact store. The cut-off filter (filed <= cutoff) is used here.
 """
 
 import csv
@@ -10,7 +10,7 @@ from pathlib import Path
 from .concepts import CONCEPTS
 
 SPAN_ORDER = ["Q", "H1", "9M", "FY"]
-DEFAULT_DATA_DIR = Path("data") / "sec"   
+DEFAULT_DATA_DIR = Path("data") / "sec"
 
 
 def _iso(d):

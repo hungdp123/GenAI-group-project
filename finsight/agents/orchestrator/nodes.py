@@ -190,7 +190,10 @@ class Nodes:
         explicit = state.post_id or posts.video_id_from_text(state.raw_input)
         kinds = posts.record_kinds(state.raw_input)
         if kinds and not explicit:
-            ordered = sorted(with_text, key=lambda row: (posts.post_date(row) or date.min, str(row.get("video_id") or "")))
+            ordered = sorted(
+                with_text,
+                key=lambda row: (posts.post_date(row) or date.min, str(row.get("video_id") or "")),
+            )
             self.rec.event("collect_posts", f"record over {len(ordered)} posts: {', '.join(sorted(kinds))}")
             return {"clarification_question": posts.record_marker(kinds, [str(row.get("video_id")) for row in ordered])}
         chosen = posts.choose_post(with_text, state.raw_input, state.influencer, state.post_id)

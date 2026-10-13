@@ -1,5 +1,5 @@
-""" 
-Turns raw SEC Company Facts / submissions JSON into flat rows 
+"""
+Turns raw SEC Company Facts / submissions JSON into flat rows
 """
 
 from datetime import date

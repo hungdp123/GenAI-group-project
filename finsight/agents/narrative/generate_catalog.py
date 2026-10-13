@@ -105,12 +105,19 @@ def generate(
         "",
         "| Dataset | Raw files | Manifest | Status |",
         "|---|---|---|---|",
-        f"| Core SEC | `data/narrative/raw/<TICKER>/{Path(core_root).name}/` | `{core_root}/manifest.json` | Complete for the defined SEC rules |",
         (
-            f"| Supplemental SEC | `data/narrative/raw/<TICKER>/{Path(supplemental_root).name}/` | `{supplemental_root}/manifest.json` | "
+            f"| Core SEC | `data/narrative/raw/<TICKER>/{Path(core_root).name}/` | "
+            f"`{core_root}/manifest.json` | Complete for the defined SEC rules |"
+        ),
+        (
+            f"| Supplemental SEC | `data/narrative/raw/<TICKER>/{Path(supplemental_root).name}/` | "
+            f"`{supplemental_root}/manifest.json` | "
             "Downloaded and deduplicated against core |"
         ),
-        f"| Official IR | `data/narrative/raw/<TICKER>/{Path(ir_root).name}/` | `{ir_root}/manifest.json` | Partial; official-site access gaps remain |",
+        (
+            f"| Official IR | `data/narrative/raw/<TICKER>/{Path(ir_root).name}/` | "
+            f"`{ir_root}/manifest.json` | Partial; official-site access gaps remain |"
+        ),
         "",
         "Document summary by dataset and type:",
         "",
@@ -342,32 +349,55 @@ def generate(
         "",
         "| Company | Captured beyond core SEC | Status | Missing or uncertain coverage |",
         "|---|---:|---|---|",
-        f"| Apple (AAPL) | {supplemental_by_ticker['AAPL'] + ir_by_ticker['AAPL']} | Not complete / availability unverified | "
-        "No official downloadable earnings transcript, earnings deck, or investor-day deck was located; Apple provides earnings-call webcasts |",
-        f"| Alphabet (GOOGL) | {supplemental_by_ticker['GOOGL'] + ir_by_ticker['GOOGL']} | Partial | "
-        "20 official call transcripts cover 2021-2025; 2026 Q1-Q2 transcripts and official earnings/investor-day presentations remain missing or unverified |",
-        f"| Microsoft (MSFT) | {supplemental_by_ticker['MSFT'] + ir_by_ticker['MSFT']} | Complete for published quarterly materials | "
-        "22 official transcripts cover FY2021 Q3 through FY2026 Q4; four official legacy earnings slide decks were also imported |",
-        f"| Nike (NKE) | {supplemental_by_ticker['NKE'] + ir_by_ticker['NKE']} | Partial | "
-        "18 official transcripts captured; FY2022 Q1 and FY2023 Q3-Q4/FY2024 Q1 remain missing, and no strategy-presentation series is captured |",
-        f"| NVIDIA (NVDA) | {supplemental_by_ticker['NVDA'] + ir_by_ticker['NVDA']} | Partial | "
-        "Older investor presentations, commentary/trends, FY2024 Q3 materials, and 2021/2022 Investor Day decks are now imported; FY2022 Q1 commentary/trend, FY2023 Q2 commentary, FY2023 Q4 trend, and most transcripts remain missing |",
         (
-            f"| McDonald's (MCD) | {supplemental_by_ticker['MCD'] + ir_by_ticker['MCD']} | Partial | "
-            "Five official/SEC presentations are captured, including the 2026 Investor Day deck; quarterly earnings decks, remarks, and transcripts remain missing |"
+            f"| Apple (AAPL) | {supplemental_by_ticker['AAPL'] + ir_by_ticker['AAPL']} | "
+            "Not complete / availability unverified | "
+            "No official downloadable earnings transcript, earnings deck, or investor-day deck was located; "
+            "Apple provides earnings-call webcasts |"
         ),
         (
-            f"| Tesla (TSLA) | {supplemental_by_ticker['TSLA'] + ir_by_ticker['TSLA']} | Complete for published downloadable materials | "
+            f"| Alphabet (GOOGL) | {supplemental_by_ticker['GOOGL'] + ir_by_ticker['GOOGL']} | Partial | "
+            "20 official call transcripts cover 2021-2025; 2026 Q1-Q2 transcripts and official "
+            "earnings/investor-day presentations remain missing or unverified |"
+        ),
+        (
+            f"| Microsoft (MSFT) | {supplemental_by_ticker['MSFT'] + ir_by_ticker['MSFT']} | "
+            "Complete for published quarterly materials | "
+            "22 official transcripts cover FY2021 Q3 through FY2026 Q4; "
+            "four official legacy earnings slide decks were also imported |"
+        ),
+        (
+            f"| Nike (NKE) | {supplemental_by_ticker['NKE'] + ir_by_ticker['NKE']} | Partial | "
+            "18 official transcripts captured; FY2022 Q1 and FY2023 Q3-Q4/FY2024 Q1 remain missing, "
+            "and no strategy-presentation series is captured |"
+        ),
+        (
+            f"| NVIDIA (NVDA) | {supplemental_by_ticker['NVDA'] + ir_by_ticker['NVDA']} | Partial | "
+            "Older investor presentations, commentary/trends, FY2024 Q3 materials, and 2021/2022 "
+            "Investor Day decks are now imported; FY2022 Q1 commentary/trend, FY2023 Q2 commentary, "
+            "FY2023 Q4 trend, and most transcripts remain missing |"
+        ),
+        (
+            f"| McDonald's (MCD) | {supplemental_by_ticker['MCD'] + ir_by_ticker['MCD']} | Partial | "
+            "Five official/SEC presentations are captured, including the 2026 Investor Day deck; "
+            "quarterly earnings decks, remarks, and transcripts remain missing |"
+        ),
+        (
+            f"| Tesla (TSLA) | {supplemental_by_ticker['TSLA'] + ir_by_ticker['TSLA']} | "
+            "Complete for published downloadable materials | "
             "All 22 quarterly shareholder decks from 2021 Q1 through 2026 Q2 and the 2023 Investor Day "
             "deck are captured; earnings Q&A is webcast-only with no official text transcript |"
         ),
         (
-            f"| Netflix (NFLX) | {supplemental_by_ticker['NFLX'] + ir_by_ticker['NFLX']} | Complete for published quarterly materials | "
-            "Official shareholder letters and transcripts are captured through 2026 Q2; one May 2025 special deck still lacks an exact day |"
+            f"| Netflix (NFLX) | {supplemental_by_ticker['NFLX'] + ir_by_ticker['NFLX']} | "
+            "Complete for published quarterly materials | "
+            "Official shareholder letters and transcripts are captured through 2026 Q2; "
+            "one May 2025 special deck still lacks an exact day |"
         ),
         (
             f"| Opendoor (OPEN) | {supplemental_by_ticker['OPEN'] + ir_by_ticker['OPEN']} | Partial | "
-            "18 official shareholder letters cover 2021 Q1 through 2025 Q2; later 2025-2026 narrative materials and special presentations remain unverified |"
+            "18 official shareholder letters cover 2021 Q1 through 2025 Q2; "
+            "later 2025-2026 narrative materials and special presentations remain unverified |"
         ),
         (
             f"| Kohl's (KSS) | {supplemental_by_ticker['KSS'] + ir_by_ticker['KSS']} | Partial | "
@@ -375,15 +405,19 @@ def generate(
         ),
         (
             f"| Krispy Kreme (DNUT) | {supplemental_by_ticker['DNUT'] + ir_by_ticker['DNUT']} | Partial | "
-            "Twelve earnings decks, two 2026 transcripts, and one SEC investor-day deck are captured; 2022-2023 decks and most transcripts remain missing |"
+            "Twelve earnings decks, two 2026 transcripts, and one SEC investor-day deck are captured; "
+            "2022-2023 decks and most transcripts remain missing |"
         ),
         (
-            f"| GoPro (GPRO) | {supplemental_by_ticker['GPRO'] + ir_by_ticker['GPRO']} | Complete for published quarterly materials | "
-            "23 management commentaries cover Q4 2020 through Q2 2026 and 16 supplemental slide decks cover Q1 2021 through Q4 2024; no separate special deck was located |"
+            f"| GoPro (GPRO) | {supplemental_by_ticker['GPRO'] + ir_by_ticker['GPRO']} | "
+            "Complete for published quarterly materials | "
+            "23 management commentaries cover Q4 2020 through Q2 2026 and 16 supplemental slide decks "
+            "cover Q1 2021 through Q4 2024; no separate special deck was located |"
         ),
         (
             f"| Smartbird/Allbirds (BIRD) | {supplemental_by_ticker['BIRD'] + ir_by_ticker['BIRD']} | Partial | "
-            "Ten transcripts, seven prepared-remarks files, one infographic, and one strategic deck are captured; older investor decks and post-Q3 2025 quarterly coverage remain incomplete |"
+            "Ten transcripts, seven prepared-remarks files, one infographic, and one strategic deck are captured; "
+            "older investor decks and post-Q3 2025 quarterly coverage remain incomplete |"
         ),
         (
             f"| GameStop (GME) | {supplemental_by_ticker['GME'] + ir_by_ticker['GME']} | Not complete | "
@@ -394,7 +428,8 @@ def generate(
         "",
         "Cross-company unresolved items:",
         "",
-        "- webcast-only events are not transcribed locally because generated text would not be an official-source transcript;",
+        "- webcast-only events are not transcribed locally because generated text would not be "
+        "an official-source transcript;",
         "- JavaScript-only archives, HTTP 403 responses, DNS failures, and timeouts can hide official files; and",
         "- a zero supplemental/IR count means **not captured**, not proof that the company never published a document.",
         "",

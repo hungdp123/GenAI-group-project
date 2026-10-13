@@ -68,7 +68,12 @@ def accuracy_sentence(verdicts: list[Verdict | None]) -> str:
     decided = supported + contradicted
     tally = ", ".join(
         f"{counts[verdict]} {verdict_label(verdict).lower()}"
-        for verdict in (Verdict.SUPPORTED, Verdict.PARTIALLY_SUPPORTED, Verdict.CONTRADICTED, Verdict.INSUFFICIENT_EVIDENCE)
+        for verdict in (
+            Verdict.SUPPORTED,
+            Verdict.PARTIALLY_SUPPORTED,
+            Verdict.CONTRADICTED,
+            Verdict.INSUFFICIENT_EVIDENCE,
+        )
         if counts[verdict]
     ) or "none could be labeled"
     if decided == 0:
@@ -118,7 +123,8 @@ def assess_record(
     lines = [
         f"This is the record across {len(video_ids)} stored posts. "
         "Each post uses its own publication date as the cut-off. There is no single overall label. "
-        "Each post keeps the one retry already allowed. That retry repeats the same check and does not start a second agent."
+        "Each post keeps the one retry already allowed. "
+        "That retry repeats the same check and does not start a second agent."
     ]
     if unfinished:
         lines.append(

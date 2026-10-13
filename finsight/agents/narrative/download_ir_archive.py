@@ -594,7 +594,13 @@ def main() -> int:
                 year = int(date_value)
                 starts_after_year_start = year == args.from_date.year and args.from_date != date(year, 1, 1)
                 ends_before_year_end = year == args.cutoff.year and args.cutoff != date(year, 12, 31)
-                if year < args.from_date.year or year > args.cutoff.year or starts_after_year_start or ends_before_year_end:
+                outside_window = (
+                    year < args.from_date.year
+                    or year > args.cutoff.year
+                    or starts_after_year_start
+                    or ends_before_year_end
+                )
+                if outside_window:
                     continue
             # Keep the manifest under raw/<corpus>/ and source files grouped
             # under raw/<ticker>/<corpus>/.

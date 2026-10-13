@@ -242,7 +242,9 @@ def main() -> int:
             known.add(digest)
         if records:
             payload = {
-                "source_policy": "Official company investor-relations downloads; URLs recovered from browser provenance.",
+                "source_policy": (
+                    "Official company investor-relations downloads; URLs recovered from browser provenance."
+                ),
                 "documents": records,
             }
             (ticker_dir / "import_metadata.json").write_text(

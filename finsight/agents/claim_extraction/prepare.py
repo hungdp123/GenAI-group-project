@@ -51,7 +51,10 @@ SEGMENT_COMPANY_REASON = (
 )
 
 SPEAKER_NOTE = "The transcript does not mark who is speaking, so the speaker was not separated."
-SCREEN_NOTE = "A figure that appears only on a chart, a slide, or an image is not in the stored text, so it was not checked."
+SCREEN_NOTE = (
+    "A figure that appears only on a chart, a slide, or an image is not in the stored text, "
+    "so it was not checked."
+)
 NO_TIME_NOTE = "This transcript has no timestamps, so the report cannot point to a moment in the video."
 
 
