@@ -1,69 +1,81 @@
 # FinSight knowledge layer. Schema owned by Person 5 (Hung); CONTENT owned by Person 4 (Irine).
 # Schema = finsight.contracts.schemas.KnowledgeRule. Keep field names stable.
+# Full rule book: docs/knowledge_layer.md. Choices and why: docs/decision_rationale.md.
+# Corpus: the companies and influencer channels in docs/knowledge_layer.md section 1.
+# Posts are from 2026-04-01 through 2026-09-30. This file does not list them.
+# This file is only the routing extract.
+#
 #   collectors:            subset of [financial, narrative], called on the first attempt
 #   retry_collectors:      extra collectors added when the orchestrator re-plans a sub-claim for its retry
 #                          (the audit failed, or no evidence came from a required tier)
 #   highest_verdict:       verdict cap (null only when refuse: true)
 #   tier_requirement:      tiers whose SUPPORTING evidence can justify a positive verdict
-#   counter_evidence_only: evidence can only block SUPPORTED
+#   counter_evidence_only: challenging evidence from tier_requirement blocks SUPPORTED
 #   refuse:                do not analyze; refuse the whole request
 # Sub-claim types not listed here (and OTHER) fall back to `fallback` below.
-version: "0.3"
-
-# DECISION: retry_collectors seed values (Irine to confirm): numeric sub-claims can also be backed by
-# MD&A / earnings-release text, and narrative sub-claims by segment or balance-sheet numbers.
-# CONTINUATION gets none: past numbers cannot show that growth will continue.
+#
+# Decided 5 Oct 2026. See docs/decision_rationale.md.
+#   D16  BUSINESS_RISK and claims not in the table: Tier 1 can Support. A Tier 2 remark can at most Partially Support.
+#   D22  retry_collectors are empty. A retry does not call the other specialist.
+version: "0.6"
 
 rules:
   - sub_claim_type: HISTORICAL_GROWTH
     collectors: [financial]
-    retry_collectors: [narrative]
+    retry_collectors: []
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1]
+    note: "Supported only when the Tier 1 computed record matches value, direction, and period. Use consolidated revenue, not a segment. A wrong number is rewritten from that record. Do not add the narrative agent."
 
   - sub_claim_type: PROFITABILITY_CASH_LEVERAGE
     collectors: [financial]
-    retry_collectors: [narrative]
+    retry_collectors: []
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1]
+    note: "One code type for profitability, cash generation, liquidity, and leverage. Each is Tier 1 and capped at SUPPORTED. The four tests are in the rule book. A wrong number is rewritten from the computed record. Do not add the narrative agent."
 
   - sub_claim_type: DEMAND_ATTRIBUTION
     collectors: [narrative]
-    retry_collectors: [financial]
+    retry_collectors: []
     highest_verdict: PARTIALLY_SUPPORTED
     tier_requirement: [TIER_1, TIER_2]
+    note: "Cap stays PARTIALLY_SUPPORTED. Tier 1 or Tier 2 may support that partial verdict. A Supported verdict when the filing quantifies one driver's share cannot be expressed as a single cap. Do not add the financial agent on retry. Retrieve the narrative passage again only when it is missing."
 
   - sub_claim_type: CONTINUATION
     collectors: [narrative]
     retry_collectors: []
     highest_verdict: PARTIALLY_SUPPORTED
     tier_requirement: [TIER_2]
+    note: "A user's forward-looking claim, such as growth just getting started. Tier 2 only. Never above PARTIALLY_SUPPORTED. Past numbers are not a retry collector."
 
   - sub_claim_type: COMPARATIVE
     collectors: []
     highest_verdict: INSUFFICIENT_EVIDENCE
     tier_requirement: []
-    note: "Peer comparison is out of scope: the corpus holds no peer filings, so 'biggest winner' style sub-claims cannot be verified."
+    note: "No peer retrieval. A second company named only as a comparator uses this type. Verdict is INSUFFICIENT_EVIDENCE, with no retry."
 
   - sub_claim_type: BUSINESS_RISK
     collectors: [narrative]
-    retry_collectors: [financial]
-    # DECISION: "counter-evidence only, can block SUPPORTED" -> cap SUPPORTED, but any eligible
-    # CHALLENGING evidence lowers SUPPORTED to PARTIALLY_SUPPORTED.
+    retry_collectors: []
+    # DECISION D16: SUPPORTED needs a Tier 1 risk factor. A Tier 2 remark can at most Partially Support.
+    # Tier 1 or Tier 2 challenging evidence blocks SUPPORTED.
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1, TIER_2]
     counter_evidence_only: true
+    note: "Supported only when a 10-K or 10-Q risk factor states the risk. A Tier 2 remark is at most Partially Supported. Tier 1 or Tier 2 counter-evidence blocks SUPPORTED. Do not add the financial agent on retry."
 
   - sub_claim_type: PERSONALIZED_ADVICE
     collectors: []
     highest_verdict: null
     tier_requirement: []
     refuse: true
-    note: "Personalized investment advice is out of scope; FinSight does not analyze it."
+    note: "Refused before decomposition. This row is the backup if a sub-claim of this type is still emitted."
 
 fallback:
   sub_claim_type: OTHER
-  collectors: [financial, narrative]
-  highest_verdict: PARTIALLY_SUPPORTED
+  collectors: [narrative]
+  retry_collectors: []
+  highest_verdict: SUPPORTED
   tier_requirement: [TIER_1, TIER_2]
-  note: "Unclassified sub-claim: routed to both collectors and capped at PARTIALLY_SUPPORTED."
+  counter_evidence_only: true
+  note: "Not labeled out of scope up front. Search the stored documents. Supported only when a Tier 1 passage states the claim. A Tier 2 remark is at most Partially Supported. Nothing in Tier 1 or Tier 2 means INSUFFICIENT_EVIDENCE. Do not invent a formula."

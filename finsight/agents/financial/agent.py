@@ -168,9 +168,23 @@ def _load_store(processed_dir: str, mtime: float) -> FactStore:
     return FactStore(facts, filings)
 
 
+def _sec_dir() -> Path:
+    """Where the pulled SEC files live. The project copy is data/financial."""
+    env = os.getenv("FINSIGHT_SEC_DATA")
+    if env:
+        return Path(env)
+    processed = DEFAULT_DATA_DIR / "processed"
+    if (processed / "facts.csv").exists():
+        return processed
+    financial = Path("data") / "financial"
+    if (financial / "facts.csv").exists():
+        return financial
+    return processed
+
+
 def default_store() -> FactStore:
     """Pulled SEC data if present, plus the demo fixture. Reloaded when facts.csv changes."""
-    processed = Path(os.getenv("FINSIGHT_SEC_DATA", str(DEFAULT_DATA_DIR / "processed")))
+    processed = _sec_dir()
     facts_csv = processed / "facts.csv"
     return _load_store(str(processed), facts_csv.stat().st_mtime if facts_csv.exists() else 0.0)
 

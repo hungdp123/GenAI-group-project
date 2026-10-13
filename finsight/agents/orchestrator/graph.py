@@ -3,7 +3,9 @@ r"""FinSight orchestrator graph and the public entry point `run_finsight`. Owner
 Mirrors the team architecture diagram:
 
     intake -> advice_gate_input -> scope_check            (initial screening: advice + scope)
-           -> decompose -> plan                           (orchestrator: decompose, plan evidence needs)
+           -> collect_posts                              (stored post; cut-off = post date)
+           -> extract_claims                              (claim extraction: keep the quote, one type, no label)
+           -> plan                                        (orchestrator: route each claim, plan evidence)
            -> gather_evidence -> audit -> retry_or_accept (specialists in parallel; auditor checks,
                    ^                          |            "source tier: enough?")
                    +---- re-plan + retry -----+            (max 1 retry per sub-claim; still failing -> INSUFFICIENT)
@@ -21,6 +23,7 @@ from pathlib import Path
 
 from langgraph.graph import END, StateGraph
 
+from finsight.agents.orchestrator import posts
 from finsight.agents.orchestrator.nodes import Nodes, RunContext, new_request_id
 from finsight.config import BOUNDARY_DISCLAIMER, AgentRegistry, Settings, get_settings
 from finsight.contracts.schemas import (
@@ -69,14 +72,15 @@ def build_graph(ctx: RunContext):
     """Compile the StateGraph for one run (nodes close over the run context)."""
     nodes = Nodes(ctx)
     g = StateGraph(FinSightState)
-    for name in ("intake", "advice_gate_input", "scope_check", "clarification", "decompose", "plan",
-                 "gather_evidence", "audit", "retry_or_accept", "apply_tier_policy", "assemble",
-                 "advice_gate_output", "finalize"):
+    for name in ("intake", "advice_gate_input", "scope_check", "clarification", "collect_posts",
+                 "extract_claims", "plan", "gather_evidence", "audit", "retry_or_accept", "apply_tier_policy",
+                 "assemble", "advice_gate_output", "finalize"):
         g.add_node(name, getattr(nodes, name))
 
     g.set_entry_point("intake")
     for src, dst in (("intake", "advice_gate_input"), ("advice_gate_input", "scope_check"),
-                     ("scope_check", "decompose"), ("decompose", "plan")):
+                     ("scope_check", "collect_posts"), ("collect_posts", "extract_claims"),
+                     ("extract_claims", "plan")):
         paths = {dst: dst, "finalize": "finalize"}
         if src != "advice_gate_input":  # the advice gate only refuses; it never asks a question
             paths["clarification"] = "clarification"
@@ -116,6 +120,8 @@ def execute(
     settings: Settings | None = None,
     kb: KnowledgeLayer | None = None,
     company_ticker: str | None = None,
+    influencer: str | None = None,
+    post_id: str | None = None,
     on_stage: Callable[[str, dict, DecisionLogRecorder], None] | None = None,
 ) -> RunOutput:
     """Run the full pipeline and return the assessment plus its decision log. Never raises.
@@ -130,7 +136,7 @@ def execute(
         ctx.registry = registry or AgentRegistry.from_config()
         ctx.kb = kb or default_knowledge_layer()
         initial = FinSightState(raw_input=claim or "", cutoff_input=_coerce_date(cutoff),
-                                company_hint=company_ticker)
+                                company_hint=company_ticker, influencer_hint=influencer, post_id=post_id)
         config = {"recursion_limit": 40 + 6 * settings.max_retries}
         graph = build_graph(ctx)
         if on_stage is None:
@@ -146,8 +152,23 @@ def execute(
                         on_stage(node, update or {}, ctx.recorder)
                     except Exception:  # noqa: BLE001 - observers must never break a run
                         pass
-        return RunOutput(FinalAssessment.model_validate(_field(out, "final")),
-                         DecisionLog.model_validate(_field(out, "decision_log")))
+        result = RunOutput(FinalAssessment.model_validate(_field(out, "final")),
+                           DecisionLog.model_validate(_field(out, "decision_log")))
+        parsed = posts.parse_record_marker(result.assessment.clarification_question)
+        if parsed and not post_id:
+            kinds, video_ids = parsed
+            from finsight.agents.orchestrator.record import assess_record
+
+            assessment = assess_record(
+                claim, kinds=kinds, video_ids=video_ids, cutoff=cutoff,
+                company_ticker=company_ticker, influencer=influencer,
+                posts_root=ctx.settings.posts_dir,
+                run_one=lambda *args, **kwargs: execute(*args, registry=ctx.registry, settings=ctx.settings,
+                                                        kb=ctx.kb, **kwargs).assessment,
+                on_stage=on_stage,
+            )
+            return RunOutput(assessment, result.decision_log)
+        return result
     except Exception as exc:  # noqa: BLE001 - last line of defence: the caller always gets an assessment
         return _crash_output(ctx, claim, exc)
 
@@ -171,13 +192,19 @@ def _crash_output(ctx: RunContext, claim: str, exc: Exception) -> RunOutput:
 
 
 def run_finsight(claim: str, cutoff: date | None = None, company_ticker: str | None = None,
-                 **kwargs) -> FinalAssessment:
-    """Public API for the UI (Person 4): evaluate `claim` as of `cutoff` (None -> corpus as-of date).
+                 influencer: str | None = None, post_id: str | None = None, **kwargs) -> FinalAssessment:
+    """Public API for the UI (Person 4).
 
-    If the result has status NEEDS_CLARIFICATION, show `clarification_question` to the user and call
-    again with their answer: an edited claim, or `company_ticker=` for "which company?".
+    The user sentence selects an influencer and a company. The claim that is checked is the
+    stored post, and the cut-off is that post's publication date. A date passed in `cutoff`
+    does not replace it.
+
+    If the result has status NEEDS_CLARIFICATION, show `clarification_question` and call again
+    with the answer: the influencer's name, `company_ticker=` , or `post_id=` for "which post?".
+    Pass `influencer=""` when the reply still names no influencer: that request is refused.
     """
-    return execute(claim, cutoff, company_ticker=company_ticker, **kwargs).assessment
+    return execute(claim, cutoff, company_ticker=company_ticker, influencer=influencer,
+                   post_id=post_id, **kwargs).assessment
 
 
 def export_mermaid(path: str | Path = "docs/orchestrator_graph.md") -> Path:

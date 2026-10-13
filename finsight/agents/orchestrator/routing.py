@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 
+from finsight.agents.claim_extraction.thesaurus import find_mentions, has_alias
 from finsight.contracts.schemas import (
     SubClaim,
     EvidenceItem,
@@ -73,13 +74,25 @@ def detect_company(claim: str, companies: dict[str, list[str]], hint: str | None
     if hint:
         return hint.upper() if hint.upper() in companies else None
     for ticker, aliases in companies.items():
-        if any(re.search(rf"\b{re.escape(a)}\b", claim, flags=re.IGNORECASE) for a in aliases):
+        if any(has_alias(claim, alias) for alias in aliases):
             return ticker
+    mentioned = list(dict.fromkeys(ticker for ticker, _surface, _start in find_mentions(claim)))
+    if len(mentioned) == 1 and mentioned[0] in companies:
+        return mentioned[0]
     return None
 
 
 def _covered(companies: dict[str, list[str]]) -> str:
     return ", ".join(f"{aliases[0]} ({ticker})" for ticker, aliases in companies.items())
+
+
+def price_or_macro_refusal(claim: str, ticker: str | None) -> str | None:
+    """Refuse a price prediction or a market-level claim before asking which influencer."""
+    if _PRICE_PREDICTION_RE.search(claim):
+        return "Price predictions are out of scope: FinSight evaluates company fundamentals, not price targets."
+    if ticker is None and _MACRO_RE.search(claim):
+        return "Macro / market-level claims are out of scope: FinSight evaluates company-level claims only."
+    return None
 
 
 def scope_screen(claim: str, ticker: str | None, hint: str | None,
@@ -101,8 +114,69 @@ def scope_screen(claim: str, ticker: str | None, hint: str | None,
     return None, None
 
 
+# Canonical key -> names matched in the user prompt, longest first when scanning.
+INFLUENCERS: dict[str, tuple[str, ...]] = {
+    "joseph_carlson": ("Joseph Carlson", "Carlson"),
+    "mark_roussin": ("Mark Roussin", "Roussin"),
+    "alex_reffett": ("Alex Reffett", "Reffett"),
+}
+INFLUENCER_CHANNELS: dict[str, frozenset[str]] = {
+    "joseph_carlson": frozenset({"joseph_carlson", "joseph_carlson_after_hours"}),
+    "mark_roussin": frozenset({"mark_roussin"}),
+    "alex_reffett": frozenset({"alex_reffett"}),
+}
+
+
+def influencer_names() -> str:
+    return ", ".join(aliases[0] for aliases in INFLUENCERS.values())
+
+
+def detect_influencer(text: str, hint: str | None = None) -> str | None:
+    """Canonical influencer key named in the hint or the text. None if nobody is named."""
+    if hint and hint.strip():
+        named = _match_influencer(hint)
+        if named:
+            return named
+    return _match_influencer(text)
+
+
+def _match_influencer(text: str) -> str | None:
+    pairs = sorted(
+        ((key, alias) for key, aliases in INFLUENCERS.items() for alias in aliases),
+        key=lambda item: len(item[1]),
+        reverse=True,
+    )
+    for key, alias in pairs:
+        if re.search(rf"\b{re.escape(alias)}\b", text, flags=re.IGNORECASE):
+            return key
+    return None
+
+
+def influencer_screen(text: str, hint: str | None) -> tuple[str | None, str | None, str | None]:
+    """(influencer key, refusal, clarification). A blank hint is a reply that named nobody."""
+    if hint is not None and not hint.strip():
+        return None, REFUSE_NO_INFLUENCER, None
+    if hint and hint.strip() and detect_influencer("", hint) is None:
+        return None, (
+            f"{hint.strip()} is not an influencer FinSight can check. "
+            f"FinSight checks posts from: {influencer_names()}."
+        ), None
+    found = detect_influencer(text, hint)
+    if found is None:
+        return None, None, CLARIFY_INFLUENCER
+    return found, None, None
+
+
 CLARIFY_EMPTY = ("Please paste the investment claim you want checked, e.g. \"Company X's revenue growth is "
                  "driven by AI demand.\"")
+CLARIFY_INFLUENCER = (
+    "Which influencer should this claim be checked against? "
+    f"FinSight checks posts from: {influencer_names()}. Resubmit naming the influencer."
+)
+REFUSE_NO_INFLUENCER = (
+    "FinSight checks an influencer's claim about one company. "
+    "No influencer was named, so this request is refused."
+)
 CLARIFY_NO_SUB_CLAIM = ("Your claim has nothing specific FinSight can check. What should it verify? For example "
                         "revenue growth, margins, what is driving demand, or whether growth will continue.")
 
@@ -196,6 +270,22 @@ def enforce_tier_requirement(
         return Verdict.INSUFFICIENT_EVIDENCE, (
             f"tier rule: no supporting evidence from required tiers ({tiers}); Tier 3 cannot raise a verdict"
         )
+    return verdict, None
+
+
+def cap_tier2_only_support(
+    verdict: Verdict, evidence: list[EvidenceItem], rule: KnowledgeRule
+) -> tuple[Verdict, str | None]:
+    """Tier 2 may support a positive verdict, but SUPPORTED still needs a Tier 1 supporting item."""
+    if verdict is not Verdict.SUPPORTED:
+        return verdict, None
+    if SourceTier.TIER_1 not in rule.tier_requirement or SourceTier.TIER_2 not in rule.tier_requirement:
+        return verdict, None
+    support = eligible_support(evidence, rule)
+    if any(e.source_tier is SourceTier.TIER_1 for e in support):
+        return verdict, None
+    if any(e.source_tier is SourceTier.TIER_2 for e in support):
+        return Verdict.PARTIALLY_SUPPORTED, "Tier 2 evidence can at most Partially Support"
     return verdict, None
 
 

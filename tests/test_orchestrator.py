@@ -1,5 +1,6 @@
 """End-to-end orchestrator tests (MOCK mode, stubs only unless a fake is injected)."""
 
+import json
 from datetime import date
 
 from finsight import execute
@@ -248,21 +249,40 @@ def test_missing_company_asks_then_resubmit_works():
     out = execute(claim, DEMO_CUTOFF)
     fa = out.assessment
     assert fa.status is AssessmentStatus.NEEDS_CLARIFICATION
-    assert "Which company" in fa.clarification_question and "Company X (CMPX)" in fa.clarification_question
+    assert "Which influencer" in fa.clarification_question
     assert fa.sub_claim_results == [] and fa.overall_verdict is None
     assert [g.gate for g in out.decision_log.gate_decisions] == ["advice_input", "scope", "clarification"]
     assert [c.agent for c in out.decision_log.agent_calls] == ["advice_boundary"], "no analysis before answer"
 
-    answered = run_finsight(claim, DEMO_CUTOFF, company_ticker="CMPX")
+    still_no_company = run_finsight(claim, DEMO_CUTOFF, influencer="Joseph Carlson")
+    assert still_no_company.status is AssessmentStatus.NEEDS_CLARIFICATION
+    assert "Which company" in still_no_company.clarification_question
+
+    answered = run_finsight(claim, DEMO_CUTOFF, company_ticker="CMPX", influencer="Joseph Carlson")
     assert answered.status is AssessmentStatus.COMPLETED and answered.sub_claim_results
 
-    other = run_finsight(claim, DEMO_CUTOFF, company_ticker="ACME")
+    other = run_finsight(claim, DEMO_CUTOFF, company_ticker="ACME", influencer="Joseph Carlson")
     assert other.status is AssessmentStatus.REFUSED and "not in the frozen corpus" in other.refusal_reason
 
 
 def test_advice_is_refused_before_clarification():
     fa = execute("Should I buy this stock with my savings?", DEMO_CUTOFF).assessment
     assert fa.status is AssessmentStatus.REFUSED
+
+
+def test_advice_line_inside_a_stored_post_does_not_refuse_the_post(tmp_path, monkeypatch):
+    text = "Joseph Carlson said Company X's revenue growth is strong. Should I buy it for my portfolio?"
+    posts = tmp_path / "advice_posts"
+    posts.mkdir()
+    (posts / "one.jsonl").write_text(json.dumps({
+        "influencer": "joseph_carlson", "video_id": "advice-line", "title": "Company X",
+        "description": "Company X", "upload_date": "2025-07-31", "transcript": text,
+    }) + "\n", encoding="utf-8")
+    monkeypatch.setenv("FINSIGHT_POSTS_DIR", str(posts))
+    fa = execute("Joseph Carlson said Company X revenue growth.", DEMO_CUTOFF).assessment
+    assert fa.status is AssessmentStatus.COMPLETED
+    assert fa.sub_claim_results
+    assert all(r.sub_claim.sub_claim_type is not SubClaimType.PERSONALIZED_ADVICE for r in fa.sub_claim_results)
 
 
 def test_empty_claim_asks_for_it():
@@ -272,7 +292,7 @@ def test_empty_claim_asks_for_it():
 
 
 def test_no_checkable_sub_claim_asks_which_sub_claim():
-    fa = execute("Company X is a really interesting company.", DEMO_CUTOFF).assessment
+    fa = execute("Joseph Carlson said Company X is a really interesting company.", DEMO_CUTOFF).assessment
     assert fa.status is AssessmentStatus.NEEDS_CLARIFICATION
     assert "nothing specific FinSight can check" in fa.clarification_question
 
@@ -282,7 +302,7 @@ def test_clarification_rendered_for_cli():
 
     fa = execute("It will keep growing.", DEMO_CUTOFF).assessment
     text = render_assessment(fa)
-    assert "needs a bit more information" in text and "Which company" in text
+    assert "needs a bit more information" in text and "Which influencer" in text
 
 
 # -- diagram: auditor "source tier: enough?" + re-plan on retry -------------------------------
@@ -300,26 +320,26 @@ def test_tier_shortfall_triggers_one_replanned_retry_then_insufficient():
     records = [r for r in out.decision_log.retries if r.sub_claim_id == demand.sub_claim.sub_claim_id]
     assert [r.exhausted for r in records] == [False, True]
     assert "source tier not enough" in records[0].feedback and "Tier 3" in records[0].feedback
-    # Re-plan: DEMAND_ATTRIBUTION adds the financial collector on its retry.
+    # D22: a retry repeats the narrative collector. It does not add the financial agent.
     calls = [c.agent for c in out.decision_log.agent_calls if c.sub_claim_id == demand.sub_claim.sub_claim_id]
-    assert calls.count("narrative") == 2 and calls.count("financial") == 1
+    assert calls.count("narrative") == 2 and calls.count("financial") == 0
 
 
 def test_failed_audit_retry_is_replanned(monkeypatch):
     monkeypatch.setenv("FINSIGHT_STUB_FAIL_SUB_CLAIMS", "sc1")
     out = execute(DEMO_CLAIM, DEMO_CUTOFF)
     c1_calls = [c.agent for c in out.decision_log.agent_calls if c.sub_claim_id == "sc1"]
-    assert c1_calls.count("financial") == 2 and c1_calls.count("narrative") == 1  # narrative added on retry
+    assert c1_calls.count("financial") == 2 and c1_calls.count("narrative") == 0  # D22: same collector again
     c1_plans = [p.collectors for p in out.decision_log.routing_plan if p.sub_claim_id == "sc1"]
-    assert c1_plans == [["financial"], ["financial", "narrative"]]
+    assert c1_plans == [["financial"]]  # unchanged collectors are not logged a second time
 
 
-def test_no_evidence_retries_once_then_insufficient():
-    out = execute(DEMO_CLAIM, date(2025, 1, 31))  # every document is after this cut-off
-    assert out.assessment.overall_verdict is Verdict.INSUFFICIENT_EVIDENCE
-    analyzed = [r for r in out.assessment.sub_claim_results
-                if r.sub_claim.sub_claim_type is not SubClaimType.COMPARATIVE]
-    assert all(r.retries_used == 1 for r in analyzed)
+def test_typed_cutoff_does_not_override_a_stored_post():
+    forced = execute(DEMO_CLAIM, date(2025, 1, 31)).assessment
+    plain = execute(DEMO_CLAIM).assessment
+    assert forced.as_of_date == plain.as_of_date == date(2025, 7, 31)
+    assert forced.overall_verdict == plain.overall_verdict
+    assert not forced.cutoff_was_defaulted
 
 
 # -- cut-off ----------------------------------------------------------------------------
@@ -328,10 +348,10 @@ def test_no_evidence_retries_once_then_insufficient():
 def test_missing_cutoff_defaults_to_corpus_as_of_and_is_stated():
     from finsight.agents.orchestrator.render import render_assessment
 
-    claim = "Company X's revenue growth is driven by AI demand."
+    claim = "Joseph Carlson said Company X's revenue growth is driven by AI demand."
     fa = execute(claim).assessment
-    assert fa.as_of_date == get_settings().corpus_as_of_date and fa.cutoff_was_defaulted
-    assert "no date was given, so the latest available data was used" in render_assessment(fa)
+    assert fa.as_of_date == date(2025, 7, 31) and not fa.cutoff_was_defaulted
+    assert "31 Jul 2025" in render_assessment(fa)
 
 
 def test_cutoff_parsed_from_claim_text():
@@ -339,9 +359,9 @@ def test_cutoff_parsed_from_claim_text():
     assert fa.as_of_date == date(2025, 7, 31) and not fa.cutoff_was_defaulted
 
 
-def test_early_cutoff_leaves_sub_claims_insufficient():
+def test_early_cutoff_does_not_replace_the_post_date():
     fa = execute(DEMO_CLAIM, date(2025, 1, 31)).assessment
-    assert fa.overall_verdict is Verdict.INSUFFICIENT_EVIDENCE
+    assert fa.as_of_date == date(2025, 7, 31) and not fa.cutoff_was_defaulted
 
 
 # -- decision log ---------------------------------------------------------------------------

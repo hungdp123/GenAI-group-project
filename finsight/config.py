@@ -15,6 +15,7 @@ from typing import Any
 
 import yaml
 
+from finsight.agents.claim_extraction.thesaurus import corpus_aliases
 from finsight.contracts.interfaces import (
     AdviceBoundary,
     Auditor,
@@ -41,7 +42,7 @@ STUB_IMPLEMENTATIONS: dict[str, str] = {
 # SWAP YOUR AGENT HERE: change only your own line(s), so merges never conflict.
 DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
     "decomposer": "finsight.agents.decomposition.stub:StubDecomposer",  # Person 3
-    "financial": "finsight.agents.financial.stub:StubFinancialAgent",  # Person 1
+    "financial": "finsight.agents.financial.agent:XbrlFinancialAgent",  # Person 1
     "narrative": "finsight.agents.narrative.stub:StubNarrativeAgent",  # Person 2
     "retriever": "finsight.agents.narrative.retriever_stub:StubRetriever",  # Person 2
     "auditor": "finsight.agents.auditor.stub:StubAuditor",  # Person 3
@@ -59,11 +60,9 @@ _PROTOCOLS: dict[str, type] = {
     "tier_policy": TierPolicy,
 }
 
-# Companies in the frozen corpus: ticker -> aliases matched (case-insensitively) in the claim.
-# DECISION: placeholder corpus with the demo company only; Person 2 / Person 4 extend it.
-CORPUS_COMPANIES: dict[str, list[str]] = {
-    "CMPX": ["Company X", "CMPX"],
-}
+# Companies in the frozen corpus: ticker -> names and product names.
+# The thesaurus is the list. CMPX is the demo placeholder. YouTube is not a search name.
+CORPUS_COMPANIES: dict[str, list[str]] = corpus_aliases()
 
 # USD per 1M tokens (input, output), standard tier. Real calls to a model missing here are refused.
 # OpenAI prices checked against https://developers.openai.com/api/docs/pricing on 2026-10-02.
@@ -105,6 +104,7 @@ class Settings:
     corpus_as_of_date: date = date(2025, 7, 31)
     corpus_companies: dict[str, list[str]] = field(default_factory=lambda: dict(CORPUS_COMPANIES))
     logs_dir: Path = Path("logs")
+    posts_dir: Path = Path("data/influencers/youtube")
     max_workers: int = 4
     max_claim_chars: int = 5000
     rag_top_k: int = 5
@@ -148,6 +148,7 @@ def get_settings() -> Settings:
         max_retries=int(os.getenv("FINSIGHT_MAX_RETRIES", "1")),
         corpus_as_of_date=date.fromisoformat(os.getenv("FINSIGHT_CORPUS_AS_OF", "2025-07-31")),
         logs_dir=Path(os.getenv("FINSIGHT_LOGS_DIR", "logs")),
+        posts_dir=Path(os.getenv("FINSIGHT_POSTS_DIR", "data/influencers/youtube")),
         max_workers=int(os.getenv("FINSIGHT_MAX_WORKERS", "4")),
     )
 

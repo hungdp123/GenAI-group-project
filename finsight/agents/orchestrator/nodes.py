@@ -11,14 +11,19 @@ Safety rules enforced here:
 
 from __future__ import annotations
 
+import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
-from finsight.agents.orchestrator import explain, routing
+from finsight.agents.claim_extraction.extract import extract_claims as run_extraction
+from finsight.agents.claim_extraction.extract import load_stored_claims, load_stored_reasons
+from finsight.agents.claim_extraction.prepare import post_limits
+from finsight.agents.orchestrator import explain, posts, routing
 from finsight.agents.orchestrator.aggregation import highest_tier, overall_verdict
+from finsight.agents.orchestrator.expansion import report_units
 from finsight.agents.orchestrator.render import render_assessment
 from finsight.config import BOUNDARY_DISCLAIMER, AgentRegistry, Settings
 from finsight.contracts.schemas import (
@@ -28,7 +33,6 @@ from finsight.contracts.schemas import (
     AuditResult,
     SubClaim,
     SubClaimResult,
-    SubClaimType,
     EvidenceItem,
     FinalAssessment,
     FinSightState,
@@ -58,6 +62,11 @@ def new_request_id() -> str:
 
 def _stop(status: AssessmentStatus, reason: str) -> dict[str, Any]:
     return {"status": status, "refusal_reason": reason}
+
+
+def _has_claim_words(text: str) -> bool:
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    return any(len(word) > 3 and word not in posts._SKIP for word in words)
 
 
 class Nodes:
@@ -117,15 +126,110 @@ class Nodes:
         claim, hint = state.request.raw_claim, state.request.company_ticker
         companies = self.ctx.settings.corpus_companies
         ticker = routing.detect_company(claim, companies, hint)
+        hard = routing.price_or_macro_refusal(claim, ticker)
+        if hard:
+            self.rec.gate("scope", True, hard)
+            return _stop(AssessmentStatus.REFUSED, hard)
+        influencer, influencer_refusal, influencer_question = routing.influencer_screen(
+            claim, state.influencer_hint)
+        if influencer_refusal or influencer_question:
+            self.rec.gate("scope", True, influencer_refusal or influencer_question)
+            update: dict[str, Any] = {}
+            if influencer_refusal:
+                update |= _stop(AssessmentStatus.REFUSED, influencer_refusal)
+            else:
+                update["clarification_question"] = influencer_question
+            return update
+        ticker = routing.detect_company(claim, companies, hint)
         reason, question = routing.scope_screen(claim, ticker, hint, companies)
-        self.rec.gate("scope", reason is not None, reason or question or f"company={ticker}")
+        self.rec.gate("scope", reason is not None, reason or question or f"influencer={influencer} company={ticker}")
         request = state.request.model_copy(update={"company_ticker": ticker})
-        update: dict[str, Any] = {"request": request}
+        update = {"request": request, "influencer": influencer}
         if reason:
             update |= _stop(AssessmentStatus.REFUSED, reason)
         elif question:
             update["clarification_question"] = question
         return update
+
+    # -- collect posts (pipeline: stored blog, social, or video; not an agent) ------
+
+    def collect_posts(self, state: FinSightState) -> dict[str, Any]:
+        """Read one stored post. The cut-off is that post's date. Nothing is downloaded."""
+        req = state.request
+        aliases = self.ctx.settings.corpus_companies.get(req.company_ticker or "", [])
+        display = routing.INFLUENCERS[state.influencer][0]
+        company = aliases[0] if aliases else req.company_ticker
+        matched = posts.posts_for(posts.load_posts(self.ctx.settings.posts_dir), state.influencer, aliases)
+        # The Company X demo is outside the project window. Real companies stay inside it.
+        if req.company_ticker != "CMPX":
+            matched = [row for row in matched if posts.in_window(row)]
+        with_text = [row for row in matched if row.get("transcript")]
+        listed_only = [row for row in matched if not row.get("transcript")]
+        self.rec.event(
+            "collect_posts",
+            f"{display}: {len(with_text)} posts with text, {len(listed_only)} listed without text, "
+            f"about {req.company_ticker}",
+        )
+        if not with_text and not listed_only and req.company_ticker == "CMPX":
+            self.rec.event("collect_posts", "placeholder company; no stored post, so the submitted sentence is checked")
+            return {}
+        pasted = state.post_id or posts.video_id_from_text(state.raw_input)
+        if pasted and not any(row.get("video_id") == pasted for row in matched):
+            return _stop(AssessmentStatus.REFUSED, "That post is not in the store.")
+        if not with_text and listed_only:
+            return _stop(
+                AssessmentStatus.REFUSED,
+                f"A {display} video about {company} is listed, and the transcript is not available yet.",
+            )
+        if not with_text:
+            return _stop(
+                AssessmentStatus.REFUSED,
+                f"No stored post from {display} about {company} is available to check.",
+            )
+        # Consistency and accuracy ask about the whole window, not one video.
+        explicit = state.post_id or posts.video_id_from_text(state.raw_input)
+        kinds = posts.record_kinds(state.raw_input)
+        if kinds and not explicit:
+            ordered = sorted(with_text, key=lambda row: (posts.post_date(row) or date.min, str(row.get("video_id") or "")))
+            self.rec.event("collect_posts", f"record over {len(ordered)} posts: {', '.join(sorted(kinds))}")
+            return {"clarification_question": posts.record_marker(kinds, [str(row.get("video_id")) for row in ordered])}
+        chosen = posts.choose_post(with_text, state.raw_input, state.influencer, state.post_id)
+        if chosen is None:
+            return _stop(AssessmentStatus.REFUSED, "That post is not in the store.")
+        if isinstance(chosen, list):
+            return {"clarification_question": posts.which_post_question(chosen)}
+        transcript = posts.about_company(
+            str(chosen.get("transcript") or "").strip(),
+            req.company_ticker or "",
+            self.ctx.settings.corpus_companies,
+        )
+        uploaded = posts.post_date(chosen)
+        fields: dict[str, Any] = {"raw_claim": transcript or str(chosen.get("transcript") or "").strip()}
+        # A date typed in the prompt does not replace the post date.
+        if uploaded is not None:
+            fields["cutoff_date"] = uploaded
+            fields["cutoff_was_defaulted"] = False
+            if self.rec.log is not None:
+                self.rec.log.cutoff_date = uploaded
+        request = req.model_copy(update=fields)
+        when = uploaded.strftime("%d %b %Y").lstrip("0") if uploaded else "an unknown date"
+        label = (
+            f"Checked {display}, \"{chosen.get('title') or 'untitled'}\" "
+            f"({chosen.get('video_id')}), published {when}."
+        )
+        if posts.score(state.raw_input, chosen, state.influencer) == 0 and _has_claim_words(state.raw_input):
+            label += " The wording in the prompt is not in this post. The post was checked."
+        label += " " + post_limits(str(chosen.get("transcript") or ""), str(chosen.get("video_id") or "") or None)
+        self.rec.event(
+            "collect_posts",
+            f"post {chosen.get('video_id')} {chosen.get('upload_date')} cutoff={request.cutoff_date}",
+        )
+        return {
+            "request": request,
+            "from_stored_post": True,
+            "checked_post": label,
+            "post_id": str(chosen.get("video_id") or "") or None,
+        }
 
     # -- clarification (diagram: "Unclear or missing info" -> ask the user) ------
 
@@ -134,31 +238,38 @@ class Nodes:
         self.rec.gate("clarification", True, state.clarification_question)
         return {"status": AssessmentStatus.NEEDS_CLARIFICATION}
 
-    # -- 4. decompose -------------------------------------------------------
+    # -- claim extraction (its own step; the orchestrator starts at plan) ---
 
-    def decompose(self, state: FinSightState) -> dict[str, Any]:
+    def extract_claims(self, state: FinSightState) -> dict[str, Any]:
         req = state.request
-        sub_claims, error = self._call("decomposer", self.ctx.registry.decomposer.decompose,
-                                   req.raw_claim, req.cutoff_date)
-        if error or not isinstance(sub_claims, list) or not all(isinstance(c, SubClaim) for c in sub_claims):
-            return _stop(AssessmentStatus.FAILED, f"Claim decomposition failed: {error or 'invalid output'}")
-        if len({c.sub_claim_id for c in sub_claims}) != len(sub_claims):
-            # DECISION: renumber duplicate sub_claim_ids instead of failing the run.
-            sub_claims = [c.model_copy(update={"sub_claim_id": f"c{i + 1}"}) for i, c in enumerate(sub_claims)]
-            self.rec.event("decompose", "duplicate sub_claim_ids from decomposer; renumbered")
-        sub_claims = [c if c.company_ticker else c.model_copy(update={"company_ticker": req.company_ticker})
-                  for c in sub_claims]
-        self.rec.event("decompose", f"{len(sub_claims)} sub-claims: " + ", ".join(
-            f"{c.sub_claim_id}={c.sub_claim_type.value}" for c in sub_claims))
-        refusing = [c for c in sub_claims if c.sub_claim_type is SubClaimType.PERSONALIZED_ADVICE
-                    or self.ctx.kb.rule_for(c.sub_claim_type).refuse]
-        update: dict[str, Any] = {"sub_claims": sub_claims}
-        if refusing:
-            note = self.ctx.kb.rule_for(refusing[0].sub_claim_type).note or "Personalized advice is out of scope."
-            update |= _stop(AssessmentStatus.REFUSED, f"Sub-claim {refusing[0].sub_claim_id}: {note}")
-        elif all(c.sub_claim_type is SubClaimType.OTHER for c in sub_claims):
-            # DECISION: no recognisable sub-claim (none, or only OTHER) counts as unclear -> ask what to check.
-            update["clarification_question"] = routing.CLARIFY_NO_SUB_CLAIM
+        claims_path = self.ctx.settings.posts_dir.parent / "claims" / "claims.jsonl"
+        stored = load_stored_claims(claims_path, state.post_id, req.company_ticker) if state.from_stored_post else None
+        reasons = load_stored_reasons(claims_path, state.post_id, req.company_ticker) if stored is not None else None
+        extracted = run_extraction(
+            text=req.raw_claim,
+            cutoff=req.cutoff_date,
+            company_ticker=req.company_ticker,
+            companies=self.ctx.settings.corpus_companies,
+            from_stored_post=state.from_stored_post,
+            decomposer=self.ctx.registry.decomposer,
+            knowledge=self.ctx.kb,
+            call=self._call,
+            stored=stored,
+            stored_reasons=reasons,
+        )
+        for note in extracted.notes:
+            self.rec.event("extract_claims", note)
+        update: dict[str, Any] = {"sub_claims": extracted.sub_claims}
+        if extracted.insufficient_reasons:
+            update["insufficient_reasons"] = extracted.insufficient_reasons
+        if extracted.dropped_by_cap:
+            quoted = "; ".join(f'"{quote}"' for quote in extracted.dropped_by_cap)
+            note = f"Not checked, past the cap of 8: {quoted}."
+            update["checked_post"] = f"{state.checked_post or ''} {note}".strip()
+        if extracted.status is not None:
+            update |= _stop(extracted.status, extracted.refusal_reason or "Claim extraction failed.")
+        elif extracted.clarification_question:
+            update["clarification_question"] = extracted.clarification_question
         return update
 
     # -- 5. plan ------------------------------------------------------------
@@ -170,6 +281,8 @@ class Nodes:
             entry = routing.plan_entry(sub_claim, rule)
             plan[sub_claim.sub_claim_id] = entry
             self.rec.plan(entry)
+            if sub_claim.sub_claim_id in insufficient:
+                continue
             if entry.collectors:
                 pending.append(sub_claim.sub_claim_id)
             else:
@@ -339,7 +452,8 @@ class Nodes:
             verdict, why = routing.cap_verdict(verdict, rule)
             if why:
                 reasons.append(why)
-            for guard in (routing.enforce_tier_requirement, routing.enforce_counter_evidence):
+            for guard in (routing.enforce_tier_requirement, routing.cap_tier2_only_support,
+                          routing.enforce_counter_evidence):
                 verdict, why = guard(verdict, evidence, rule)
                 if why:
                     reasons.append(why)
@@ -371,12 +485,18 @@ class Nodes:
                 gaps.append(f"{cid}: {state.insufficient_reasons[cid]}")
             elif verdict is Verdict.INSUFFICIENT_EVIDENCE:
                 gaps.append(f"{cid}: no supporting evidence from a required source tier before the cut-off.")
-        if not state.sub_claims:
-            gaps.append("No checkable sub-claims were found in the claim.")
-        overall = overall_verdict([r.verdict for r in results])
+        if not results:
+            overall = None
+            text = "Nothing in this post could be checked, so there is no overall label."
+            gaps.append(text)
+        else:
+            overall = overall_verdict([unit.verdict for unit in report_units(results)])
+            text = explain.summary(results, overall)
+        # The report names what the user asked. The post text stays in the check, not in this line.
+        shown_claim = state.raw_input if state.from_stored_post else state.request.raw_claim
         final = FinalAssessment(
             request_id=state.request.request_id, status=AssessmentStatus.COMPLETED,
-            claim=state.request.raw_claim, summary=explain.summary(results, overall),
+            claim=shown_claim, checked_post=state.checked_post, summary=text,
             overall_verdict=overall, sub_claim_results=results,
             evidence_gaps=gaps, as_of_date=state.request.cutoff_date,
             cutoff_was_defaulted=state.request.cutoff_was_defaulted, boundary_disclaimer=BOUNDARY_DISCLAIMER,

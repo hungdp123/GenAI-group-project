@@ -19,7 +19,7 @@ option and marked `# DECISION:` in the code. Rows marked **Team** need group sig
 | D10 | Sub-claims run in parallel in a thread pool inside the gather and audit nodes, rather than the LangGraph Send API | Keeps the state simple (no reducers); same speed-up | `nodes.py` | Done |
 | D11 | The live decision log is held by a thread-safe recorder and copied into the graph state at `finalize` | Parallel agent calls append safely; the state stays plain data | `logging/decision_log.py` | Done |
 | D12 | Total latency = wall-clock for the run, not the sum of agent calls | Agents run in parallel, so a sum overstates user-facing latency | `decision_log.py` | Done |
-| D13 | Duplicate sub-claim IDs from the decomposer are renumbered, not treated as an error | Robustness; logged as an event | `nodes.py: decompose` | Done |
+| D13 | Duplicate sub-claim IDs from the decomposer are renumbered, not treated as an error | Robustness; logged as an event | `claim_extraction/extract.py` | Done |
 | D14 | NEUTRAL evidence is kept and counts toward `highest_tier_used`, but is listed under neither supporting nor challenging | Schema only has the two lists | `nodes.py: assemble` | Done |
 | D15 | Claim text is dropped if it comes back as evidence (`doc_type` claim, or content contained verbatim in the claim) | Spec: the pasted claim is never evidence | `routing.py: is_claim_echo` | Done |
 | D17 | End-to-end tests are pinned to the stubs (`STUB_IMPLEMENTATIONS`); only the contract tests run the registered agents | Real agents can merge one at a time without breaking demo expectations | `config.py`, `tests/conftest.py` | Done |

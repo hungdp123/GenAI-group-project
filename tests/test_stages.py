@@ -7,8 +7,9 @@ from finsight.contracts.schemas import AssessmentStatus
 
 from demo import DEMO_CLAIM, DEMO_CUTOFF
 
-DEMO_STAGES = ["intake", "advice_gate_input", "scope_check", "decompose", "plan", "gather_evidence", "audit",
-               "retry_or_accept", "apply_tier_policy", "assemble", "advice_gate_output", "finalize"]
+DEMO_STAGES = ["intake", "advice_gate_input", "scope_check", "collect_posts", "extract_claims", "plan",
+               "gather_evidence", "audit", "retry_or_accept", "apply_tier_policy", "assemble",
+               "advice_gate_output", "finalize"]
 
 
 def test_on_stage_sees_every_node_and_result_is_unchanged():
@@ -41,9 +42,9 @@ def test_reporter_lines_for_retry_round_only_show_retried_sub_claim(monkeypatch)
     lines: list[str] = []
     execute(DEMO_CLAIM, DEMO_CUTOFF, on_stage=StageReporter(emit=lines.append))
     text = "\n".join(lines)
-    second_gather = text.split("[ 9] gather_evidence")[1].split("[10]")[0]
+    second_gather = text.split("[10] gather_evidence")[1].split("[11]")[0]
     assert "sc1" in second_gather and "sc2" not in second_gather and "sc4" not in second_gather
-    assert "RETRY with collectors financial+narrative" in text
+    assert "RETRY with collectors financial;" in text
     assert "1 retries" in text
 
 
@@ -59,13 +60,14 @@ def test_cli_stages_demo(capsys):
 def test_cli_stages_stops_at_refusal_and_clarification(capsys):
     cli_main(["run", "Should I put my savings into Company X?", "--stages"])
     refused = capsys.readouterr().out
-    assert "STOP -> REFUSED" in refused and "decompose" not in refused
+    assert "STOP -> REFUSED" in refused and "extract_claims" not in refused
 
     cli_main(["run", "Its revenue growth is just getting started.", "--stages"])
     asked = capsys.readouterr().out
-    assert "needs clarification: Which company" in asked and "[ 4] clarification" in asked
+    assert "needs clarification: Which influencer" in asked and "[ 4] clarification" in asked
 
 
 def test_cli_company_answers_clarification(capsys):
-    cli_main(["run", "Its revenue growth is just getting started.", "--cutoff", "2025-07-31", "--company", "CMPX"])
+    cli_main(["run", "Its revenue growth is just getting started.", "--cutoff", "2025-07-31",
+              "--company", "CMPX", "--influencer", "Joseph Carlson"])
     assert "Overall, this claim is" in capsys.readouterr().out

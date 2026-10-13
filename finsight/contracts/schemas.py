@@ -20,7 +20,9 @@ from pydantic import BaseModel, ConfigDict, Field
 #      ClaimType -> SubClaimType, ClaimResult -> SubClaimResult, claim_id -> sub_claim_id,
 #      claim_type -> sub_claim_type, claim_results -> sub_claim_results).
 # 0.4: FinalAssessment.claim + summary, SubClaimResult.explanation (plain-language output; all optional).
-SCHEMA_VERSION = "0.4"
+# 0.5: SubClaim.source_span, parent_span, expansion_rule, measure, quote_time.
+#      Set when section 6 expands a vague phrase. The report shows that expansion.
+SCHEMA_VERSION = "0.5"
 
 
 class _Strict(BaseModel):
@@ -125,6 +127,15 @@ class SubClaim(_Strict):
     sub_claim_type: SubClaimType
     company_ticker: str | None = None
     is_quantitative: bool = False
+    source_span: str | None = Field(default=None, description="The quote in the stored post.")
+    parent_span: str | None = Field(
+        default=None, description="The original vague phrase, set only on a section 6 expansion.")
+    expansion_rule: str | None = Field(
+        default=None, description="The section 6 rule, for example financially_strong.")
+    measure: str | None = Field(
+        default=None, description="The measure this child tests, for example profitability or leverage.")
+    quote_time: str | None = Field(
+        default=None, description="A time from the stored post, such as 02:14. Empty when the post has none.")
 
 
 class EvidenceItem(_Strict):
@@ -222,6 +233,8 @@ class FinalAssessment(_Strict):
     request_id: str
     status: AssessmentStatus
     claim: str | None = Field(default=None, description="The claim as the user submitted it")
+    checked_post: str | None = Field(
+        default=None, description="Influencer, title, post id, and publication date of the stored post.")
     summary: str | None = Field(
         default=None, description="Plain-language overall summary shown before the details (built by rule, no LLM)")
     overall_verdict: Verdict | None = None
@@ -327,6 +340,13 @@ class FinSightState(_Strict):
     raw_input: str = ""
     cutoff_input: date | None = None
     company_hint: str | None = None
+    # Empty string means the user answered the influencer question and named nobody.
+    influencer_hint: str | None = None
+    post_id: str | None = None
+    influencer: str | None = None
+    from_stored_post: bool = False
+    # Set when a stored post was chosen: influencer, title, post id, and publication date.
+    checked_post: str | None = None
     # progress
     request: ClaimRequest | None = None
     status: AssessmentStatus | None = None  # set only when the run stops early

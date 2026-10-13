@@ -14,8 +14,10 @@ def test_seed_table_loads():
 
 def test_other_uses_fallback():
     rule = load_knowledge_layer().rule_for(SubClaimType.OTHER)
-    assert rule.collectors == ["financial", "narrative"]
-    assert rule.highest_verdict is Verdict.PARTIALLY_SUPPORTED
+    assert rule.collectors == ["narrative"]
+    assert rule.highest_verdict is Verdict.SUPPORTED
+    assert rule.tier_requirement == [SourceTier.TIER_1, SourceTier.TIER_2]
+    assert rule.counter_evidence_only
 
 
 def test_unknown_sub_claim_type_fails_loudly(tmp_path):

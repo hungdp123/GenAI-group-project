@@ -5,9 +5,11 @@ from datetime import date
 
 from finsight import execute
 from finsight.agents.advice_boundary.stub import StubAdviceBoundary
-from finsight.agents.orchestrator.explain import source_label, verdict_label
+from finsight.agents.orchestrator.explain import source_label, summary, verdict_label
 from finsight.agents.orchestrator.render import render_assessment
-from finsight.contracts.schemas import AdviceStage, EvidenceItem, SourceTier, Stance, Verdict
+from finsight.contracts.schemas import (
+    AdviceStage, EvidenceItem, SourceTier, Stance, SubClaim, SubClaimResult, SubClaimType, Verdict,
+)
 
 from demo import DEMO_CLAIM, DEMO_CUTOFF
 
@@ -59,23 +61,48 @@ def test_refusal_and_clarification_summaries_are_readable():
     assert refused.summary.startswith("FinSight didn't analyse this request.")
     assert "\\b" not in refused.summary and "pattern" not in refused.summary
     asked = execute("Its revenue growth is just getting started.", DEMO_CUTOFF).assessment
-    assert asked.summary.startswith("FinSight needs a bit more information") and "Which company" in asked.summary
+    assert asked.summary.startswith("FinSight needs a bit more information") and "Which influencer" in asked.summary
 
 
 def test_overall_sentence_reads_naturally_for_every_verdict():
-    cutoff_before_filing = execute("Company X's revenue growth is driven by AI demand.", date(2025, 7, 24))
-    assert cutoff_before_filing.assessment.summary.startswith(
-        "Overall, this claim can't be confirmed from the available evidence.")
-    single = execute("Company X is getting more profitable: its margins keep expanding.", DEMO_CUTOFF).assessment
+    ranking = SubClaimResult(
+        sub_claim=SubClaim(sub_claim_id="c", text="biggest winner", sub_claim_type=SubClaimType.COMPARATIVE),
+        verdict=Verdict.INSUFFICIENT_EVIDENCE, rationale="A ranking is not checked against peer filings.",
+    )
+    text = summary([ranking], Verdict.INSUFFICIENT_EVIDENCE)
+    assert text.startswith("Overall, this claim can't be confirmed from the available evidence.")
+    single = execute(
+        "Joseph Carlson said Company X is getting more profitable: its margins keep expanding.",
+        DEMO_CUTOFF).assessment
     assert single.summary == ("Overall, the evidence contradicts this claim. "
                               "FinSight checked it against company filings and reports.")
-    assert "claim is can't" not in cutoff_before_filing.assessment.summary
+    assert "claim is can't" not in text
     assert "checked each" not in single.summary  # one point: "checked it"
 
 
 def test_company_given_separately_is_not_shown_as_unknown():
-    fa = execute("Its revenue growth is just getting started.", DEMO_CUTOFF, company_ticker="CMPX").assessment
+    fa = execute("Its revenue growth is just getting started.", DEMO_CUTOFF, company_ticker="CMPX",
+                 influencer="Joseph Carlson").assessment
     assert fa.sub_claim_results and not any("UNKNOWN" in r.sub_claim.text for r in fa.sub_claim_results)
+
+
+def test_a_partial_label_names_why():
+    from finsight.agents.orchestrator.explain import explain, partial_reason
+
+    forward = SubClaimResult(
+        sub_claim=SubClaim(sub_claim_id="a", text="Growth is just getting started.",
+                           sub_claim_type=SubClaimType.CONTINUATION),
+        verdict=Verdict.PARTIALLY_SUPPORTED, rationale="test",
+    )
+    causes = SubClaimResult(
+        sub_claim=SubClaim(sub_claim_id="b", text="Growth is from AI demand.",
+                           sub_claim_type=SubClaimType.DEMAND_ATTRIBUTION),
+        verdict=Verdict.PARTIALLY_SUPPORTED, rationale="test",
+    )
+    assert partial_reason(forward) == "forward-looking"
+    assert partial_reason(causes) == "more than one cause"
+    assert "about the future" in explain(forward, date(2026, 9, 29), None)
+    assert "more than one cause" in explain(causes, date(2026, 9, 29), None)
 
 
 def test_labels():
