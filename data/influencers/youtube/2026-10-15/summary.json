@@ -4,7 +4,7 @@
   "window": "2026-04-01 through 2026-09-30, inclusive",
   "until_date": "2026-09-30",
   "date_note": "published_at comes from YouTube's relative label. date_precision 'day' is a recent label such as '4 days ago'. 'week' is 'N weeks ago'. 'month' is 'N months ago', so every video in that month bucket shares one date and the July bucket can include a video from early June.",
-  "source": "Channel Videos tab for the list. Spoken words from the public English caption track. upload_date is the video's real upload date.",
+  "source": "Channel Videos tab for the list. Spoken words from the public English caption track, or from youtube-transcript-api when that track returned HTTP 429 (see transcript_via). upload_date is the video's real upload date.",
   "counts": {
     "alex_reffett": 46
   },

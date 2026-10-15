@@ -5,12 +5,14 @@ listed video and save the English caption track (the spoken words) plus the
 description and the real upload date.
 
 YouTube's Data API will not download another creator's captions. This uses the
-public caption track the video page already exposes.
+public caption track the video page already exposes. When that download returns
+HTTP 429, the same captions are requested through youtube-transcript-api, which
+uses a different YouTube endpoint. transcript_via records which one was used.
 
-Requires yt-dlp. From the repo root:
+Requires yt-dlp and youtube-transcript-api. From the repo root:
 
     python3 -m venv .venv
-    .venv/bin/pip install yt-dlp
+    .venv/bin/pip install yt-dlp youtube-transcript-api
     .venv/bin/python scripts/scrape_influencer_youtube.py
     .venv/bin/python scripts/scrape_influencer_youtube.py --transcripts
 
@@ -23,6 +25,7 @@ import argparse
 import json
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -155,7 +158,8 @@ def write_run(
     out_dir = _ROOT / "data" / "influencers" / "youtube" / now.date().isoformat()
     out_dir.mkdir(parents=True, exist_ok=True)
     kept_fields = (
-        "description", "upload_date", "transcript", "transcript_source", "transcript_chars", "transcript_error",
+        "description", "upload_date", "transcript", "transcript_source", "transcript_via", "transcript_chars",
+        "transcript_error",
     )
     counts = {}
     for name, rows in by_influencer.items():
@@ -238,7 +242,7 @@ def reuse_saved_transcripts(run_dir: Path) -> int:
             if row.get("video_id") and row.get("transcript"):
                 saved[row["video_id"]] = row
     copied = 0
-    fields = ("description", "upload_date", "transcript", "transcript_source", "transcript_chars")
+    fields = ("description", "upload_date", "transcript", "transcript_source", "transcript_via", "transcript_chars")
     for path in sorted(run_dir.glob("*.jsonl")):
         rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
         changed = False
@@ -319,6 +323,28 @@ def keep_window(run_dir: Path, since: str, until: str) -> None:
         print(f"{path.stem}: kept {len(kept)} of {len(rows)}", flush=True)
 
 
+def _transcript_api(video_id: str) -> tuple[str, str]:
+    """English captions through youtube-transcript-api. A creator-uploaded track wins.
+
+    Raises with "429" in the message when YouTube blocks this endpoint too, so a
+    run that stops on rate limits still stops.
+    """
+    from youtube_transcript_api import YouTubeTranscriptApi
+    from youtube_transcript_api._errors import NoTranscriptFound, RequestBlocked
+
+    try:
+        listing = YouTubeTranscriptApi().list(video_id)
+        try:
+            track, source = listing.find_manually_created_transcript(["en"]), "manual"
+        except NoTranscriptFound:
+            track, source = listing.find_generated_transcript(["en"]), "automatic"
+        text = " ".join(" ".join(snippet.text for snippet in track.fetch()).split())
+    except RequestBlocked as exc:
+        blocked = type(exc).__name__
+        raise RuntimeError(f"HTTP Error 429 on captions; youtube-transcript-api also blocked ({blocked})") from exc
+    return text, source
+
+
 def fetch_spoken_content(video_id: str) -> dict:
     """Title, description, exact upload date, and the spoken transcript."""
     options = {"quiet": True, "no_warnings": True, "skip_download": True}
@@ -326,10 +352,18 @@ def fetch_spoken_content(video_id: str) -> dict:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
     url, source = _caption_url(info)
     transcript = None
+    via = None
     if url:
         request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(request, timeout=30) as response:
-            transcript = _plain_text(response.read())
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                transcript = _plain_text(response.read())
+            via = "caption_track"
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429:
+                raise
+            transcript, source = _transcript_api(video_id)
+            via = "youtube_transcript_api"
     upload = info.get("upload_date")
     exact = None
     if upload and len(upload) == 8:
@@ -340,6 +374,7 @@ def fetch_spoken_content(video_id: str) -> dict:
         "upload_date": exact,
         "transcript": transcript,
         "transcript_source": source,
+        "transcript_via": via,
         "transcript_chars": len(transcript) if transcript else 0,
     }
 
@@ -396,7 +431,8 @@ def add_transcripts(run_dir: Path, pause_seconds: float = 1.5, stop_on_rate_limi
     if summary_path.exists():
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         summary["source"] = (
-            "Channel Videos tab for the list. Spoken words from the public English caption track. "
+            "Channel Videos tab for the list. Spoken words from the public English caption track, "
+            "or from youtube-transcript-api when that track returned HTTP 429 (see transcript_via). "
             "upload_date is the video's real upload date."
         )
         summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
