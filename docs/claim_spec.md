@@ -135,14 +135,6 @@ Fields marked **new** are not in the current `EvalItem` and need adding (section
 - A level word with no guideline ("very high margins") is Insufficient Evidence.
 - At most 8 sub-claims per request. Earnings-release text with no matching filing can support a claim only partially. News never supports a claim.
 
-## 6. Changes needed in the repo (for Hung)
-
-1. **`EvalItem`** in `finsight/eval/run_eval.py` (`extra="forbid"`): add the **new** fields in section 4, all optional so older items still load. Widen `category` with the 5 new values.
-2. **`validate_datasets()`** in the same file: refusal and clarification items must currently have no gold sub-claims. Items with `expected_outcome` of `PROCESS_AFTER_CLARIFICATION` have both a question and gold sub-claims, so they need an exception.
-3. **`GoldSubClaim`** in `finsight/eval/metrics.py` (`extra="forbid"`): add optional `influencer` and `rule_note`. Make `gold_verdict` optional while item 05's Azure sub-claim is pending.
-4. **`SubClaimType`** in `finsight/contracts/schemas.py`: still the 8-value list, where Irine's rule book has 11 types. This file uses `PROFITABILITY` and `CASH_GENERATION` (the current enum has one combined `PROFITABILITY_CASH_LEVERAGE`), so the enum needs splitting and the other rule-book types added. The names above are provisional until Irine and Hung agree on the exact spelling. `knowledge_layer.yaml` (Irine) changes in the same step.
-5. **`docs/eval_dataset_guide.md`**: document the new fields and categories.
-
 ## 7. Known gaps
 
 - **Empty narrative files.** These are 0 KB in the narrative folders: Amazon FY2025 10-K and Q2 2026 10-Q; Apple FY2025 10-K and the Q2 and Q3 FY26 10-Qs; Starbucks FY2024 and FY2025 10-Ks. Items 09, 19 and 24 carry a caution until they are re-saved. SEC numbers are not affected.
