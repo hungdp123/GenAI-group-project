@@ -11,9 +11,11 @@ from typing import Any, Iterable
 
 
 CANONICAL_MANIFESTS = (
-    Path("data/narrative/raw/from_2021_final/manifest.json"),
-    Path("data/narrative/raw/supplemental_from_2021_official_final/manifest.json"),
-    Path("data/narrative/raw/ir_from_2021_official_final/manifest.json"),
+    Path("data/narrative/raw/manifest_core_sec.json"),
+    Path("data/narrative/raw/manifest_supplemental_sec.json"),
+    Path("data/narrative/raw/manifest_official_ir.json"),
+    Path("data/narrative/raw/manifest_third_party_transcripts.json"),
+    Path("data/narrative/raw/manifest_event_reports.json"),
 )
 
 
@@ -30,11 +32,18 @@ class CorpusDocument:
     sha256: str
     period: str | None = None
     retrieval_eligible: bool = True
+    original_local_path: Path | None = None
+    publication_date_is_estimated: bool = False
+    publication_date_precision: str = "day"
+    publication_date_basis: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         value = asdict(self)
         value["publication_date"] = self.publication_date.isoformat()
         value["local_path"] = self.local_path.as_posix()
+        value["original_local_path"] = (
+            self.original_local_path.as_posix() if self.original_local_path else None
+        )
         return value
 
 
@@ -60,27 +69,54 @@ def load_documents(
     documents: list[CorpusDocument] = []
     for manifest in manifests:
         manifest_path = manifest if manifest.is_absolute() else workspace / manifest
+        if manifest_path.name == "manifest_third_party_transcripts.json" and not manifest_path.exists():
+            continue
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         for item in payload.get("documents", []):
             if str(item.get("company_ticker", "")).upper() != ticker:
                 continue
-            if item.get("retrieval_eligible") is False:
+            exact_date = item.get("publication_date")
+            estimated_date = item.get("estimated_publication_date")
+            if item.get("retrieval_eligible") is False and not estimated_date:
                 continue
+            effective_date = exact_date or estimated_date
+            if not effective_date:
+                continue
+            date_is_estimated = not bool(exact_date) and bool(estimated_date)
             relative_path = Path(item["local_path"])
             local_path = relative_path if relative_path.is_absolute() else workspace / relative_path
+            original_relative_path = item.get("original_local_path")
+            original_local_path = None
+            if original_relative_path:
+                original_relative_path = Path(original_relative_path)
+                original_local_path = (
+                    original_relative_path
+                    if original_relative_path.is_absolute()
+                    else workspace / original_relative_path
+                )
             documents.append(
                 CorpusDocument(
                     document_id=item["document_id"],
                     company_ticker=ticker,
                     company_name=item.get("company_name") or ticker,
                     document_type=item["document_type"],
-                    publication_date=date.fromisoformat(item["publication_date"]),
+                    publication_date=date.fromisoformat(effective_date),
                     source_tier=_source_tier(item["source_tier"]),
                     source_url=item["source_url"],
                     local_path=local_path.resolve(),
                     sha256=item["sha256"].lower(),
                     period=item.get("period"),
                     retrieval_eligible=True,
+                    original_local_path=original_local_path.resolve() if original_local_path else None,
+                    publication_date_is_estimated=date_is_estimated,
+                    publication_date_precision=(
+                        "estimated_day" if date_is_estimated else item.get("date_precision") or "day"
+                    ),
+                    publication_date_basis=(
+                        item.get("estimated_publication_date_basis")
+                        if date_is_estimated
+                        else item.get("publication_date_basis")
+                    ),
                 )
             )
     canonical_name = next(
@@ -115,5 +151,19 @@ def validate_document(document: CorpusDocument) -> None:
 
 
 def corpus_fingerprint(documents: Iterable[CorpusDocument]) -> str:
-    rows = sorted(f"{doc.document_id}:{doc.sha256}" for doc in documents)
+    rows = sorted(
+        json.dumps(
+            {
+                "document_id": doc.document_id,
+                "sha256": doc.sha256,
+                "publication_date": doc.publication_date.isoformat(),
+                "publication_date_is_estimated": doc.publication_date_is_estimated,
+                "publication_date_precision": doc.publication_date_precision,
+                "source_tier": doc.source_tier,
+                "source_url": doc.source_url,
+            },
+            sort_keys=True,
+        )
+        for doc in documents
+    )
     return hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest()

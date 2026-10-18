@@ -10,7 +10,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Iterable
 
-from finsight.agents.narrative.chunk import NarrativeChunk
+from finsight.agents.narrative.processing.chunk import NarrativeChunk
 
 
 INDEX_SCHEMA_VERSION = "1.0"
