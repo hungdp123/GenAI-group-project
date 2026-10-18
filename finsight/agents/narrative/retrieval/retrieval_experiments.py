@@ -14,7 +14,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Protocol, Sequence
 
-from finsight.agents.narrative.index import search_index
+from finsight.agents.narrative.processing.index import search_index
 
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -49,7 +49,10 @@ class SentenceTransformersBackend:
                 "pip install -e .[retrieval]"
             ) from exc
         self.model_name = model_name
-        self.model = SentenceTransformer(model_name)
+        try:
+            self.model = SentenceTransformer(model_name, local_files_only=True)
+        except OSError:
+            self.model = SentenceTransformer(model_name)
 
     def encode_documents(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
         encode = getattr(self.model, "encode_document", self.model.encode)
