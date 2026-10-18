@@ -1,0 +1,18 @@
+{
+  "token_targets": [128, 192, 256],
+  "boundary_policies": ["structure", "sentence", "token"],
+  "weights": {
+    "structural_integrity": 0.25,
+    "context_completeness": 0.25,
+    "semantic_coherence": 0.25,
+    "length_efficiency": 0.25
+  },
+  "max_repeated_context_tokens": 64,
+  "single_unit_coherence": 0.5,
+  "structural_rewards": {
+    "paragraph_or_row": 1.0,
+    "sentence": 0.8,
+    "word": 0.25,
+    "character": 0.0
+  }
+}

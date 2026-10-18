@@ -1,5 +1,16 @@
 # Narrative Agent — Week 1 Summary
 
+> **Current processing status (17 October 2026):** All 1,204 retrieval-eligible
+> documents across 16 companies are represented in the saved blocks, chunks and
+> BM25 indexes. All 16 companies pass the current document-coverage, provenance
+> and freshness checks. Microsoft's rebuilt output includes all 66 documents,
+> including its 11 converted presentation PDFs. The current totals are 9,225 blocks,
+> 22,657 chunks and 21,972 deduplicated indexed passages. The remaining sections
+> retain the original Week 1 snapshot. See the [updated Week 1 recap](recap_week_1.md)
+> and [audit report](../../../data/narrative/experiments/week1_audit/report.json).
+
+Workflow recap (tasks, inputs, scripts, outputs and status): [Week 1 recap](recap_week_1.md).
+
 ## Goal
 
 Prepare official company documents for the Narrative Agent: collect SEC filings and
@@ -283,7 +294,7 @@ locate it within the filing, and `source_url` to verify it against the original.
 a relevant passage to inspect—not an automatic conclusion that the question's claim is true.
 
 The chunking, metadata, and retrieval details are documented in
-[`narrative_chunking_metadata_retrieval_schema.md`](narrative_chunking_metadata_retrieval_schema.md).
+[`narrative_chunking_metadata_retrieval_schema.md`](../reference/narrative_chunking_metadata_retrieval_schema.md).
 
 ## Current gaps / next work
 

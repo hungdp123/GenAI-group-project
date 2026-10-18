@@ -1,0 +1,52 @@
+{
+  "status": "complete",
+  "approved_at": "2026-10-15T17:08:11.725358+00:00",
+  "approval_basis": "Explicit user approval of draft questions and references in this session",
+  "query_file": "docs\\retrieval_queries_v2.jsonl",
+  "query_set_sha256": "f3a0eb4cf3d61347e216f921c4a12da35ce252f185f65cb1a313c1083624fbb8",
+  "company_count": 16,
+  "directional_query_count": 32,
+  "previous_results_archive": "data/narrative/experiments/retrieval_comparison/archives/pre_v2_20261016_010813",
+  "top_k": 10,
+  "candidate_k": 50,
+  "completed_at": "2026-10-15T17:19:55.766811+00:00",
+  "results_snapshot": "data/narrative/experiments/retrieval_comparison/runs/all_16_v2_20261015T171955Z",
+  "evaluation_checks": {
+    "bm25": {
+      "returned": 320,
+      "cutoff_leaks": 0,
+      "wrong_company_results": 0,
+      "duplicate_results": 0,
+      "missing_citation_metadata": 10,
+      "index_mismatches": 0,
+      "missing_source_files": 0
+    },
+    "dense": {
+      "returned": 320,
+      "cutoff_leaks": 0,
+      "wrong_company_results": 0,
+      "duplicate_results": 0,
+      "missing_citation_metadata": 15,
+      "index_mismatches": 0,
+      "missing_source_files": 0
+    },
+    "hybrid_rrf": {
+      "returned": 320,
+      "cutoff_leaks": 0,
+      "wrong_company_results": 0,
+      "duplicate_results": 0,
+      "missing_citation_metadata": 15,
+      "index_mismatches": 0,
+      "missing_source_files": 0
+    },
+    "hybrid_cross_encoder": {
+      "returned": 320,
+      "cutoff_leaks": 0,
+      "wrong_company_results": 0,
+      "duplicate_results": 0,
+      "missing_citation_metadata": 16,
+      "index_mismatches": 0,
+      "missing_source_files": 0
+    }
+  }
+}
