@@ -1,7 +1,7 @@
 """Run the five narrative-retrieval approaches on the same query and corpus.
 
 Example:
-    python -m finsight.agents.narrative.compare_retrieval \
+    python -m finsight.agents.narrative.evaluation.compare_retrieval \
       --query "NVDA data center demand risks and customer concentration" \
       --cutoff 2025-07-31
 """
@@ -14,8 +14,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from finsight.agents.narrative.index import load_index
-from finsight.agents.narrative.retrieval_experiments import (
+from finsight.agents.narrative.processing.index import load_index
+from finsight.agents.narrative.retrieval.retrieval_experiments import (
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_RERANKER_MODEL,
     DenseVectorCache,
@@ -65,7 +65,7 @@ def compare_query(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--index", type=Path, default=Path("data/narrative/processed/indexes/NVDA_full/index.json"))
+    parser.add_argument("--index", type=Path, default=Path("data/narrative/processed/NVDA/indexes/index.json"))
     parser.add_argument("--dense-cache", type=Path)
     parser.add_argument("--query", required=True)
     parser.add_argument("--cutoff", type=date.fromisoformat, required=True)
