@@ -30,8 +30,8 @@ from finsight.contracts.interfaces import (
 STUB_IMPLEMENTATIONS: dict[str, str] = {
     "decomposer": "finsight.agents.decomposition.stub:StubDecomposer",
     "financial": "finsight.agents.financial.stub:StubFinancialAgent",
-    "narrative": "finsight.agents.narrative.stub:StubNarrativeAgent",
-    "retriever": "finsight.agents.narrative.retriever_stub:StubRetriever",
+    "narrative": "finsight.agents.narrative.demo.stub:StubNarrativeAgent",
+    "retriever": "finsight.agents.narrative.demo.retriever_stub:StubRetriever",
     "auditor": "finsight.agents.auditor.stub:StubAuditor",
     "advice_boundary": "finsight.agents.advice_boundary.stub:StubAdviceBoundary",
     "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",
@@ -42,8 +42,8 @@ STUB_IMPLEMENTATIONS: dict[str, str] = {
 DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
     "decomposer": "finsight.agents.decomposition.stub:StubDecomposer",  # Person 3
     "financial": "finsight.agents.financial.stub:StubFinancialAgent",  # Person 1
-    "narrative": "finsight.agents.narrative.stub:StubNarrativeAgent",  # Person 2
-    "retriever": "finsight.agents.narrative.retriever_stub:StubRetriever",  # Person 2
+    "narrative": "finsight.agents.narrative.demo.stub:StubNarrativeAgent",  # Person 2
+    "retriever": "finsight.agents.narrative.demo.retriever_stub:StubRetriever",  # Person 2
     "auditor": "finsight.agents.auditor.stub:StubAuditor",  # Person 3
     "advice_boundary": "finsight.agents.advice_boundary.stub:StubAdviceBoundary",  # Person 4
     "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",  # Person 4
@@ -63,6 +63,18 @@ _PROTOCOLS: dict[str, type] = {
 # DECISION: placeholder corpus with the demo company only; Person 2 / Person 4 extend it.
 CORPUS_COMPANIES: dict[str, list[str]] = {
     "CMPX": ["Company X", "CMPX"],
+}
+
+# Opt-in canonical scope. Demo defaults remain pinned until team acceptance.
+CANONICAL_COMPANIES: dict[str, list[str]] = {
+    "AAPL": ["Apple", "AAPL"], "AMD": ["Advanced Micro Devices", "AMD"],
+    "AMZN": ["Amazon", "AMZN"], "CRM": ["Salesforce", "CRM"],
+    "GOOGL": ["Alphabet", "Google", "GOOGL"], "INTC": ["Intel", "INTC"],
+    "INTU": ["Intuit", "INTU"], "MELI": ["MercadoLibre", "Mercado Libre", "MELI"],
+    "META": ["Meta Platforms", "Meta", "META"], "MSFT": ["Microsoft", "MSFT"],
+    "NFLX": ["Netflix", "NFLX"], "NVDA": ["NVIDIA", "NVDA"],
+    "ORCL": ["Oracle", "ORCL"], "PLTR": ["Palantir", "PLTR"],
+    "SBUX": ["Starbucks", "SBUX"], "TSLA": ["Tesla", "TSLA"],
 }
 
 # USD per 1M tokens (input, output), standard tier. Real calls to a model missing here are refused.
@@ -142,6 +154,9 @@ def get_settings() -> Settings:
     local = read_local_config()
     provider = (os.getenv("FINSIGHT_LLM_PROVIDER") or local.get("llm_provider") or "mock").lower()
     model = os.getenv("FINSIGHT_LLM_MODEL") or (local.get("llm_model") if provider != "mock" else None)
+    profile = os.getenv("FINSIGHT_CORPUS_PROFILE", "demo")
+    if profile not in {"demo", "canonical"}:
+        raise ValueError("FINSIGHT_CORPUS_PROFILE must be demo or canonical")
     return Settings(
         llm_provider=provider,
         llm_model=model or DEFAULT_MODELS.get(provider, "mock-model"),
@@ -149,6 +164,7 @@ def get_settings() -> Settings:
         corpus_as_of_date=date.fromisoformat(os.getenv("FINSIGHT_CORPUS_AS_OF", "2025-07-31")),
         logs_dir=Path(os.getenv("FINSIGHT_LOGS_DIR", "logs")),
         max_workers=int(os.getenv("FINSIGHT_MAX_WORKERS", "4")),
+        corpus_companies=dict(CANONICAL_COMPANIES if profile == "canonical" else CORPUS_COMPANIES),
     )
 
 

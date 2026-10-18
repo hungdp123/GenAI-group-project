@@ -18,8 +18,17 @@ dependencies = [
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.40"]
+document-ai = [
+    "docling>=2.139,<3",
+    "openai>=2.38",
+    "pillow>=10",
+    "pypdfium2>=4.30",
+]
 dev = ["pytest>=8", "ruff>=0.6"]
-retrieval = ["sentence-transformers>=3.0"]
+retrieval = [
+    "qdrant-client>=1.12",
+    "sentence-transformers>=3.0",
+]
 
 [project.scripts]
 finsight = "finsight.cli:main"
