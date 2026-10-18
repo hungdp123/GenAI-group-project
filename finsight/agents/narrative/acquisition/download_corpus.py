@@ -27,6 +27,7 @@ from typing import Any
 DEFAULT_TICKERS = [
     "AAPL", "GOOGL", "MSFT", "NKE", "NVDA", "MCD", "TSLA", "NFLX",
     "OPEN", "KSS", "DNUT", "GPRO", "BIRD", "GME", "AMC",
+    "AMZN", "META", "MELI", "SBUX", "PLTR", "INTC", "INTU", "CRM", "ORCL", "AMD",
 ]
 SEC_DATA = "https://data.sec.gov"
 SEC_ARCHIVES = "https://www.sec.gov/Archives/edgar/data"
@@ -257,7 +258,12 @@ def main() -> int:
         "--output",
         type=Path,
         required=True,
-        help="Destination directory for the corpus manifest and downloaded files.",
+        help=(
+            "Corpus folder under data/narrative/raw (e.g. "
+            "data/narrative/raw/core_sec). For canonical raw output, "
+            "files go in raw/<TICKER>/<folder>/ and the manifest is written "
+            "directly in raw/ with a dataset-specific name."
+        ),
     )
     parser.add_argument("--tickers", nargs="+", default=DEFAULT_TICKERS)
     parser.add_argument(
@@ -289,7 +295,6 @@ def main() -> int:
         entries.extend(company_entries)
         warnings.extend(company_warnings)
 
-    args.output.mkdir(parents=True, exist_ok=True)
     manifest = {
         "schema_version": "1.0",
         "cutoff_date": args.cutoff.isoformat(),
@@ -298,7 +303,14 @@ def main() -> int:
         "documents": [asdict(entry) for entry in entries],
         "warnings": warnings,
     }
-    manifest_path = args.output / "manifest.json"
+    if args.output.parent.name == "raw" and args.output.parent.parent.name == "narrative":
+        manifest_name = {
+            "core_sec": "manifest_core_sec.json",
+        }.get(args.output.name, f"manifest_{args.output.name}.json")
+        manifest_path = args.output.parent / manifest_name
+    else:
+        args.output.mkdir(parents=True, exist_ok=True)
+        manifest_path = args.output / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Downloaded {len(entries)} documents; manifest: {manifest_path}")
     for warning in warnings:

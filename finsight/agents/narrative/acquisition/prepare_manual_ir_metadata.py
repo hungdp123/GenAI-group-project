@@ -19,9 +19,9 @@ from typing import Any
 ROOT = Path("data/narrative")
 INBOX = ROOT / "manual_inbox"
 MANIFESTS = (
-    ROOT / "raw" / "from_2021_final" / "manifest.json",
-    ROOT / "raw" / "supplemental_from_2021_official_final" / "manifest.json",
-    ROOT / "raw" / "ir_from_2021_official_final" / "manifest.json",
+    ROOT / "raw" / "manifest_core_sec.json",
+    ROOT / "raw" / "manifest_supplemental_sec.json",
+    ROOT / "raw" / "manifest_official_ir.json",
 )
 FROM_DATE = date(2021, 1, 1)
 CUTOFF_DATE = date(2026, 10, 4)

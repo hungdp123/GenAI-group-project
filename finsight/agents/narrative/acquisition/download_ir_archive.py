@@ -21,7 +21,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlunparse
 
-from finsight.agents.narrative.download_corpus import SecClient, _safe_name
+from finsight.agents.narrative.acquisition.download_corpus import SecClient, _safe_name
+from finsight.agents.narrative.maintenance.publication_dates import (
+    build_quarter_period_lookup,
+    estimate_publication_date,
+)
 
 
 IR_SOURCES: dict[str, list[str]] = {
@@ -58,6 +62,35 @@ IR_SOURCES: dict[str, list[str]] = {
         "https://investor.amctheatres.com/news-events/presentations",
         "https://investor.amctheatres.com/financial-information/financial-results",
     ],
+    "AMZN": [
+        "https://ir.aboutamazon.com/quarterly-results/default.aspx",
+        "https://ir.aboutamazon.com/events/default.aspx",
+    ],
+    "META": [
+        "https://investor.fb.com/financials/quarterly-results/default.aspx",
+        "https://investor.fb.com/events-and-presentations/default.aspx",
+    ],
+    "MELI": [
+        "https://investor.mercadolibre.com/sec-filings",
+        "https://investor.mercadolibre.com/news-and-events",
+    ],
+    "SBUX": [
+        "https://investor.starbucks.com/financials/quarterly-results-and-data/default.aspx",
+        "https://investor.starbucks.com/ir-home/default.aspx",
+    ],
+    "PLTR": [
+        "https://investors.palantir.com/financials/quarterly-results",
+        "https://investors.palantir.com/events/1000",
+    ],
+    "INTC": ["https://www.intc.com/financial-info/financial-results"],
+    "INTU": [
+        "https://investors.intuit.com/financial-information",
+        "https://investors.intuit.com/news-events/ir-calendar/past",
+        "https://investors.intuit.com/news-events/presentations",
+    ],
+    "CRM": ["https://investor.salesforce.com/financials/quarterly-results/"],
+    "ORCL": ["https://investor.oracle.com/financials/"],
+    "AMD": ["https://ir.amd.com/financial-information/financial-results"],
 }
 
 KNOWN_DATES_BY_FILENAME = {
@@ -145,6 +178,8 @@ class IrEntry:
     local_path: str
     sha256: str
     link_text: str
+    estimated_publication_date: str | None
+    estimated_publication_date_basis: str | None
 
 
 class LinkParser(HTMLParser):
@@ -503,7 +538,15 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("data/narrative/raw/ir_from_2021_official_final"),
+        default=Path("data/narrative/raw/official_ir"),
+    )
+    parser.add_argument(
+        "--tickers",
+        nargs="+",
+        type=str.upper,
+        choices=sorted(IR_SOURCES),
+        default=sorted(IR_SOURCES),
+        help="Companies to scan (defaults to all companies configured in IR_SOURCES).",
     )
     parser.add_argument("--max-search-pages", type=int, default=25)
     parser.add_argument("--timeout", type=float, default=15)
@@ -515,7 +558,24 @@ def main() -> int:
     )
     args = parser.parse_args()
     client = SecClient(args.user_agent, timeout=args.timeout, attempts=args.attempts)
-    existing_manifest = args.output / "manifest.json"
+    core_manifest_path = Path("data/narrative/raw/manifest_core_sec.json")
+    period_lookup = (
+        build_quarter_period_lookup(json.loads(core_manifest_path.read_text(encoding="utf-8")))
+        if core_manifest_path.exists()
+        else {}
+    )
+    canonical_output = (
+        args.output.parent.name == "raw"
+        and args.output.parent.parent.name == "narrative"
+    )
+    canonical_manifest_name = {
+        "official_ir": "manifest_official_ir.json",
+    }.get(args.output.name, f"manifest_{args.output.name}.json")
+    existing_manifest = (
+        args.output.parent / canonical_manifest_name
+        if canonical_output
+        else args.output / "manifest.json"
+    )
     cached_files: dict[str, Path] = {}
     cached_failures: dict[str, str] = {}
     if existing_manifest.exists():
@@ -529,20 +589,27 @@ def main() -> int:
                 match = re.match(r"^[A-Z]+: (https?://.*?): Unable to download", warning)
                 if match:
                     cached_failures[match.group(1)] = warning
-    candidates: dict[str, list[tuple[str, str, str]]] = {ticker: [] for ticker in IR_SOURCES}
-    for ticker, seeds in IR_SOURCES.items():
+    candidates: dict[str, list[tuple[str, str, str]]] = {ticker: [] for ticker in args.tickers}
+    for ticker in args.tickers:
+        seeds = IR_SOURCES[ticker]
         print(f"Discovering official IR documents for {ticker}...")
         for seed in seeds:
             try:
                 candidates[ticker].extend(_discover(client, seed, args.max_search_pages))
             except RuntimeError as exc:
                 print(f"WARNING: {ticker}: {exc}")
-    candidates["GOOGL"].extend(_alphabet_pages())
-    candidates["NFLX"].extend(_netflix_pages(client, args.from_date, args.cutoff))
-    candidates["NVDA"].extend(_nvidia_pages())
-    candidates["GPRO"].extend(_gopro_pages(args.from_date, args.cutoff))
-    candidates["OPEN"].extend(_opendoor_pages())
-    candidates["MSFT"] = _microsoft_pages()
+    if "GOOGL" in candidates:
+        candidates["GOOGL"].extend(_alphabet_pages())
+    if "NFLX" in candidates:
+        candidates["NFLX"].extend(_netflix_pages(client, args.from_date, args.cutoff))
+    if "NVDA" in candidates:
+        candidates["NVDA"].extend(_nvidia_pages())
+    if "GPRO" in candidates:
+        candidates["GPRO"].extend(_gopro_pages(args.from_date, args.cutoff))
+    if "OPEN" in candidates:
+        candidates["OPEN"].extend(_opendoor_pages())
+    if "MSFT" in candidates:
+        candidates["MSFT"] = _microsoft_pages()
 
     entries: list[IrEntry] = []
     seen_hashes: set[str] = set()
@@ -603,6 +670,12 @@ def main() -> int:
             date_prefix = date_value or "date-unknown"
             target = target_dir / _safe_name(f"{date_prefix}_{document_type}_{filename}")
             target.write_bytes(payload)
+            if precision == "day":
+                estimated_date, estimate_basis = None, None
+            else:
+                estimated_date, estimate_basis = estimate_publication_date(
+                    ticker, label, target.as_posix(), period_lookup
+                )
             entries.append(IrEntry(
                 document_id=f"{ticker}-IR-{digest[:16]}",
                 company_ticker=ticker,
@@ -617,9 +690,10 @@ def main() -> int:
                 local_path=target.as_posix(),
                 sha256=digest,
                 link_text=label,
+                estimated_publication_date=estimated_date,
+                estimated_publication_date_basis=estimate_basis,
             ))
 
-    args.output.mkdir(parents=True, exist_ok=True)
     manifest: dict[str, Any] = {
         "schema_version": "1.0",
         "source_policy": "Documents directly linked by official company investor-relations pages only.",
@@ -631,7 +705,11 @@ def main() -> int:
             entry.document_id for entry in entries if not entry.retrieval_eligible
         ],
     }
-    manifest_path = args.output / "manifest.json"
+    if canonical_output:
+        manifest_path = args.output.parent / canonical_manifest_name
+    else:
+        args.output.mkdir(parents=True, exist_ok=True)
+        manifest_path = args.output / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Downloaded {len(entries)} official IR documents; manifest: {manifest_path}")
     print(f"Date review required: {len(manifest['review_required'])}; warnings: {len(warnings)}")

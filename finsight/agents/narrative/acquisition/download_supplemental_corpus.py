@@ -19,7 +19,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from finsight.agents.narrative.download_corpus import (
+from finsight.agents.narrative.acquisition.download_corpus import (
     DEFAULT_TICKERS,
     SEC_DATA,
     SecClient,
@@ -182,12 +182,19 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--from-date", type=date.fromisoformat, default=date(2021, 10, 2))
     parser.add_argument("--cutoff", type=date.fromisoformat, default=date(2026, 10, 2))
-    parser.add_argument("--output", type=Path, default=Path("data/narrative/raw/archive/supplemental_5y_final"))
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("data/narrative/raw/supplemental_sec"),
+    )
     parser.add_argument(
         "--exclude-manifest",
         type=Path,
         nargs="+",
-        default=[Path("data/narrative/raw/archive/history_5y_final/manifest.json")],
+        default=[
+            Path("data/narrative/raw/manifest_core_sec.json"),
+            Path("data/narrative/raw/manifest_official_ir.json"),
+        ],
         help="Manifests whose document hashes should not be duplicated.",
     )
     parser.add_argument("--tickers", nargs="+", default=DEFAULT_TICKERS)
@@ -229,7 +236,6 @@ def main() -> int:
                 "investor_day_presentation", "special_presentation",
             ) if kind not in present],
         }
-    args.output.mkdir(parents=True, exist_ok=True)
     manifest = {
         "schema_version": "1.0",
         "source_policy": "Official SEC EDGAR filing exhibits only; no third-party transcripts.",
@@ -239,7 +245,14 @@ def main() -> int:
         "counts_by_type": dict(counts),
         "coverage": coverage,
     }
-    manifest_path = args.output / "manifest.json"
+    if args.output.parent.name == "raw" and args.output.parent.parent.name == "narrative":
+        manifest_name = {
+            "supplemental_sec": "manifest_supplemental_sec.json",
+        }.get(args.output.name, f"manifest_{args.output.name}.json")
+        manifest_path = args.output.parent / manifest_name
+    else:
+        args.output.mkdir(parents=True, exist_ok=True)
+        manifest_path = args.output / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Downloaded {len(entries)} supplemental documents; manifest: {manifest_path}")
     print(json.dumps(dict(counts), indent=2))

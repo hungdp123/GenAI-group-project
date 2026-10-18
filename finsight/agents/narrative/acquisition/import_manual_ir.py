@@ -10,7 +10,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from finsight.agents.narrative.download_corpus import _safe_name
+from finsight.agents.narrative.acquisition.download_corpus import _safe_name
 
 
 def main() -> int:
@@ -62,9 +62,15 @@ def main() -> int:
 
         ticker = record["company_ticker"].upper()
         document_type = record["document_type"]
-        # Canonical corpora keep their manifests at raw/<corpus>/manifest.json,
-        # while source files are grouped at raw/<ticker>/<corpus>/.
-        target_dir = corpus_root.parent / ticker / corpus_root.name
+        canonical_folder = {
+            "manifest_core_sec.json": "core_sec",
+            "manifest_supplemental_sec.json": "supplemental_sec",
+            "manifest_official_ir.json": "official_ir",
+        }.get(args.manifest.name)
+        if canonical_folder and corpus_root.name == "raw":
+            target_dir = corpus_root / ticker / canonical_folder
+        else:
+            target_dir = corpus_root.parent / ticker / corpus_root.name
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / _safe_name(
             f"{publication_date.isoformat()}_{document_type}_{source.name}"
