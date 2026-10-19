@@ -672,52 +672,7 @@ Import-Csv data/narrative/experiments/narrative_rag/20261018_all16_v1/retrieval_
 
 Keep the full JSON/CSV/index artifacts in the shared data snapshot. Commit the small comparison report and this summary so GitHub readers can see the results without downloading `data/`.
 
-## 9. Exact GitHub scope
-
-### Required implementation
-
-Commit **all of `finsight/agents/narrative/`**, including its existing stubs and acquisition helpers. This preserves imports and supports both corpus maintenance and inference. Keep the shared LLM client already in the repository; do not copy credentials into code.
-
-For the experiment workflow, commit this complete helper set under **`scripts/narrative/`** (paths below are relative to that folder):
-
-Keep these runners in `scripts/narrative/`: they coordinate frozen inputs, datasets, versioned experiment folders and reports. Reusable parsing, chunking and retrieval algorithms belong in `finsight/agents/narrative/` and are imported by the runners. Both folders are needed to reproduce the experiments. The [Narrative tool inventory](../reference/narrative_scripts.md) lists 19 tools (18 moved tools and the new 92-claim canonical runner), grouped by responsibility. Shared `scripts/check.py` remains at its original location.
-
-```text
-experiments/prepare_narrative_experiment.py
-datasets/prepare_narrative_labels.py
-chunking/validate_narrative_chunking.py
-datasets/narrative_reference_mapping.py
-chunking/build_adaptive_narrative_chunks.py
-chunking/inspect_adaptive_chunking.py
-chunking/compare_narrative_chunking.py
-retrieval/compare_narrative_retrieval_priority.py
-retrieval/compare_canonical_development.py
-```
-
-`datasets/narrative_reference_mapping.py` is an imported helper, not a standalone workflow step. Optional diagnostics/history include `experiments/freeze_chunking_baseline.py`, `diagnostics/preview_narrative_parser.py`, `diagnostics/audit_week1_corpus.py`, `diagnostics/summarize_narrative_document_coverage.py`, the META pilot scripts and one-time source recovery scripts. Include these if reproducing those operations; do not remove imports used by a retained runner. Acquisition modules inside the Narrative package include `acquisition/download_corpus.py`, `acquisition/download_supplemental_corpus.py`, `acquisition/download_ir_archive.py`, `acquisition/download_event_reports.py`, `acquisition/download_ir_event_reports.py`, `acquisition/prepare_manual_ir_metadata.py` and `acquisition/import_manual_ir.py`.
-
-Also commit:
-
-- `pyproject.toml`, `config.example.yaml`, `finsight/config.py`, `finsight/contracts/schemas.py` and relevant regression tests. Shared config/contracts need team-owner review under `CONTRIBUTING.md`.
-- This summary, the Week 1/2 recaps, handoff guide, experimental design and referenced component guides.
-- `docs/narrative/evaluation/retrieval_queries_v2.jsonl`, its lock, reference/review files and `docs/narrative/config/narrative_c4_config_v1.json`, `docs/narrative/config/narrative_priority_config_v1.json`; retain any v1 inputs referenced by included historical tools.
-- Selected small result summaries, especially the [Basic RAG consistency report](../results/2026-10-18_basic_narrative_rag_consistency.md) and [current E1-E4 report](../results/2026-10-18_task4_retrieval_comparison.md).
-- The 92-claim batch entry point `evaluation/run_basic_rag_batch.py`, its changes in `rag/basic_rag.py`, and the focused batch regression tests.
-- The [all-company chunking and retrieval summary](../results/2026-10-18_chunking_retrieval_summary.md), including the 12 retrieval/priority configurations.
-- The [development claim source inventory](../results/2026-10-18_development_claim_sources.csv): per-claim origins and source provenance for the 92 evaluated development claims.
-
-Keep `config.yaml`, API keys, `data/`, Qdrant storage, downloaded model weights, logs, caches, `tmp/` and local editor/agent state out of the handoff. Tests are code to commit; generated test/experiment outputs can remain local. Share the agreed corpus snapshot separately and preserve its relative paths. Links into `data/` describe local artifacts and will not resolve on GitHub.
-
-Use explicit staging commands from the [push guide](narrative_pipeline_handoff.md), add this summary, then inspect:
-
-```powershell
-git add -- docs/narrative/workflow/summary_week_2.md
-git diff --cached --name-only
-git diff --cached --check
-git diff --cached
-```
-
-## 10. Latest recorded status
+## 9. Latest recorded status
 
 Status checked against the saved artifacts. Figures are scoped to the listed run; earlier reports remain historical where stated.
 
