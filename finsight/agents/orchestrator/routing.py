@@ -177,6 +177,55 @@ def companies_with_own_claims(claim: str, companies: dict[str, list[str]]) -> li
     return found if len(found) >= 2 else []
 
 
+_COMPARE_LINK = re.compile(
+    r"\b(?:faster|slower|higher|lower|ahead of|behind|more than|less than|better than|worse than|versus|vs\.?|than)\b",
+    flags=re.IGNORECASE,
+)
+_COMPARE_MEASURES = (
+    ("free cash", "free cash flow"),
+    ("cash flow", "cash flow"),
+    ("gross margin", "gross margin"),
+    ("operating margin", "operating margin"),
+    ("net margin", "net margin"),
+    ("current ratio", "liquidity"),
+    ("liquidity", "liquidity"),
+    ("revenue", "revenue growth"),
+    ("sales", "revenue growth"),
+    ("net income", "earnings grew"),
+    ("earnings", "earnings grew"),
+    ("profit", "earnings grew"),
+    ("margin", "operating margin"),
+)
+
+
+def measurable_comparison(claim: str, companies: dict[str, list[str]]) -> tuple[list[str], str] | None:
+    """Two corpus companies compared on a calculated measure. A ranking with no measure returns None."""
+    from finsight.agents.claim_extraction.thesaurus import find_mentions
+
+    if not _COMPARE_LINK.search(claim or ""):
+        return None
+    found: list[str] = []
+    for ticker, _surface, _start in find_mentions(claim or ""):
+        if ticker in companies and ticker not in found:
+            found.append(ticker)
+    if len(found) < 2:
+        return None
+    lowered = (claim or "").lower()
+    for needle, phrase in _COMPARE_MEASURES:
+        if needle in lowered:
+            return found[:2], phrase
+    return None
+
+
+def comparison_focus(claim: str, ticker: str, companies: dict[str, list[str]], measure: str) -> str:
+    """One company and the shared measure, so that run is a normal financial check."""
+    alias = (companies.get(ticker) or [ticker])[0]
+    who = detect_influencer(claim)
+    name = INFLUENCERS[who][0] if who else ""
+    prefix = f"{name} said " if name else ""
+    return f"{prefix}{alias} {measure}."
+
+
 # Canonical key -> names matched in the user prompt, longest first when scanning.
 INFLUENCERS: dict[str, tuple[str, ...]] = {
     "joseph_carlson": ("Joseph Carlson", "Carlson"),

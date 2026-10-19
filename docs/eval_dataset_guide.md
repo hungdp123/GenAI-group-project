@@ -24,7 +24,7 @@ One JSON object per line:
    `evidence`, so a second labeler can check it.
 3. **Apply the project's verdict rules**, the same ones FinSight enforces:
    - Tier 3 news alone can never support a sub-claim, and the claim is never evidence.
-   - `COMPARATIVE` sub-claims ("biggest winner", "better than peers") → `INSUFFICIENT_EVIDENCE` (peers are out of scope).
+   - `COMPARATIVE` with no named measure ("biggest winner", "better than peers") → `INSUFFICIENT_EVIDENCE`. A named measure across two companies in the table is checked once per company, then the figures are compared.
    - `DEMAND_ATTRIBUTION` and `CONTINUATION` sub-claims can be at most `PARTIALLY_SUPPORTED`.
    - Evidence published after `cutoff_date` does not exist for that item. Check **filing dates**, not period-end dates.
 4. **Atomic sub-claims.** One checkable statement per gold sub-claim. Include sub-claims the claim *implies*:

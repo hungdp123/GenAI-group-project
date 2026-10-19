@@ -13,7 +13,7 @@ Short reference. Full rules live in `docs/knowledge_layer.md` (Irine's branch). 
 |---|---|
 | Financial (calculated, Tier 1 only) | HISTORICAL_GROWTH, NET_INCOME_GROWTH, PROFITABILITY, CASH_GENERATION, LIQUIDITY, LEVERAGE |
 | Narrative | DEMAND_ATTRIBUTION, CONTINUATION, BUSINESS_RISK, OTHER (not in table) |
-| No lookup | COMPARATIVE (always Insufficient Evidence) |
+| No lookup | COMPARATIVE with no named measure (always Insufficient Evidence). A named measure across two companies in the table is checked once per company. |
 
 Advice is refused at screening (KL §2) and never becomes a sub-claim.
 

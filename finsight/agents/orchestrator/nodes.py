@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
+from finsight.agents.advice_boundary.stub import without_advice
 from finsight.agents.claim_extraction.build import claims_catalog_path
 from finsight.agents.claim_extraction.extract import extract_claims as run_extraction
 from finsight.agents.claim_extraction.extract import (
@@ -68,6 +69,29 @@ def new_request_id() -> str:
 
 def _stop(status: AssessmentStatus, reason: str) -> dict[str, Any]:
     return {"status": status, "refusal_reason": reason}
+
+
+def _clean_evidence(item: EvidenceItem) -> EvidenceItem:
+    cleaned = without_advice(item.content)
+    if cleaned == item.content.strip():
+        return item
+    content = cleaned or "This passage told you to buy or sell, so that wording was removed. The source is unchanged."
+    return item.model_copy(update={"content": content})
+
+
+def _without_advice(final: FinalAssessment) -> FinalAssessment:
+    """Remove buy or sell sentences from the draft. The claim and each label stay."""
+    note = "A sentence that told you to buy or sell was removed. The claim and the labels are unchanged."
+    results = []
+    for row in final.sub_claim_results:
+        results.append(row.model_copy(update={
+            "explanation": without_advice(row.explanation or "") or row.explanation,
+            "supporting": [_clean_evidence(item) for item in row.supporting],
+            "challenging": [_clean_evidence(item) for item in row.challenging],
+        }))
+    summary = without_advice(final.summary or "")
+    summary = f"{note} {summary}".strip()
+    return final.model_copy(update={"summary": summary, "sub_claim_results": results})
 
 
 def _said_and_verified(state: FinSightState, results: list[SubClaimResult], text: str, overall: Verdict | None):
@@ -587,8 +611,7 @@ class Nodes:
         )
         return {"final": final}
 
-    @staticmethod
-    def _rationale(state: FinSightState, sub_claim: SubClaim, evidence: list[EvidenceItem]) -> str:
+    def _rationale(self, state: FinSightState, sub_claim: SubClaim, evidence: list[EvidenceItem]) -> str:
         """Deterministic rationale built from checks only. Numbers are copied from evidence, never computed."""
         cid = sub_claim.sub_claim_id
         if cid in state.insufficient_reasons:
@@ -620,11 +643,9 @@ class Nodes:
                                            "Output advice check failed; response withheld.")
         self.rec.gate("advice_output", decision.flagged, decision.reason)
         update: dict[str, Any] = {"advice_decisions": [*state.advice_decisions, decision]}
-        if decision.flagged:
-            update |= {"final": None} | _stop(
-                AssessmentStatus.REFUSED,
-                ("The generated response was withheld because it contained advice-like language. "
-                 f"{decision.reason or ''}").strip())
+        if decision.flagged and state.final is not None:
+            # The claim text and the verdicts stay. Only the advice sentence is removed.
+            update["final"] = _without_advice(state.final)
         return update
 
     # -- 12. finalize -------------------------------------------------------

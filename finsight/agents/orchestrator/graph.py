@@ -150,6 +150,22 @@ def execute(
             for ticker in tickers[:2]
         ]
         return _combine(runs)
+    compared = (
+        routing.measurable_comparison(claim or "", settings.corpus_companies)
+        if company_ticker is None and not post_id else None
+    )
+    if compared:
+        tickers, measure = compared
+        who = influencer or routing.detect_influencer(claim or "")
+        runs = [
+            execute(
+                routing.comparison_focus(claim or "", ticker, settings.corpus_companies, measure),
+                cutoff, registry=registry, settings=settings, kb=kb,
+                company_ticker=ticker, influencer=who, on_stage=on_stage,
+            )
+            for ticker in tickers
+        ]
+        return _compare(runs, claim or "", tickers, settings.corpus_companies)
     ctx = RunContext(registry=registry, settings=settings, kb=kb)  # type: ignore[arg-type]
     try:
         # Inside the try: a mis-registered agent or bad knowledge layer must return FAILED, not crash the UI.
@@ -214,6 +230,32 @@ def _combine(runs: list[RunOutput]) -> RunOutput:
         "clarification_question": question if status is AssessmentStatus.NEEDS_CLARIFICATION else None,
     })
     return RunOutput(merged, runs[0].decision_log)
+
+
+def _computed(run: RunOutput) -> tuple[float | None, str | None]:
+    for row in run.assessment.sub_claim_results:
+        for item in [*row.supporting, *row.challenging]:
+            if item.computed_value is not None:
+                return item.computed_value, item.content
+    return None, None
+
+
+def _compare(
+    runs: list[RunOutput], claim: str, tickers: list[str], companies: dict[str, list[str]],
+) -> RunOutput:
+    """Keep each company's check, then say how the two figures compare."""
+    from finsight.agents.orchestrator.explain import comparison_line
+
+    merged = _combine(runs)
+    left_value, left_text = _computed(runs[0])
+    right_value, right_text = _computed(runs[1])
+    names = [(companies.get(ticker) or [ticker])[0] for ticker in tickers]
+    sentence, verdict = comparison_line(claim, names[0], names[1], left_text, right_text, left_value, right_value)
+    summary = f"{sentence} {merged.assessment.summary or ''}".strip()
+    return RunOutput(
+        merged.assessment.model_copy(update={"summary": summary, "overall_verdict": verdict}),
+        merged.decision_log,
+    )
 
 
 def _field(state, name: str):

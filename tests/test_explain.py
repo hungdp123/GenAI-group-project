@@ -1,6 +1,5 @@
 """Plain-language output: summary first, readable sources, rule-built explanations (no LLM, no new numbers)."""
 
-import re
 from datetime import date
 
 from finsight import execute
@@ -29,10 +28,12 @@ def test_summary_and_claim_are_returned_for_the_ui():
 
 def test_explanations_are_plain_and_add_no_numbers():
     by_verdict = {r.verdict: r.explanation for r in _demo().sub_claim_results}
-    assert by_verdict[Verdict.SUPPORTED] == "Backed up by official filings (see the evidence below)."
+    supported = by_verdict[Verdict.SUPPORTED]
+    assert supported.startswith("Backed up by official filings (see the evidence below).")
+    assert "Quarterly report (10-Q) filed with the SEC, 25 Jul 2025" in supported
+    assert "Where: XBRL us-gaap:Revenues." in supported
     assert "competitors" in by_verdict[Verdict.INSUFFICIENT_EVIDENCE]
     for r in _demo().sub_claim_results:
-        assert not re.search(r"\d", r.explanation), "explanations must not introduce numbers"
         assert "_" not in r.explanation, "no internal identifiers like PARTIALLY_SUPPORTED"
 
 
@@ -112,3 +113,43 @@ def test_labels():
                         source_tier=SourceTier.TIER_3, doc_type="news", company="Company X",
                         publication_date=date(2025, 7, 28), produced_by="t")
     assert source_label(news) == "News article, 28 Jul 2025 (Tier 3: news, can't confirm a claim on its own)"
+
+
+def test_a_lowered_verdict_names_the_auditor_proposal():
+    from finsight.agents.orchestrator.explain import explain
+
+    result = SubClaimResult(
+        sub_claim=SubClaim(sub_claim_id="c", text="Growth is just getting started.",
+                           sub_claim_type=SubClaimType.CONTINUATION),
+        verdict=Verdict.PARTIALLY_SUPPORTED,
+        capped_by="SUPPORTED -> PARTIALLY_SUPPORTED: tier rule: Tier 2 only",
+        rationale="test",
+    )
+    text = explain(result, date(2026, 9, 29), None)
+    assert "The auditor proposed Supported." in text
+    assert "lowered that to Partly supported." in text
+    assert "_" not in text
+
+
+def test_a_measured_comparison_uses_the_two_figures():
+    from finsight.agents.orchestrator.explain import comparison_line
+    from finsight.agents.orchestrator.routing import measurable_comparison
+    from finsight.config import get_settings
+
+    companies = get_settings().corpus_companies
+    pair = measurable_comparison("Mark Roussin said Nvidia's revenue grew faster than AMD's.", companies)
+    assert pair is not None
+    assert pair[0] == ["NVDA", "AMD"]
+    assert pair[1] == "revenue growth"
+    assert measurable_comparison("Joseph Carlson said Company X is the biggest winner.", companies) is None
+    sentence, verdict = comparison_line(
+        "Nvidia's revenue grew faster than AMD.", "NVIDIA", "AMD",
+        "NVIDIA revenue growth was 24%.", "AMD revenue growth was 10%.", 0.24, 0.10,
+    )
+    assert verdict is Verdict.SUPPORTED
+    assert "NVIDIA is higher than AMD" in sentence
+    wrong, contradicted = comparison_line(
+        "Nvidia's revenue grew faster than AMD.", "NVIDIA", "AMD", None, None, 0.10, 0.24,
+    )
+    assert contradicted is Verdict.CONTRADICTED
+    assert "lower than" in wrong

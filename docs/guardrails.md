@@ -64,8 +64,7 @@ Output guardrails run after the agents and the auditor, on the drafted report.
 
 ### The answer cannot advise
 
-- Already in the app: the output advice gate reads the draft. Buy, sell, hold, allocate, a price target, or a guaranteed return is caught. Today the whole answer is withheld. The knowledge layer says rewrite those sentences and still release the claim results. Until that rewrite exists, withholding is the safe behavior.
-- If the gate errors, the draft is withheld. It is not released with the advice still in it.
+- Already in the app: the output advice gate reads the draft. Buy, sell, hold, allocate, a price target, or a guaranteed return is removed from the wording. The claim text and the labels stay, and the report says that an advice sentence was removed. If the gate errors, the draft is withheld. It is not released with the advice still in it.
 - Already in the app: every finished assessment, including a refusal and a clarification, carries the disclaimer that the result is not a personal recommendation.
 
 ### The report stays inside the check

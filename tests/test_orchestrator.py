@@ -89,24 +89,33 @@ class _OutputFlaggingBoundary:
         return AdviceDecision(stage=stage, flagged=stage is AdviceStage.OUTPUT, reason="advice-like output")
 
 
-def test_advice_refusal_at_output():
+def test_advice_wording_is_removed_and_the_claim_stays():
     reg = AgentRegistry.from_config(advice_boundary=_OutputFlaggingBoundary())
     out = execute(DEMO_CLAIM, DEMO_CUTOFF, registry=reg)
-    assert out.assessment.status is AssessmentStatus.REFUSED
-    assert out.assessment.sub_claim_results == []
-    assert "withheld" in out.assessment.refusal_reason
+    fa = out.assessment
+    assert fa.status is AssessmentStatus.COMPLETED
+    assert fa.claim == DEMO_CLAIM
+    assert fa.sub_claim_results
+    assert "removed" in (fa.summary or "")
+    assert "withheld" not in (fa.refusal_reason or "")
     assert out.decision_log.gate_decisions[-1].gate == "advice_output"
+
+
+def test_advice_language_in_evidence_is_removed():
+    from finsight.agents.orchestrator.render import render_assessment
+
+    out = execute(DEMO_CLAIM, DEMO_CUTOFF, registry=AgentRegistry.from_config(narrative=_AdviceLeakingNarrative()))
+    fa = out.assessment
+    assert fa.status is AssessmentStatus.COMPLETED
+    assert fa.sub_claim_results
+    rendered = render_assessment(fa)
+    assert "you should buy" not in rendered.lower()
 
 
 class _AdviceLeakingNarrative(StubNarrativeAgent):
     def gather(self, sub_claim, cutoff_date, feedback):
         return [_evidence(sub_claim.sub_claim_id, evidence_id="LEAK", source_tier=SourceTier.TIER_3, doc_type="news",
                           content="Analysts say you should buy Company X before earnings.")]
-
-
-def test_advice_language_in_evidence_is_caught_by_stub_output_gate():
-    out = execute(DEMO_CLAIM, DEMO_CUTOFF, registry=AgentRegistry.from_config(narrative=_AdviceLeakingNarrative()))
-    assert out.assessment.status is AssessmentStatus.REFUSED
 
 
 # -- retries ----------------------------------------------------------------------

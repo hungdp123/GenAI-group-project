@@ -8,6 +8,7 @@ and reuse `verdict_label` / `source_label` for its own layout.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 from finsight.agents.orchestrator.expansion import SIZE_NOT_TESTED, ReportUnit, report_units, rollup_counts
@@ -90,6 +91,81 @@ def source_label(e: EvidenceItem) -> str:
     return f"{doc}, {friendly_date(e.publication_date)} ({_TIER_NOTES[e.source_tier]})"
 
 
+def _source_sentence(result: SubClaimResult) -> str:
+    """The filing, date, and citation copied from the first evidence item."""
+    items = [*result.supporting, *result.challenging]
+    if not items:
+        return ""
+    item = items[0]
+    sentence = f" Source: {source_label(item)}."
+    if item.citation_span:
+        sentence += f" Where: {item.citation_span}."
+    return sentence
+
+
+def _lowered(result: SubClaimResult) -> str:
+    """Say when a rule changed the auditor's proposal. The raw log stays in capped_by."""
+    match = re.match(r"([A-Z_]+) -> ([A-Z_]+):", result.capped_by or "")
+    if match is None:
+        return ""
+    try:
+        proposed = Verdict(match.group(1))
+    except ValueError:
+        return ""
+    if proposed is result.verdict:
+        return ""
+    proposed_label = verdict_label(proposed)
+    final_label = verdict_label(result.verdict)
+    return f" The auditor proposed {proposed_label}. A source rule lowered that to {final_label}."
+
+
+_HIGHER = re.compile(r"\b(?:faster|higher|ahead|more than|better than)\b", flags=re.IGNORECASE)
+_LOWER = re.compile(r"\b(?:slower|lower|behind|less than|worse than)\b", flags=re.IGNORECASE)
+
+
+def comparison_line(
+    claim: str,
+    left_name: str,
+    right_name: str,
+    left_text: str | None,
+    right_text: str | None,
+    left_value: float | None,
+    right_value: float | None,
+) -> tuple[str, Verdict]:
+    """How two calculated figures compare. The figures themselves stay in the quoted evidence."""
+    if left_value is None or right_value is None:
+        return (
+            f"{left_name} and {right_name} were each checked on this measure. "
+            "One figure is missing, so the comparison can't be confirmed.",
+            Verdict.INSUFFICIENT_EVIDENCE,
+        )
+    want_higher = bool(_HIGHER.search(claim)) and not _LOWER.search(claim)
+    want_lower = bool(_LOWER.search(claim)) and not _HIGHER.search(claim)
+    if left_value == right_value:
+        relation = "the same as"
+    elif left_value > right_value:
+        relation = "higher than"
+    else:
+        relation = "lower than"
+    quoted = " ".join(part.strip() for part in (left_text, right_text) if part)
+    if not want_higher and not want_lower:
+        sentence = (
+            f"{left_name} and {right_name} were each checked. "
+            "The sentence does not say which one should be higher, so the comparison can't be confirmed."
+        )
+        verdict = Verdict.INSUFFICIENT_EVIDENCE
+    else:
+        ok = (left_value > right_value) if want_higher else (left_value < right_value)
+        verdict = Verdict.SUPPORTED if ok else Verdict.CONTRADICTED
+        sentence = (
+            f"{left_name} is {relation} {right_name} on this measure. "
+            f"The comparison is {verdict_label(verdict).lower()}."
+        )
+    if quoted:
+        sentence = f"{sentence} {quoted}"
+    return sentence, verdict
+
+
 def explain(result: SubClaimResult, as_of: date | None, not_assessed_reason: str | None) -> str:
     """One or two short plain sentences: why this sub-claim got its verdict. The evidence itself is shown
     separately (FinalAssessment / rendered details), so this does not repeat it."""
@@ -105,7 +181,8 @@ def explain(result: SubClaimResult, as_of: date | None, not_assessed_reason: str
         note = _size_note(result)
         if result.sub_claim.measure == "segment":
             note = "This is about that segment, not the whole company. " + (note or "")
-        return note + sentence if note else sentence
+        body = note + sentence if note else sentence
+        return body + _source_sentence(result) + _lowered(result)
 
     if result.verdict is Verdict.INSUFFICIENT_EVIDENCE:
         if not_assessed_reason and (

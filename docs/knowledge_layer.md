@@ -98,6 +98,7 @@ The prompt may state a claim, as in "Check Joseph Carlson's claim that Netflix's
 
 - The prompt names two influencers. One check is one influencer. Ask which one. Comparing two influencers is two separate runs.
 - The prompt names two companies from section 1 and gives each its own figure. Check both, one company per entry in the result. Asking which of those companies to choose is still out of scope.
+- The prompt compares two companies in section 1 on a measure section 11 calculates, such as revenue growth or margin. Check each company on that measure, then compare the two figures. "Biggest winner," with no measure, stays Insufficient Evidence.
 - The company is not in section 1.
 - The whole prompt is about the economy, a market index, a peer group, or a price, and names no company in section 1.
 
@@ -180,7 +181,7 @@ If the same type, measure, and period appears twice, keep one claim. Keep the ea
 | Leverage | Debt-to-equity, direction only | "Leverage is under control." | Financial | Insufficient Evidence until the financial agent returns the ratio. Supported once that filing ratio is calculated. |
 | Demand attribution | The post names the cause of a result, such as AI demand or a new product. The check is whether the company itself said that. | "Growth is from AI infrastructure demand." | Narrative | Supported only when a filing gives that cause's share of the result and names no other cause. Any weaker company statement is Partially Supported. |
 | Continuation | A forward-looking claim about demand or guidance | "This growth is just getting started." | Narrative | Partially Supported. The source is management's own remarks. |
-| Comparative | A ranking against other companies | "Biggest winner." | Nobody. No peer filings. | Insufficient Evidence |
+| Comparative | A ranking against other companies, or a comparison of one calculated measure | "Biggest winner." "Nvidia's revenue grew faster than AMD." | Nobody, when no measure is named. Financial, once per company, when both companies are in section 1 and the measure is in section 11. | Insufficient Evidence when no measure is named. Supported or Contradicted when the two calculated figures agree or disagree with the stated order. |
 | Business risk | A risk named in the post | "Customer concentration is a risk." | Narrative | Supported only when a 10-K or 10-Q risk factor states it. An earnings-call remark can at most be Partially Supported. |
 | Not in the table | A company fact that matches no row above | "They bought back stock." "Attendance rose." | Narrative, in the documents stored for that company | Supported when a filing states it. An earnings remark can at most be Partially Supported. |
 
@@ -196,7 +197,7 @@ A sentence that fits none of the rows will be checked against the documents stor
 
 The other sentences in the same post are still checked. Do not ask the user to rephrase only because a sentence is missing from the table.
 
-A ranking against another company does not get this search. Peer filings are not stored, so it stays Insufficient Evidence. A price or a return that is the whole user prompt was refused in section 2. Inside a post, a price is Insufficient Evidence, because the stored filings are not used to judge a price.
+A ranking with no named measure, such as "biggest winner," does not get a filing search. It stays Insufficient Evidence. A comparison that names a measure from section 11, and names two companies from section 1, is checked once per company. The two calculated figures are then compared. A price or a return that is the whole user prompt was refused in section 2. Inside a post, a price is Insufficient Evidence, because the stored filings are not used to judge a price.
 
 ## 6. Vague phrases
 
@@ -282,9 +283,9 @@ Two checks happen before the user sees an answer. Both run after the agents have
 
 **Auditor.** For each claim, check three things. The number matches section 11, when the claim uses one of those measures. The quote is an exact span of a stored passage. The source level is one section 9 allows for that type. Section 12 says when the label may be Supported. If this check fails, section 13 is the one retry.
 
-**Last screen.** The Advice Boundary Agent reads the drafted report. If the draft tells the user to buy, sell, hold, or allocate money, or if it names a price target or guarantees a return, rewrite the draft and delete those sentences. The claim results stay. This screen does not refuse the request. A refusal happens earlier: the input screen in section 2, or collect posts in section 3 when no usable post is stored.
+**Last screen.** The Advice Boundary Agent reads the drafted report. If the draft tells the user to buy, sell, hold, or allocate money, or if it names a price target or guarantees a return, delete those sentences. The claim text and the labels stay. This screen does not refuse the request. A refusal happens earlier: the input screen in section 2, or collect posts in section 3 when no usable post is stored. The report says that an advice sentence was removed.
 
-The report names the influencer, the post title, the post id, and the post date used as the cut-off. If the prompt stated a claim and no stored row is close enough, the reply quotes the closest spoken sentence and asks the user to confirm it, or says the line is not in the stored videos. An evidence answer also includes one sentence: this checks the evidence for the stated claim and is not a personal recommendation. A record report names every post instead of one, and it has no single overall label. It includes the consistency sentence, the accuracy count, or both, as section 3 describes.
+The report names the influencer, the post title, the post id, and the post date used as the cut-off. It also names the source next to each verdict: the document, the filing date, and the citation. Those are copied from the evidence. They are not a new calculation. When a rule lowers the auditor's proposal, the report says what the auditor proposed and what the label is after the rule. If the prompt stated a claim and no stored row is close enough, the reply quotes the closest spoken sentence and asks the user to confirm it, or says the line is not in the stored videos. An evidence answer also includes one sentence: this checks the evidence for the stated claim and is not a personal recommendation. A record report names every post instead of one, and it has no single overall label. It includes the consistency sentence, the accuracy count, or both, as section 3 describes.
 
 When section 6 expands a phrase, the report shows that expansion. The log is not a substitute. The overall label uses the parent, so the children are not also counted as separate claims.
 
@@ -356,7 +357,7 @@ Adjusted EBITDA, earnings per share, buybacks, dividends, a cash balance, homes 
 | Leverage | Never, until the financial agent returns debt ÷ equity | Insufficient Evidence. The narrative agent cannot calculate the ratio. |
 | Demand attribution | A filing gives that driver's share of growth and names no other driver | Any weaker company statement: Partially Supported. A number with no driver: Insufficient Evidence |
 | Continuation | Never | Management says "expects" or gives guidance: Partially Supported. "Will" or "proves" overstates that. |
-| Comparative | Never | Insufficient Evidence. Peer filings are not stored, so there is no search. |
+| Comparative | A named measure across two companies in the table is checked once per company, then the figures are compared. A ranking with no measure, such as biggest winner, stays Insufficient Evidence. |
 | Not in the table | A stored filing states the claim | An earnings remark that states it: Partially Supported. Nothing in the stored filings or remarks: Insufficient Evidence. That is the out-of-scope judgment. |
 | Business risk | The 10-K or 10-Q risk factors state that risk | An earnings remark that states it: Partially Supported. Otherwise the passage can only count as counter-evidence on another claim. |
 

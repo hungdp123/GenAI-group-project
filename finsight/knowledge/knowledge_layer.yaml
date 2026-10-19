@@ -88,7 +88,7 @@ rules:
     collectors: []
     highest_verdict: INSUFFICIENT_EVIDENCE
     tier_requirement: []
-    note: "No peer retrieval. A second company named only as a comparator uses this type. Verdict is INSUFFICIENT_EVIDENCE, with no retry."
+    note: "A ranking with no measure, such as biggest winner, stays Insufficient Evidence. No agent is called. When the sentence names a calculated measure and two companies in the table, each company is checked on that measure and the two figures are compared. That path is not this row."
 
   - sub_claim_type: BUSINESS_RISK
     collectors: [narrative]
