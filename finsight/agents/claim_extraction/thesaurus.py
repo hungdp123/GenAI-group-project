@@ -147,6 +147,10 @@ def subject_ticker(sentence: str, mentions: list[tuple[str, str, int]] | None = 
         window = sentence[max(0, start - 24):start]
         if _COMPARATOR.search(window):
             continue
+        # "Like Meta, Amazon is a big spender" is about Amazon. "I like Meta" stays Meta.
+        later = any(other > start for _ticker, _surface, other in found)
+        if later and re.search(r"\blike\s*$", window, flags=re.IGNORECASE):
+            continue
         return ticker
     return None
 

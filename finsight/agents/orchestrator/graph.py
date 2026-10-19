@@ -23,7 +23,8 @@ from pathlib import Path
 
 from langgraph.graph import END, StateGraph
 
-from finsight.agents.orchestrator import posts
+from finsight.agents.orchestrator import posts, routing
+from finsight.agents.orchestrator.aggregation import overall_verdict
 from finsight.agents.orchestrator.nodes import Nodes, RunContext, new_request_id
 from finsight.config import BOUNDARY_DISCLAIMER, AgentRegistry, Settings, get_settings
 from finsight.contracts.schemas import (
@@ -130,6 +131,25 @@ def execute(
     It only observes; an exception inside it is ignored so it can never change the run.
     """
     settings = settings or get_settings()
+    names = routing.influencers_named(claim or "") if not influencer else []
+    if len(names) >= 2 and influencer is None and not post_id:
+        runs = [
+            execute(claim, cutoff, registry=registry, settings=settings, kb=kb,
+                    company_ticker=company_ticker, influencer=name, on_stage=on_stage)
+            for name in names[:2]
+        ]
+        return _combine(runs)
+    tickers = (
+        routing.companies_with_own_claims(claim or "", settings.corpus_companies)
+        if company_ticker is None and not post_id else []
+    )
+    if len(tickers) >= 2:
+        runs = [
+            execute(claim, cutoff, registry=registry, settings=settings, kb=kb,
+                    company_ticker=ticker, influencer=influencer, on_stage=on_stage)
+            for ticker in tickers[:2]
+        ]
+        return _combine(runs)
     ctx = RunContext(registry=registry, settings=settings, kb=kb)  # type: ignore[arg-type]
     try:
         # Inside the try: a mis-registered agent or bad knowledge layer must return FAILED, not crash the UI.
@@ -171,6 +191,29 @@ def execute(
         return result
     except Exception as exc:  # noqa: BLE001 - last line of defence: the caller always gets an assessment
         return _crash_output(ctx, claim, exc)
+
+
+def _combine(runs: list[RunOutput]) -> RunOutput:
+    """Two influencers in one prompt become two entries in one result."""
+    finals = [run.assessment for run in runs]
+    results = [row for final in finals for row in final.sub_claim_results]
+    names = []
+    for final in finals:
+        if final.checked_post:
+            names.append(final.checked_post)
+    summary = " ".join(final.summary for final in finals if final.summary)
+    status = next((final.status for final in finals if final.status is AssessmentStatus.COMPLETED), finals[0].status)
+    overall = overall_verdict([row.verdict for row in results]) if results else finals[0].overall_verdict
+    question = next((final.clarification_question for final in finals if final.clarification_question), None)
+    merged = finals[0].model_copy(update={
+        "status": status,
+        "sub_claim_results": results,
+        "summary": summary,
+        "checked_post": " | ".join(names) or None,
+        "overall_verdict": overall,
+        "clarification_question": question if status is AssessmentStatus.NEEDS_CLARIFICATION else None,
+    })
+    return RunOutput(merged, runs[0].decision_log)
 
 
 def _field(state, name: str):

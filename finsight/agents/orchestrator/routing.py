@@ -41,6 +41,35 @@ def parse_date(text: str) -> date | None:
     return None
 
 
+def has_cutoff(claim: str) -> bool:
+    return _CUTOFF_RE.search(claim or "") is not None
+
+
+def without_cutoff(text: str) -> str:
+    """The claim with the review-date phrase removed, so that date is not the video's date."""
+    return _CUTOFF_RE.sub(" ", text or "")
+
+
+def invalid_cutoff_text(claim: str) -> str | None:
+    """The cut-off phrase when it is present and is not a real date, such as 31 Feb."""
+    match = _CUTOFF_RE.search(claim or "")
+    if not match or parse_date(match.group(1)):
+        return None
+    return match.group(1)
+
+
+def lone_date(text: str) -> date | None:
+    """A reply that is only a date."""
+    return parse_date(text or "")
+
+
+def replace_cutoff(claim: str, replacement: str) -> str:
+    match = _CUTOFF_RE.search(claim or "")
+    if not match:
+        return f"{claim.rstrip()} Cut-off: {replacement}"
+    return claim[:match.start(1)] + replacement + claim[match.end(1):]
+
+
 def resolve_cutoff(explicit: date | None, claim: str, corpus_as_of: date) -> tuple[date, bool]:
     """Return (cutoff, was_defaulted).
 
@@ -65,6 +94,18 @@ _PRICE_PREDICTION_RE = re.compile(
 )
 _MACRO_RE = re.compile(
     r"\b(s&p\s?500|nasdaq|dow jones|interest rates?|inflation|recession|the fed|gdp|the market)\b",
+    flags=re.IGNORECASE,
+)
+_SHARE_PRICE_MOVE = re.compile(
+    r"\b(?:stock|shares)\b.{0,60}\b(?:up|down|rose|fell|gained|lost|higher|lower)\b",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_COMPANY_RESULT = re.compile(
+    r"\b(?:revenue|sales|margin|profit|earnings|income|cash flow|free cash|debt)\b",
+    flags=re.IGNORECASE,
+)
+_HAS_FIGURE = re.compile(
+    r"\d+(?:\.\d+)?\s*%|\$\s*\d|\b(?:doubled|tripled|halved)\b",
     flags=re.IGNORECASE,
 )
 
@@ -111,7 +152,29 @@ def scope_screen(claim: str, ticker: str | None, hint: str | None,
     if ticker is None:
         return None, (f"Which company is this claim about? FinSight covers: {_covered(companies)}. "
                       "Resubmit naming the company.")
+    if _SHARE_PRICE_MOVE.search(claim) and _HAS_FIGURE.search(claim) and not _COMPANY_RESULT.search(claim):
+        return None, (
+            "That figure is a share-price move. What company result should be checked? "
+            "For example revenue, margin, or cash flow."
+        )
     return None, None
+
+
+def companies_with_own_claims(claim: str, companies: dict[str, list[str]]) -> list[str]:
+    """Tickers that each have their own figure. One comparison mention stays one company."""
+    from finsight.agents.claim_extraction.thesaurus import find_mentions
+
+    found: list[str] = []
+    for piece in re.split(r"\b(?:and|but)\b", claim or "", flags=re.IGNORECASE):
+        if not _HAS_FIGURE.search(piece):
+            continue
+        named: list[str] = []
+        for ticker, _surface, _start in find_mentions(piece):
+            if ticker in companies and ticker not in named:
+                named.append(ticker)
+        if len(named) == 1 and named[0] not in found:
+            found.append(named[0])
+    return found if len(found) >= 2 else []
 
 
 # Canonical key -> names matched in the user prompt, longest first when scanning.
@@ -119,11 +182,13 @@ INFLUENCERS: dict[str, tuple[str, ...]] = {
     "joseph_carlson": ("Joseph Carlson", "Carlson"),
     "mark_roussin": ("Mark Roussin", "Roussin"),
     "alex_reffett": ("Alex Reffett", "Reffett"),
+    "meet_kevin": ("Meet Kevin", "Kevin Paffrath"),
 }
 INFLUENCER_CHANNELS: dict[str, frozenset[str]] = {
     "joseph_carlson": frozenset({"joseph_carlson", "joseph_carlson_after_hours"}),
     "mark_roussin": frozenset({"mark_roussin"}),
     "alex_reffett": frozenset({"alex_reffett"}),
+    "meet_kevin": frozenset({"meet_kevin"}),
 }
 
 
@@ -134,10 +199,104 @@ def influencer_names() -> str:
 def detect_influencer(text: str, hint: str | None = None) -> str | None:
     """Canonical influencer key named in the hint or the text. None if nobody is named."""
     if hint and hint.strip():
+        if hint.strip() in INFLUENCERS:
+            return hint.strip()
         named = _match_influencer(hint)
         if named:
             return named
     return _match_influencer(text)
+
+
+def influencers_named(text: str) -> list[str]:
+    """Every influencer named by a full alias. A longer alias hides the shorter one inside it."""
+    occupied = [False] * len(text or "")
+    found: list[str] = []
+    pairs = sorted(
+        ((key, alias) for key, aliases in INFLUENCERS.items() for alias in aliases),
+        key=lambda item: len(item[1]),
+        reverse=True,
+    )
+    for key, alias in pairs:
+        for match in re.finditer(rf"\b{re.escape(alias)}\b", text or "", flags=re.IGNORECASE):
+            if any(occupied[match.start():match.end()]):
+                continue
+            for index in range(match.start(), match.end()):
+                occupied[index] = True
+            if key not in found:
+                found.append(key)
+    return found
+
+
+def typo_match(text: str) -> tuple[str, str] | None:
+    """One alias a single edit away, such as Mark Rousin. A first name is not a typo."""
+    if influencers_named(text):
+        return None
+    lowered = (text or "").lower()
+    found: list[tuple[str, str]] = []
+    for key, aliases in INFLUENCERS.items():
+        for alias in aliases:
+            if len(alias) < 10:
+                continue
+            target = alias.lower()
+            for extra in (-1, 0, 1):
+                width = len(target) + extra
+                if width < 1 or width > len(lowered):
+                    continue
+                for start in range(0, len(lowered) - width + 1):
+                    window = lowered[start:start + width]
+                    if window[:1].isalpha() and _edits(window, target) == 1:
+                        found.append((key, aliases[0]))
+                        break
+                else:
+                    continue
+                break
+            else:
+                continue
+            break
+    unique = list(dict.fromkeys(found))
+    if len(unique) == 1:
+        return unique[0]
+    return None
+
+
+def first_name_question(text: str) -> str | None:
+    """A first name stays a question. Attributing the claim to the wrong person is worse than asking."""
+    if influencers_named(text) or typo_match(text):
+        return None
+    if re.search(r"\bJoseph\b", text or "", flags=re.IGNORECASE):
+        return (
+            "Which Joseph? FinSight checks posts from Joseph Carlson. "
+            "Resubmit with the full name."
+        )
+    if re.search(r"\bMark\b", text or "", flags=re.IGNORECASE):
+        return (
+            "Which Mark? FinSight checks posts from Mark Roussin. "
+            "Resubmit with the full name."
+        )
+    return None
+
+
+def typo_note(text: str) -> str | None:
+    match = typo_match(text)
+    if not match:
+        return None
+    return f"Checking {match[1]}. Not who you meant?"
+
+
+def _edits(left: str, right: str) -> int:
+    if abs(len(left) - len(right)) > 1:
+        return 2
+    previous = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, start=1):
+        current = [i]
+        for j, right_char in enumerate(right, start=1):
+            current.append(min(
+                current[-1] + 1,
+                previous[j] + 1,
+                previous[j - 1] + (left_char != right_char),
+            ))
+        previous = current
+    return previous[-1]
 
 
 def _match_influencer(text: str) -> str | None:
@@ -162,6 +321,11 @@ def influencer_screen(text: str, hint: str | None) -> tuple[str | None, str | No
             f"FinSight checks posts from: {influencer_names()}."
         ), None
     found = detect_influencer(text, hint)
+    if found is None and not (hint and hint.strip()):
+        typo = typo_match(text)
+        if typo:
+            return typo[0], None, None
+        return None, None, first_name_question(text) or CLARIFY_INFLUENCER
     if found is None:
         return None, None, CLARIFY_INFLUENCER
     return found, None, None

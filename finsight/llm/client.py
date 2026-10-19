@@ -3,7 +3,7 @@
     from finsight.llm.client import complete, data_block, DATA_SAFETY_PREAMBLE
     resp = complete(system=DATA_SAFETY_PREAMBLE + "Your task...", prompt=data_block("claim", claim))
 
-Provider via FINSIGHT_LLM_PROVIDER = mock | anthropic | openai (default mock: no API key needed).
+Provider via FINSIGHT_LLM_PROVIDER = mock | anthropic | openai | gemini (default mock: no API key needed).
 Model via FINSIGHT_LLM_MODEL. Usage is added to the current agent call's meter automatically.
 Real calls need a key (env var or gitignored config.yaml), respect FINSIGHT_SPEND_LIMIT_USD and are
 appended to the usage ledger (see finsight/llm/spend.py).
@@ -128,6 +128,53 @@ def _call_openai(model: str, system: str, prompt: str, max_tokens: int,
     return choice.message.content or "", resp.usage.prompt_tokens, resp.usage.completion_tokens, choice.finish_reason
 
 
+def _call_gemini(model: str, system: str, prompt: str, max_tokens: int,
+                 temperature: float) -> tuple[str, int, int, str | None]:
+    """Gemini Developer API. The key is a header, so it is not written into the URL."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    body = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": temperature,
+            "maxOutputTokens": max_tokens,
+            # Labeling does not need hidden reasoning, and those tokens are billed as output.
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    }
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key("gemini")},
+        method="POST",
+    )
+    payload = None
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                payload = json.loads(response.read().decode())
+            break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode(errors="replace")[:500]
+            if exc.code in (429, 500, 503) and attempt < 3:
+                time.sleep(2 ** attempt)
+                continue
+            raise RuntimeError(f"Gemini request failed ({exc.code}): {detail}") from exc
+    if payload is None:
+        raise RuntimeError("Gemini request failed")
+    candidate = (payload.get("candidates") or [{}])[0]
+    parts = ((candidate.get("content") or {}).get("parts") or [])
+    text = "".join(part.get("text", "") for part in parts if not part.get("thought"))
+    usage = payload.get("usageMetadata") or {}
+    input_tokens = int(usage.get("promptTokenCount") or 0)
+    output_tokens = int(usage.get("candidatesTokenCount") or 0) + int(usage.get("thoughtsTokenCount") or 0)
+    return text, input_tokens, output_tokens, candidate.get("finishReason")
+
+
 def complete(
     prompt: str,
     *,
@@ -147,14 +194,14 @@ def complete(
     if provider == "mock":
         text = _mock_responder(system, prompt)
         in_tok, out_tok = _estimate_tokens(system + prompt), _estimate_tokens(text)
-    elif provider in ("anthropic", "openai"):
+    elif provider in ("anthropic", "openai", "gemini"):
         if model not in PRICE_TABLE:
             raise ValueError(f"No price for {model!r} in config.PRICE_TABLE; add it before spending money")
         GUARD.check()
-        call = _call_anthropic if provider == "anthropic" else _call_openai
+        call = {"anthropic": _call_anthropic, "openai": _call_openai, "gemini": _call_gemini}[provider]
         text, in_tok, out_tok, finish = call(model, system, prompt, max_tokens, temperature)
     else:
-        raise ValueError(f"Unknown FINSIGHT_LLM_PROVIDER={provider!r} (use mock, anthropic or openai)")
+        raise ValueError(f"Unknown FINSIGHT_LLM_PROVIDER={provider!r} (use mock, anthropic, openai or gemini)")
     cost = estimate_cost(model, in_tok, out_tok)
     latency = round((time.perf_counter() - t0) * 1000, 3)
     if provider != "mock":

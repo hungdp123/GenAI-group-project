@@ -270,6 +270,96 @@ def test_advice_is_refused_before_clarification():
     assert fa.status is AssessmentStatus.REFUSED
 
 
+def _stored_company_x(tmp_path, transcript: str, claims: list[dict]):
+    posts = tmp_path / "stated_posts"
+    posts.mkdir()
+    (posts / "one.jsonl").write_text(json.dumps({
+        "influencer": "joseph_carlson", "video_id": "vid1", "title": "Company X update",
+        "description": "Company X", "upload_date": "2025-07-31", "transcript": transcript,
+    }) + "\n", encoding="utf-8")
+    claims_dir = tmp_path / "claims"
+    claims_dir.mkdir()
+    (claims_dir / "claims.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in claims), encoding="utf-8",
+    )
+    return posts
+
+
+def test_a_stated_claim_checks_the_matching_line_only(tmp_path, monkeypatch):
+    revenue = "Company X reported revenues of 96.2 billion, up 106% year-over-year."
+    margin = "Company X margins are expanding."
+    posts = _stored_company_x(tmp_path, f"{revenue} {margin}", [
+        {"video_id": "vid1", "company_ticker": "CMPX", "sub_claim_id": "rev",
+         "text": revenue, "sub_claim_type": "HISTORICAL_GROWTH"},
+        {"video_id": "vid1", "company_ticker": "CMPX", "sub_claim_id": "margin",
+         "text": margin, "sub_claim_type": "PROFITABILITY_CASH_LEVERAGE"},
+    ])
+    monkeypatch.setenv("FINSIGHT_POSTS_DIR", str(posts))
+    out = execute("Joseph Carlson said Company X revenue doubled.", DEMO_CUTOFF)
+    fa = out.assessment
+    assert fa.status is AssessmentStatus.COMPLETED
+    assert [row.sub_claim.sub_claim_id for row in fa.sub_claim_results] == ["rev"]
+    assert "match the claim in the prompt" in (fa.checked_post or "")
+    agents = [call.agent for call in out.decision_log.agent_calls]
+    assert "decomposer" not in agents
+    assert agents.count("financial") == 1
+
+
+def test_a_prompt_with_no_claim_checks_the_video(tmp_path, monkeypatch):
+    revenue = "Company X reported revenues of 96.2 billion, up 106% year-over-year."
+    margin = "Company X margins are expanding."
+    posts = _stored_company_x(tmp_path, f"{revenue} {margin}", [
+        {"video_id": "vid1", "company_ticker": "CMPX", "sub_claim_id": "rev",
+         "text": revenue, "sub_claim_type": "HISTORICAL_GROWTH"},
+        {"video_id": "vid1", "company_ticker": "CMPX", "sub_claim_id": "margin",
+         "text": margin, "sub_claim_type": "PROFITABILITY_CASH_LEVERAGE"},
+    ])
+    monkeypatch.setenv("FINSIGHT_POSTS_DIR", str(posts))
+    fa = execute("Is Joseph Carlson right about Company X?", DEMO_CUTOFF).assessment
+    assert fa.status is AssessmentStatus.COMPLETED
+    assert {row.sub_claim.sub_claim_id for row in fa.sub_claim_results} == {"rev", "margin"}
+
+
+def test_a_line_missing_from_the_claim_list_is_confirmed_before_it_is_checked(tmp_path, monkeypatch):
+    margin = "Company X margins are expanding."
+    spoken = "Company X revenue doubled last quarter."
+    posts = _stored_company_x(tmp_path, f"{margin} {spoken}", [
+        {"video_id": "vid1", "company_ticker": "CMPX", "sub_claim_id": "margin",
+         "text": margin, "sub_claim_type": "PROFITABILITY_CASH_LEVERAGE"},
+    ])
+    monkeypatch.setenv("FINSIGHT_POSTS_DIR", str(posts))
+    prompt = "Joseph Carlson said Company X revenue doubled."
+    out = execute(prompt, DEMO_CUTOFF)
+    fa = out.assessment
+    assert fa.status is AssessmentStatus.COMPLETED
+    assert fa.sub_claim_results
+    assert fa.sub_claim_results[0].sub_claim.text == spoken
+    agents = [call.agent for call in out.decision_log.agent_calls]
+    assert "decomposer" not in agents
+    assert "financial" in agents
+
+    checked = execute(prompt, DEMO_CUTOFF, post_id="vid1")
+    assert checked.assessment.status is AssessmentStatus.COMPLETED
+    assert checked.assessment.sub_claim_results
+    assert checked.assessment.sub_claim_results[0].sub_claim.text == spoken
+    checked_agents = [call.agent for call in checked.decision_log.agent_calls]
+    assert "decomposer" not in checked_agents
+    assert "financial" in checked_agents
+
+
+def test_a_line_missing_from_the_video_asks_the_user_to_restate_it(tmp_path, monkeypatch):
+    margin = "Company X margins are expanding."
+    posts = _stored_company_x(tmp_path, margin, [
+        {"video_id": "vid1", "company_ticker": "CMPX", "sub_claim_id": "margin",
+         "text": margin, "sub_claim_type": "PROFITABILITY_CASH_LEVERAGE"},
+    ])
+    monkeypatch.setenv("FINSIGHT_POSTS_DIR", str(posts))
+    fa = execute("Joseph Carlson said Company X opened a factory in Ohio.", DEMO_CUTOFF).assessment
+    assert fa.status is AssessmentStatus.NEEDS_CLARIFICATION
+    assert fa.sub_claim_results == []
+    assert "not in this influencer's stored videos" in fa.clarification_question
+
+
 def test_advice_line_inside_a_stored_post_does_not_refuse_the_post(tmp_path, monkeypatch):
     text = "Joseph Carlson said Company X's revenue growth is strong. Should I buy it for my portfolio?"
     posts = tmp_path / "advice_posts"
@@ -362,6 +452,28 @@ def test_cutoff_parsed_from_claim_text():
 def test_early_cutoff_does_not_replace_the_post_date():
     fa = execute(DEMO_CLAIM, date(2025, 1, 31)).assessment
     assert fa.as_of_date == date(2025, 7, 31) and not fa.cutoff_was_defaulted
+
+
+def test_an_impossible_date_is_asked_again_and_a_real_date_finishes_it():
+    first = execute("Joseph Carlson said Company X revenue doubled. Cut-off date: 31 Feb 2026").assessment
+    assert first.status is AssessmentStatus.NEEDS_CLARIFICATION
+    assert first.clarification_question == "31 Feb 2026 is not a real date. Resubmit with a real cut-off date."
+    second = execute("6 May 2026").assessment
+    assert second.status is AssessmentStatus.COMPLETED
+    assert second.as_of_date == date(2026, 5, 6)
+
+
+def test_a_one_letter_typo_is_checked_with_a_visible_note():
+    from finsight.agents.orchestrator.routing import first_name_question, influencers_named, typo_match
+
+    assert typo_match("Mark Rousin said Amazon's AWS grew 28%") == ("mark_roussin", "Mark Roussin")
+    assert "Which Joseph" in (first_name_question("Joseph said Amazon grew 28%") or "")
+    assert influencers_named("Joseph Carlson said Google grew 20% but Mark Roussin said 22%") == [
+        "joseph_carlson", "mark_roussin",
+    ]
+    fa = execute("Mark Rousin said Company X revenue doubled.").assessment
+    assert fa.status is AssessmentStatus.COMPLETED
+    assert fa.summary.startswith("Checking Mark Roussin. Not who you meant?")
 
 
 # -- decision log ---------------------------------------------------------------------------

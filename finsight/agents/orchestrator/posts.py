@@ -12,7 +12,7 @@ from datetime import date
 from pathlib import Path
 
 from finsight.agents.claim_extraction.thesaurus import find_mentions, has_alias
-from finsight.agents.orchestrator.routing import INFLUENCER_CHANNELS, INFLUENCERS, parse_date
+from finsight.agents.orchestrator.routing import INFLUENCER_CHANNELS, INFLUENCERS, parse_date, without_cutoff
 
 # The project window. A question does not fetch a post outside it.
 WINDOW_START = date(2026, 4, 1)
@@ -77,7 +77,7 @@ def video_id_from_text(text: str) -> str | None:
 
 def dates_in_text(text: str) -> set[date]:
     found: set[date] = set()
-    for match in _WRITTEN_DATE.finditer(text or ""):
+    for match in _WRITTEN_DATE.finditer(without_cutoff(text)):
         raw = match.group(0)
         if len(raw) == 10 and raw[4] == "-":
             try:
@@ -129,16 +129,19 @@ def choose_post(rows: list[dict], user_text: str, influencer: str, post_id: str 
     if len(rows) <= 1:
         return rows[0] if rows else None
     scored = sorted(
-        ((score(user_text, row, influencer), -len(row.get("transcript") or ""), row) for row in rows),
+        (
+            (score(user_text, row, influencer), -len(row.get("transcript") or ""), str(row.get("video_id") or ""), row)
+            for row in rows
+        ),
         reverse=True,
     )
     best, second = scored[0], scored[1]
     if best[0] > second[0]:
-        return best[2]
+        return best[3]
     # Same overlap: the shorter post is the closer quote.
-    if best[0] > 0 and len(best[2].get("transcript") or "") < len(second[2].get("transcript") or ""):
-        return best[2]
-    return [item[2] for item in scored]
+    if best[0] > 0 and len(best[3].get("transcript") or "") < len(second[3].get("transcript") or ""):
+        return best[3]
+    return [item[3] for item in scored]
 
 
 def score(user_text: str, row: dict, influencer: str) -> int:

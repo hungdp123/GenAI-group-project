@@ -1,6 +1,6 @@
 # FinSight knowledge layer
 
-Update as of: 13 Oct 2026
+Update as of: 19 Oct 2026
 
 This is the complete rule book. The shorter version that will be called by FinSight itself is `finsight/knowledge/knowledge_layer.yaml`. 
 
@@ -13,8 +13,8 @@ The steps always run in this order:
 1. The user types a prompt. The prompt names the influencer and the company. It may also state a claim, or it may not. Either way, the prompt is not what gets verified.
 2. Initial screening reads that prompt only. It refuses advice, asks which influencer or company is missing, or stops an out-of-scope prompt. It does not call an agent.
 3. A prompt that passes goes to collect posts. That step reads a post already stored for that influencer and company. It does not start the orchestrator.
-4. If several posts fit and the prompt is about one claim, ask which post. If the prompt asks whether that influencer has been consistent about that company, or asks for the accuracy of that influencer's claims about that company over time, do not ask which post. Check every stored post in the window. Each post keeps its own publication date as the cut-off. A date typed in the prompt does not replace a post date.
-5. Claim extraction reads that one post. It keeps the sentences about the named company, keeps each quote, and gives each claim one type. It writes no label. If the prompt stated a claim, only the matching claims are checked. If it stated none, the checkable claims about that company are checked.
+4. If several posts state the same claim and the prompt names no video, show both lines. A named video uses that video. If the prompt asks whether that influencer has been consistent about that company, or asks for the accuracy of that influencer's claims about that company over time, do not ask which post. Check every stored post in the window. Each post keeps its own publication date as the cut-off. A date typed in the prompt does not replace a post date.
+5. Claim extraction reads that one post. It keeps the sentences about the named company, keeps each quote, and gives each claim one type. It writes no label. If the prompt stated a claim, a stored row is checked only when it shares the measure and any stated figure. "Grew 24%" matches a row that contains 24%, not a row that contains 17%. The match is semantic. If no stored row is that close, the transcripts of that influencer's videos about the company are searched. One close spoken sentence is shown and the user is asked to confirm it. Several are shown and the user is asked which one. Nothing close asks the user to restate the line or name the video. A confirmed sentence is then checked. If the prompt stated no claim, the checkable claims about that company are checked.
 6. The orchestrator starts here. The YAML table chooses an agent for each claim. The financial agent and the narrative agent gather evidence. The auditor checks. One retry is allowed. The output advice screen rewrites any buy or sell wording and still releases the report. The report names the influencer, the post title, the post id, and the post date.
 
 Three rules apply everywhere:
@@ -63,11 +63,12 @@ The YouTube text is collected when the corpus is built, before any question. Pub
 | Joseph Carlson | After Hours, https://www.youtube.com/@JosephCarlsonAfterHours | Apple, Google, Microsoft, Netflix |
 | Mark Roussin, CPA | https://www.youtube.com/@MarkRoussinCPA | Amazon, Meta, Tesla, Apple, Alphabet, Microsoft, MercadoLibre, Starbucks |
 | Joseph Carlson | Main show, https://www.youtube.com/@JosephCarlsonShow | Meta, Amazon, Intuit, NVIDIA, Salesforce, Microsoft, Google, Oracle, and other companies in the table above when a stored post states the claim |
-| Alex Reffett | https://www.youtube.com/@TickerSymbolYOU | NVIDIA, Tesla, Palantir, AMD, Microsoft, Alphabet, Amazon, Meta, and other companies in the table above when a stored post states the claim |
+| Alex Reffett | https://www.youtube.com/@TickerSymbolYOU | NVIDIA, Alphabet, Amazon, Meta, Microsoft, AMD, Intel, Apple, Tesla, Palantir, and other companies in the table above when a stored post states the claim |
+| Meet Kevin | https://www.youtube.com/channel/UCUvvj5lwue7PspotMDjk5UA | Tesla, Apple, NVIDIA, Palantir, Alphabet, Meta, Salesforce, Oracle, Microsoft, and other companies in the table above when a stored post states the claim |
 | Joseph Carlson | X, https://x.com/joecarlsonshow | A company in the table above when a stored post states the claim |
 | Mark Roussin, CPA | X, https://x.com/Dividend_Dollar | A company in the table above when a stored post states the claim |
 
-Joseph Carlson is one influencer. After Hours, the main show, and @joecarlsonshow are all his, and a check names him once. Mark Roussin is one influencer. His YouTube channel and @Dividend_Dollar are both his, and a check names him once. The post may come from any of that influencer's rows. The company column is the coverage recorded for that channel. The user may still ask about another company in the company table when a stored post from that channel states the claim. Sentences in the chosen post about a different company are dropped in section 4. An X post has no separate transcript: the stored text of the post is the post.
+Joseph Carlson is one influencer. After Hours, the main show, and @joecarlsonshow are all his, and a check names him once. Mark Roussin is one influencer. His YouTube channel and @Dividend_Dollar are both his, and a check names him once. Alex Reffett is one influencer, and a check names him once. Meet Kevin is one influencer, and a check names him once. The post may come from any of that influencer's rows. The company column is the coverage recorded for that channel. The user may still ask about another company in the company table when a stored post from that channel states the claim. Sentences in the chosen post about a different company are dropped in section 4. An X post has no separate transcript: the stored text of the post is the post.
 
 For each company, store the latest annual report (10-K), the last four quarterly reports (10-Q), the latest earnings release or investor-relations remarks, and up to 10 Yahoo Finance news articles from the corpus window. Collect the news once, when the corpus is built. Keep the publisher, headline, date, and URL. Do not fetch news again when a user asks a question.
 
@@ -96,7 +97,7 @@ The prompt may state a claim, as in "Check Joseph Carlson's claim that Netflix's
 **Stop as out of scope** when the prompt itself is outside the project:
 
 - The prompt names two influencers. One check is one influencer. Ask which one. Comparing two influencers is two separate runs.
-- The prompt names two companies from section 1 and gives each its own claim, or asks which of those companies to choose.
+- The prompt names two companies from section 1 and gives each its own figure. Check both, one company per entry in the result. Asking which of those companies to choose is still out of scope.
 - The company is not in section 1.
 - The whole prompt is about the economy, a market index, a peer group, or a price, and names no company in section 1.
 
@@ -110,7 +111,7 @@ It reads posts already stored for that influencer's channel in section 1, and ke
 
 - No stored post mentions that company: refuse. Say that this influencer has no stored post about that company.
 - A video is listed, but the spoken text is not stored yet: refuse with a different reason. Say that the video is listed and the transcript is not available yet. Do not treat that as "this influencer never covered the company."
-- Several posts fit, and the prompt is about one claim: ask which post. List the date, the post id, and the title. For an X post, the title is the first line of the post. One round. The user resubmits with the post id. If the prompt named a date or a title, use that to choose before asking.
+- Several posts state the same claim, and the prompt names no video: show both lines, with the date, the title, and the video id. The user resubmits with the video id. A named video uses that video.
 - The prompt asks whether this influencer has been consistent about this company, or asks for the accuracy of this influencer's claims about this company over time: do not ask which post. Check every stored post in the window that has text. A URL or a post id in the prompt still selects that one post.
 - One post fits, or the user gave a post id: that post is the one to check.
 
@@ -138,9 +139,9 @@ A garbled number or a garbled ticker is Insufficient Evidence. It is not Contrad
 
 A figure that appears only on a chart, a slide, or an image is not in the stored text. The report says so. This project does not read the screen.
 
-The cap of 8 claims is applied after that drop. If the remaining split would pass 8, keep claims in this order and drop the rest: comparative, continuation, demand attribution, historical growth, net income growth, then the four children of a company-wide strong or weak phrase, then business risk. The report lists every quote the cap left out.
+If the prompt stated a claim, match it to stored rows by meaning. The row must share the measure, and a stated figure must be in that row. "Revenue doubled" matches a kept sentence such as "revenues of 96.2 billion, up 106% year-over-year." "Grew 24%" does not match "search revenue increased by 17%." If no stored row is that close, search the transcripts of that influencer's videos about the company. One close spoken sentence is shown, and the user confirms it before it is checked. Several close sentences are shown, and the user picks one. If nothing is close, say the line is not in the stored videos and ask the user to restate it or name the video. Do not check a nearby sentence, and do not check the other claims. If the prompt stated no claim, check the kept claims about that company.
 
-If the prompt stated a claim, check the kept claims that match it. If the user's wording is not in the post, say so in one sentence and check the post. If the prompt stated no claim, check the kept claims.
+The cap of 8 applies to the claims selected above. If that set would pass 8, keep claims in this order and drop the rest: comparative, continuation, demand attribution, historical growth, net income growth, then the four children of a company-wide strong or weak phrase, then business risk. The report lists every quote the cap left out.
 
 For example, a kept summary "Revenue growth proves it is the biggest winner from AI demand, and this is just getting started" becomes four claims: historical growth, demand attribution, comparative, continuation. A fact and an opinion about that fact stay in separate claims.
 
@@ -281,7 +282,7 @@ Two checks happen before the user sees an answer. Both run after the agents have
 
 **Last screen.** The Advice Boundary Agent reads the drafted report. If the draft tells the user to buy, sell, hold, or allocate money, or if it names a price target or guarantees a return, rewrite the draft and delete those sentences. The claim results stay. This screen does not refuse the request. A refusal happens earlier: the input screen in section 2, or collect posts in section 3 when no usable post is stored.
 
-The report names the influencer, the post title, the post id, and the post date used as the cut-off. If the user's wording is not in that post, the report says in one sentence that the post was checked. An evidence answer also includes one sentence: this checks the evidence for the stated claim and is not a personal recommendation. A record report names every post instead of one, and it has no single overall label. It includes the consistency sentence, the accuracy count, or both, as section 3 describes.
+The report names the influencer, the post title, the post id, and the post date used as the cut-off. If the prompt stated a claim and no stored row is close enough, the reply quotes the closest spoken sentence and asks the user to confirm it, or says the line is not in the stored videos. An evidence answer also includes one sentence: this checks the evidence for the stated claim and is not a personal recommendation. A record report names every post instead of one, and it has no single overall label. It includes the consistency sentence, the accuracy count, or both, as section 3 describes.
 
 When section 6 expands a phrase, the report shows that expansion. The log is not a substitute. The overall label uses the parent, so the children are not also counted as separate claims.
 

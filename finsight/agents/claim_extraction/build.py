@@ -96,6 +96,14 @@ def claims_path(posts_dir: Path) -> Path:
     return posts_dir.parent / "claims" / "claims.jsonl"
 
 
+def claims_catalog_path(posts_dir: Path) -> Path:
+    """The field catalog when it has been built, otherwise the original claim list."""
+    updated = posts_dir.parent / "claims" / "claims_updated.jsonl"
+    if updated.exists():
+        return updated
+    return claims_path(posts_dir)
+
+
 def claims_from_transcript(
     text: str,
     *,

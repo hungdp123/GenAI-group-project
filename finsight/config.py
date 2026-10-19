@@ -78,11 +78,18 @@ PRICE_TABLE: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.15, 0.60),
     "claude-sonnet-5-5": (3.0, 15.0),
     "claude-haiku-4-5-20251001": (1.0, 5.0),
+    # Gemini Developer API paid tier, text, checked 2026-10-16. Output includes thinking tokens.
+    "gemini-2.5-flash": (0.30, 2.50),
 }
 
 # DECISION: testing defaults to the cheapest model of the course model's family (gpt-5.4-nano, ~12x cheaper).
 # Final reported runs must opt in to the course model explicitly: FINSIGHT_LLM_MODEL=gpt-5.4.
-DEFAULT_MODELS = {"mock": "mock-model", "anthropic": "claude-sonnet-5-5", "openai": "gpt-5.4-nano"}
+DEFAULT_MODELS = {
+    "mock": "mock-model",
+    "anthropic": "claude-sonnet-5-5",
+    "openai": "gpt-5.4-nano",
+    "gemini": "gemini-2.5-flash",
+}
 FINAL_REPORT_MODEL = "gpt-5.4"
 
 # Total course credit, for `finsight usage`.

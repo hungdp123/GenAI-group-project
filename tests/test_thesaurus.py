@@ -27,6 +27,13 @@ def test_the_subject_is_not_the_name_after_than():
     assert resolve_ticker("NVIDIA is ahead of Google on revenue growth.") == "NVDA"
 
 
+def test_like_meta_amazon_is_a_big_spender_is_about_amazon():
+    from finsight.agents.claim_extraction.thesaurus import subject_ticker
+
+    assert subject_ticker("Well, like Meta, Amazon is a big spender right now.") == "AMZN"
+    assert subject_ticker("I like what Meta is doing.") == "META"
+
+
 def test_extraction_drops_and_holds_the_agreed_sentences():
     text = (
         "Tesla revenue grew. "

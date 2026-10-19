@@ -347,6 +347,13 @@ class FinSightState(_Strict):
     from_stored_post: bool = False
     # Set when a stored post was chosen: influencer, title, post id, and publication date.
     checked_post: str | None = None
+    # Sentences chosen for this check: a stored claim, or a transcript line the user confirmed.
+    focus_quotes: list[str] = Field(default_factory=list)
+    # Publication date of the video that was checked. A cut-off typed in the prompt stays on the request.
+    post_published: date | None = None
+    cutoff_from_prompt: bool = False
+    # Set when a one-letter name was corrected, so the report can say who was checked.
+    influencer_note: str | None = None
     # progress
     request: ClaimRequest | None = None
     status: AssessmentStatus | None = None  # set only when the run stops early

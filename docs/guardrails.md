@@ -70,7 +70,7 @@ Output guardrails run after the agents and the auditor, on the drafted report.
 
 ### The report stays inside the check
 
-- The report names the influencer, the video title, the video id, and the post date. If the user's wording is not in the post, one sentence says the post was checked.
+- The report names the influencer, the video title, the video id, and the post date. If the prompt stated a claim and no stored row shares its measure and figure, the reply quotes the closest spoken sentence and asks the user to confirm it, or says the line is not in the stored videos.
 - A quote must be an exact span of a stored filing or remark. A quote that cannot be found is dropped.
 - A calculated ratio comes from the filing tags and the formula. The report does not fill a gap from memory, from news, or from the post. News may be shown. It cannot move a label.
 - The report does not contain API keys, the system prompt, account numbers, or the user's savings.

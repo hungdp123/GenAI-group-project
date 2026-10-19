@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from finsight.agents.claim_extraction.prepare import prepare_post
+from finsight.agents.claim_extraction.select import explain_miss, matching_claims
 from finsight.agents.claim_extraction.thesaurus import find_mentions
 from finsight.agents.orchestrator import routing
 from finsight.contracts.schemas import AssessmentStatus, SubClaim, SubClaimType
@@ -31,6 +32,7 @@ class Extraction:
     notes: list[str] = field(default_factory=list)
     insufficient_reasons: dict[str, str] = field(default_factory=dict)
     dropped_by_cap: list[str] = field(default_factory=list)
+    miss: str | None = None
 
 
 def load_stored_claims(path: Path, video_id: str | None, company_ticker: str | None) -> list[SubClaim] | None:
@@ -72,6 +74,91 @@ def load_stored_claims(path: Path, video_id: str | None, company_ticker: str | N
     return claims if found else None
 
 
+def load_claim_rows(
+    path: Path, video_ids: set[str], company_ticker: str | None,
+) -> list[tuple[SubClaim, str]]:
+    """Stored claims for these videos, each paired with its video id."""
+    if not video_ids or not path.exists():
+        return []
+    rows: list[tuple[SubClaim, str]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        video_id = str(row.get("video_id") or "")
+        if video_id not in video_ids:
+            continue
+        ticker = row.get("company_ticker")
+        if company_ticker and ticker and ticker != company_ticker:
+            continue
+        try:
+            claim_type = SubClaimType(row["sub_claim_type"])
+        except (KeyError, ValueError):
+            continue
+        claim = SubClaim(
+            sub_claim_id=str(row.get("sub_claim_id") or f"c{len(rows) + 1}"),
+            text=str(row.get("text") or row.get("source_span") or ""),
+            sub_claim_type=claim_type,
+            company_ticker=ticker or company_ticker,
+            is_quantitative=bool(row.get("is_quantitative")),
+            source_span=row.get("source_span"),
+            parent_span=row.get("parent_span"),
+            expansion_rule=row.get("expansion_rule"),
+            measure=row.get("measure"),
+            quote_time=row.get("quote_time"),
+        )
+        rows.append((claim, video_id))
+    return rows
+
+
+def extraction_from_quotes(
+    quotes: list[str], stored: list[SubClaim] | None, ticker: str | None,
+) -> Extraction:
+    """Check the sentences already chosen. A segment line is still checked."""
+    out = Extraction()
+    by_text = {_norm(claim.text): claim for claim in stored or []}
+    sub_claims: list[SubClaim] = []
+    for index, quote in enumerate(quotes, start=1):
+        stored_claim = by_text.get(_norm(quote))
+        if stored_claim is not None:
+            sub_claims.append(stored_claim)
+            continue
+        claim, reason = _quote_claim(quote, ticker, index)
+        sub_claims.append(claim)
+        if reason:
+            out.insufficient_reasons[claim.sub_claim_id] = reason
+    sub_claims, out.dropped_by_cap = keep_within_cap(sub_claims)
+    out.sub_claims = sub_claims
+    out.notes.append(
+        f"{len(sub_claims)} sub-claims: " + ", ".join(f"{c.sub_claim_id}={c.sub_claim_type.value}" for c in sub_claims)
+    )
+    return out
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _quote_claim(quote: str, ticker: str | None, index: int) -> tuple[SubClaim, str | None]:
+    from finsight.agents.claim_extraction.build import _ADVICE_OR_PRICE, _classify
+
+    kind = _classify(quote)
+    reason = kind.reason if kind is not None else None
+    claim_type = SubClaimType(kind.type) if kind is not None else SubClaimType.OTHER
+    if kind is None and (_ADVICE_OR_PRICE.search(quote) or re.search(r"\bworth\b.{0,30}\$\s*\d", quote)):
+        reason = "This line is about a price, so it is not checked against a filing."
+    claim = SubClaim(
+        sub_claim_id=f"q{index}",
+        text=quote,
+        sub_claim_type=claim_type,
+        company_ticker=ticker,
+        is_quantitative=bool(re.search(r"\d", quote)),
+        source_span=quote,
+        measure=kind.measure if kind is not None else None,
+    )
+    return claim, reason
+
+
 def load_stored_reasons(path: Path, video_id: str | None, company_ticker: str | None) -> dict[str, str]:
     """Reasons stored with a sentence, such as a garbled number. Empty when the video has no record."""
     if not video_id or not path.exists():
@@ -105,8 +192,13 @@ def extract_claims(
     call: Callable[..., tuple[Any, Exception | None]],
     stored: list[SubClaim] | None = None,
     stored_reasons: dict[str, str] | None = None,
+    focus: str | None = None,
 ) -> Extraction:
-    """Use stored sentences when the corpus has them. Otherwise call the decomposer once."""
+    """Use stored sentences when the corpus has them. Otherwise call the decomposer once.
+
+    `focus` is the claim the user stated. Only stored rows that match it are checked.
+    A transcript line that is not in that list is explained and is not verified.
+    """
     out = Extraction()
     if stored is not None:
         sub_claims, error = stored, None
@@ -153,6 +245,15 @@ def extract_claims(
         out.notes.append(f"dropped {len(refusing)} advice line(s) inside the stored post")
         sub_claims = [c for c in sub_claims if c not in refusing]
         refusing = []
+    if focus:
+        matched = matching_claims(focus, sub_claims)
+        if not matched:
+            out.miss = explain_miss(focus, text)
+            out.notes.append(out.miss)
+            return out
+        if len(matched) < len(sub_claims):
+            out.notes.append(f"kept {len(matched)} claim(s) matching the prompt")
+        sub_claims = matched
     sub_claims, out.dropped_by_cap = keep_within_cap(sub_claims)
     if out.dropped_by_cap:
         out.notes.append(f"cap of 8 left out {len(out.dropped_by_cap)} claim(s)")

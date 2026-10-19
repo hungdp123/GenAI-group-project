@@ -2,6 +2,7 @@
 # Schema = finsight.contracts.schemas.KnowledgeRule. Keep field names stable.
 # Full rule book: docs/knowledge_layer.md. Choices and why: docs/decision_rationale.md.
 # Corpus: the companies and influencer channels in docs/knowledge_layer.md section 1.
+# Influencers: Joseph Carlson, Mark Roussin, Alex Reffett, Meet Kevin.
 # Posts are from 2026-04-01 through 2026-09-30. This file does not list them.
 # This file is only the routing extract.
 #
