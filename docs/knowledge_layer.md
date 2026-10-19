@@ -174,15 +174,17 @@ If the same type, measure, and period appears twice, keep one claim. Keep the ea
 |---|---|---|---|---|
 | Historical growth | Past change in total revenue | "Revenue grew about 14% year over year." | Financial | Supported, from a filing only |
 | Net income growth | Past change in accounting profit | "Profits grew." | Financial | Supported, from a filing only |
-| Profitability | Operating margin or net margin, level and direction | "Margins are healthy and not falling." | Financial | Supported, from a filing only |
+| Profitability | Operating margin, net margin, or gross margin, level and direction | "Margins are healthy and not falling." "Gross margin improved." | Financial | Supported, from a filing only |
 | Cash generation | Free cash flow, level and direction | "The company generates cash." | Financial | Supported, from a filing only |
 | Liquidity | Current ratio, level and direction | "Liquidity is solid." | Financial | Supported, from a filing only |
-| Leverage | Debt-to-equity, direction only | "Leverage is under control." | Financial | Supported, from a filing only |
+| Leverage | Debt-to-equity, direction only | "Leverage is under control." | Financial | Insufficient Evidence until the financial agent returns the ratio. Supported once that filing ratio is calculated. |
 | Demand attribution | The post names the cause of a result, such as AI demand or a new product. The check is whether the company itself said that. | "Growth is from AI infrastructure demand." | Narrative | Supported only when a filing gives that cause's share of the result and names no other cause. Any weaker company statement is Partially Supported. |
 | Continuation | A forward-looking claim about demand or guidance | "This growth is just getting started." | Narrative | Partially Supported. The source is management's own remarks. |
 | Comparative | A ranking against other companies | "Biggest winner." | Nobody. No peer filings. | Insufficient Evidence |
 | Business risk | A risk named in the post | "Customer concentration is a risk." | Narrative | Supported only when a 10-K or 10-Q risk factor states it. An earnings-call remark can at most be Partially Supported. |
-| Not in the table | A company fact that matches no row above | "Gross margin improved." "They bought back stock." "Attendance rose." | Narrative, in the documents stored for that company | Supported when a filing states it. An earnings remark can at most be Partially Supported. |
+| Not in the table | A company fact that matches no row above | "They bought back stock." "Attendance rose." | Narrative, in the documents stored for that company | Supported when a filing states it. An earnings remark can at most be Partially Supported. |
+
+A debt amount is not leverage. "Debt is over $100 billion" goes to the narrative agent, which quotes the figure from a stored filing. Debt tags differ across companies, so the financial agent does not add them up. The narrative agent does not calculate debt ÷ equity. That ratio stays a leverage claim.
 
 A sentence that fits none of the rows will be checked against the documents stored for that company, then determined whether Out of Scope or not. For example:
 
@@ -301,10 +303,11 @@ Only these calculations may support a financial claim. The numbers come from the
 | Revenue growth | Total revenue | Later revenue ÷ earlier revenue − 1 |
 | Net income growth | Accounting profit | Later profit ÷ earlier profit − 1 |
 | Operating margin | Operating income, revenue | Operating income ÷ revenue |
+| Gross margin | Gross profit, revenue | Gross profit ÷ revenue |
 | Net margin | Profit, revenue | Profit ÷ revenue |
 | Free cash flow | Cash from operations, capital spending | Cash from operations minus capital spending. Treat capital spending as money going out. If the tagged number is already negative, do not subtract it a second time. |
 | Current ratio | Short-term assets, short-term bills | Short-term assets ÷ short-term bills. A result of 1 means the assets cover the bills. |
-| Debt-to-equity | Short-term debt, long-term debt, shareholders' equity | (Short-term debt + long-term debt) ÷ equity. For the "financially strong" test, only the direction from last year is used. |
+| Debt-to-equity | Short-term debt, long-term debt, shareholders' equity | (Short-term debt + long-term debt) ÷ equity. For the "financially strong" test, only the direction from last year is used. The financial agent does not return this ratio yet, so a leverage claim is Insufficient Evidence. |
 
 Use total revenue and total profit, not a segment. A segment growth rate presented as if it were the whole company is Insufficient Evidence. A segment figure stated as that segment, such as "AWS grew 17%," is checked as that segment. It is not sent through the total-revenue calculation. The report says it is about that segment, not the whole company. The lookup is a stored passage that states the figure. If no passage states it, the label is Insufficient Evidence.
 
@@ -332,9 +335,11 @@ Use total revenue and total profit, not a segment. A segment growth rate present
 - On a growth claim, "strong" and "explosive" mean the direction only, as in section 6. The output says the size was not tested.
 - A dollar amount matches after rounding to the precision the post stated. "$2.1 billion" matches a calculated amount from $2.05 billion to $2.15 billion.
 
-**Not calculated here.** A missing tag or a missing comparison period makes that calculated claim Insufficient Evidence. The gap is not filled from news, from the stored post, or from memory.
+**Not calculated here.** A missing tag or a missing comparison period makes that calculated claim Insufficient Evidence. The gap is not filled from news, from the stored post, or from memory. Debt-to-equity is in the table above, and the financial agent returns no figure for it yet, so the label is Insufficient Evidence. The narrative agent is not asked to divide debt by equity.
 
-Gross margin, adjusted EBITDA, earnings per share, buybacks, dividends, a cash balance, homes sold, and attendance are not in the table above, so they are not calculated. They are still checked under section 5, by searching the stored documents. The label is Insufficient Evidence only when those documents do not state the claim. A segment figure presented as the whole company stays Insufficient Evidence.
+A debt amount, such as "debt is over $100 billion", is not one of these calculations. The narrative agent quotes that figure from a stored filing passage.
+
+Adjusted EBITDA, earnings per share, buybacks, dividends, a cash balance, homes sold, and attendance are not in the table above, so they are not calculated. They are still checked under section 5, by searching the stored documents. The label is Insufficient Evidence only when those documents do not state the claim. A segment figure presented as the whole company stays Insufficient Evidence.
 
 ## 12. The four labels
 
@@ -347,7 +352,8 @@ Gross margin, adjusted EBITDA, earnings per share, buybacks, dividends, a cash b
 
 | Type | Supported when | Otherwise |
 |---|---|---|
-| Historical growth, net income growth, profitability, cash, liquidity, leverage | The filing matches the value, the direction, and the period in section 11 | Missing period or missing tag: Insufficient Evidence |
+| Historical growth, net income growth, profitability, cash, liquidity | The filing matches the value, the direction, and the period in section 11 | Missing period or missing tag: Insufficient Evidence |
+| Leverage | Never, until the financial agent returns debt ÷ equity | Insufficient Evidence. The narrative agent cannot calculate the ratio. |
 | Demand attribution | A filing gives that driver's share of growth and names no other driver | Any weaker company statement: Partially Supported. A number with no driver: Insufficient Evidence |
 | Continuation | Never | Management says "expects" or gives guidance: Partially Supported. "Will" or "proves" overstates that. |
 | Comparative | Never | Insufficient Evidence. Peer filings are not stored, so there is no search. |

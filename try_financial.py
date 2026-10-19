@@ -3,7 +3,8 @@ from finsight.agents.financial.agent import XbrlFinancialAgent
 from finsight.contracts.schemas import SubClaim, SubClaimType
 
 G = SubClaimType.HISTORICAL_GROWTH
-P = SubClaimType.PROFITABILITY_CASH_LEVERAGE
+P = SubClaimType.PROFITABILITY
+L = SubClaimType.LEVERAGE
 D = SubClaimType.DEMAND_ATTRIBUTION
 CUTOFF = date(2025, 7, 31)
 
@@ -16,7 +17,7 @@ CASES = [  # (ticker, type, claim text, cut-off)
     ("GME", P, "GameStop's share count keeps rising.", CUTOFF),
     ("OPEN", P, "Opendoor's inventory is falling.", CUTOFF),
     ("AMC", P, "AMC's gross margin is improving.", CUTOFF),
-    ("MCD", P, "McDonald's leverage is falling.", CUTOFF),
+    ("MCD", L, "McDonald's leverage is falling.", CUTOFF),
     ("ZZZZ", G, "This company's revenue grew.", CUTOFF),
     ("NVDA", D, "NVIDIA's growth is driven by AI demand.", CUTOFF),
 ]

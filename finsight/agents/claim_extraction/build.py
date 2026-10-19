@@ -28,6 +28,12 @@ from finsight.agents.orchestrator.routing import INFLUENCER_CHANNELS
 
 _CHANNELS = frozenset(channel for group in INFLUENCER_CHANNELS.values() for channel in group)
 _MEASURES = ("profitability", "cash_generation", "liquidity", "leverage")
+_TYPE_BY_MEASURE = {
+    "profitability": "PROFITABILITY",
+    "cash_generation": "CASH_GENERATION",
+    "liquidity": "LIQUIDITY",
+    "leverage": "LEVERAGE",
+}
 _WIDE = (
     (re.compile(r"\bfinancially strong\b", flags=re.IGNORECASE), "financially_strong"),
     (re.compile(r"\bstrong fundamentals\b", flags=re.IGNORECASE), "strong_fundamentals"),
@@ -68,10 +74,16 @@ _RESULT = re.compile(
     flags=re.IGNORECASE,
 )
 _RISK = re.compile(r"\b(risks?|threat|customer concentration)\b", flags=re.IGNORECASE)
-_PROFIT = re.compile(
-    r"\b(margins?|free cash flow|cash flow|liquidity|current ratio|leverage|debt|balance sheet)\b",
+_MARGIN = re.compile(
+    r"\b(gross margins?|operating margins?|net margins?|profit margins?|margins?)\b",
     flags=re.IGNORECASE,
 )
+_CASH = re.compile(r"\b(free cash flow|cash flow|fcf|cash generation)\b", flags=re.IGNORECASE)
+_LIQUIDITY = re.compile(r"\b(liquidity|current ratio)\b", flags=re.IGNORECASE)
+_LEVERAGE = re.compile(r"\b(leverage|debt[- ]to[- ]equity|debt/equity)\b", flags=re.IGNORECASE)
+_DEBT_AMOUNT = re.compile(r"\b(debt|indebted|balance sheet)\b", flags=re.IGNORECASE)
+_REVENUE_WORD = re.compile(r"\b(revenues?|sales|top[- ]line)\b", flags=re.IGNORECASE)
+_NET_INCOME_WORD = re.compile(r"\b(net income|earnings|profits?|bottom line)\b", flags=re.IGNORECASE)
 _GROWTH_MEASURE = re.compile(
     r"\b(revenues?|sales|earnings|profits?|net income|top line)\b",
     flags=re.IGNORECASE,
@@ -255,7 +267,7 @@ def _classify(text: str) -> Kind | None:
         return Kind("OTHER", measure="segment")
     for pattern, rule in _WIDE:
         if pattern.search(text) and not _NAMED_MEASURE.search(text):
-            return Kind("PROFITABILITY_CASH_LEVERAGE", expansion=rule)
+            return Kind("PROFITABILITY", expansion=rule)
     if _FORWARD.search(text):
         return Kind("CONTINUATION", measure="guidance" if re.search(r"\bguid", text, flags=re.IGNORECASE) else None)
     if _COMPARE.search(text):
@@ -264,11 +276,33 @@ def _classify(text: str) -> Kind | None:
         return Kind("BUSINESS_RISK")
     if _CAUSE.search(text) and _RESULT.search(text) and not _NUMBER.search(text):
         return Kind("DEMAND_ATTRIBUTION")
-    if _PROFIT.search(text):
-        return Kind("PROFITABILITY_CASH_LEVERAGE")
+    if _LEVERAGE.search(text):
+        return Kind("LEVERAGE")
+    if _DEBT_AMOUNT.search(text):
+        return Kind("OTHER")
+    if _LIQUIDITY.search(text):
+        return Kind("LIQUIDITY")
+    if _CASH.search(text):
+        return Kind("CASH_GENERATION")
+    if _MARGIN.search(text):
+        return Kind("PROFITABILITY")
     if _GROWTH_MEASURE.search(text) and (_DIRECTION.search(text) or _NUMBER.search(text)):
+        if _NET_INCOME_WORD.search(text) and not _REVENUE_WORD.search(text):
+            return Kind("NET_INCOME_GROWTH")
         return Kind("HISTORICAL_GROWTH")
     return None
+
+
+def specific_type(stored: str, text: str, measure: str | None) -> str:
+    """Split an older merged profitability row into the measure it actually names."""
+    if measure in _TYPE_BY_MEASURE:
+        return _TYPE_BY_MEASURE[measure]
+    if stored != "PROFITABILITY_CASH_LEVERAGE":
+        return stored
+    kind = _classify(text)
+    if kind is None or kind.expansion:
+        return stored
+    return kind.type
 
 
 def _materialize(
@@ -296,7 +330,7 @@ def _materialize(
         return [
             {
                 **base,
-                "sub_claim_type": kind.type,
+                "sub_claim_type": _TYPE_BY_MEASURE[measure],
                 "measure": measure,
                 "parent_span": quote,
                 "expansion_rule": kind.expansion,

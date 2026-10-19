@@ -41,13 +41,13 @@ Supported, Partially Supported, Contradicted, Insufficient Evidence. Caps per ty
 
 | Item | KL doc | Code / other |
 |---|---|---|
-| Types | 11 (four measures plus NET_INCOME_GROWTH) | `SubClaimType` has 8; the four measures are merged, no NET_INCOME_GROWTH |
+| Types | 11, kept separate in code | `SubClaimType` has NET_INCOME_GROWTH, PROFITABILITY, CASH_GENERATION, LIQUIDITY, and LEVERAGE. Older rows may still say PROFITABILITY_CASH_LEVERAGE and are split on load. |
 | Sub-claim fields | KL §7 list | `SubClaim` has `sub_claim_id, text, sub_claim_type, company_ticker, is_quantitative` |
 | Influencer module | Not mentioned | Not in schema or dataset guide |
 
 ## 7. Open decisions
 
-1. **Which type enum is final (KL's 11 or code's 8)?** Owners: Irine, Hung. The code merges profitability, cash, leverage into one type and has no NET_INCOME_GROWTH; KL keeps them separate, and the dev drafts follow KL.
+1. **Which type enum is final?** Settled 19 Oct 2026. The separate types are final: historical growth, net income growth, profitability (including gross margin), cash generation, liquidity, and leverage. A debt amount is not leverage. It is quoted by the narrative agent. Leverage stays with the financial agent, which returns no ratio yet.
 2. **Why 8 for the cap?** KL gives no rationale. Ask Irine.
 3. **If the user's sentence differs from the real post, which is checked?** Settled 16 Oct 2026. A stored row is checked when it shares the measure and any stated figure, including a paraphrase. "Grew 24%" does not attach to a row that says 17%. If no stored row is that close, the transcript is searched. One close spoken sentence is shown and confirmed before it is checked. Several are shown and the user picks one. If nothing is close, the reply says the line is not in the stored videos and stops.
 4. **Claim with no influencer named: valid input or Clarification?** Only 3 influencers are chosen, so they may not have covered every company. Undecided.

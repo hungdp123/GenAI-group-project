@@ -28,12 +28,47 @@ rules:
     tier_requirement: [TIER_1]
     note: "Supported only when the Tier 1 computed record matches value, direction, and period. Use consolidated revenue, not a segment. A wrong number is rewritten from that record. Do not add the narrative agent."
 
+  - sub_claim_type: NET_INCOME_GROWTH
+    collectors: [financial]
+    retry_collectors: []
+    highest_verdict: SUPPORTED
+    tier_requirement: [TIER_1]
+    note: "Past change in accounting profit. Supported only when the Tier 1 record matches value, direction, and period. Do not add the narrative agent."
+
+  - sub_claim_type: PROFITABILITY
+    collectors: [financial]
+    retry_collectors: []
+    highest_verdict: SUPPORTED
+    tier_requirement: [TIER_1]
+    note: "Operating margin, net margin, and gross margin. Gross margin is gross profit divided by revenue. Supported only from a Tier 1 filing. Do not add the narrative agent."
+
+  - sub_claim_type: CASH_GENERATION
+    collectors: [financial]
+    retry_collectors: []
+    highest_verdict: SUPPORTED
+    tier_requirement: [TIER_1]
+    note: "Free cash flow, level and direction. Supported only from a Tier 1 filing. Do not add the narrative agent."
+
+  - sub_claim_type: LIQUIDITY
+    collectors: [financial]
+    retry_collectors: []
+    highest_verdict: SUPPORTED
+    tier_requirement: [TIER_1]
+    note: "Current ratio, level and direction. Supported only from a Tier 1 filing. Do not add the narrative agent."
+
+  - sub_claim_type: LEVERAGE
+    collectors: [financial]
+    retry_collectors: []
+    highest_verdict: INSUFFICIENT_EVIDENCE
+    tier_requirement: [TIER_1]
+    note: "Debt divided by equity stays with the financial agent. The agent returns no figure yet, so the label is Insufficient Evidence. The narrative agent is not called, because it cannot calculate the ratio. A debt amount is not this type."
+
   - sub_claim_type: PROFITABILITY_CASH_LEVERAGE
     collectors: [financial]
     retry_collectors: []
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1]
-    note: "One code type for profitability, cash generation, liquidity, and leverage. Each is Tier 1 and capped at SUPPORTED. The four tests are in the rule book. A wrong number is rewritten from the computed record. Do not add the narrative agent."
+    note: "Older stored rows that still use the merged type. New rows use PROFITABILITY, CASH_GENERATION, LIQUIDITY, or LEVERAGE."
 
   - sub_claim_type: DEMAND_ATTRIBUTION
     collectors: [narrative]

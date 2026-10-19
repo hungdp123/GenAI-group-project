@@ -59,14 +59,14 @@ _METRIC_RULES = [
     (r"\bcash flow|\bcash generation", "OperatingCashFlow", True),
     (r"\bmargins?", "gross_margin", True),
     (r"\bliquidity|\bcurrent ratio", "current_ratio", True),
-    # DECISION: debt is not mapped (tags are inconsistent), so leverage uses total liabilities / equity.
-    (r"\bleverage|\bliabilit|\bindebted|\bbalance sheet|\bdebt", "liabilities_to_equity", False),
+    # A debt amount is not calculated here. Tags differ by company, so the narrative agent quotes it.
+    # Debt-to-equity is a leverage claim. gather() returns nothing for that type until the ratio is wired.
     (r"\bdilut|\bshare count|\bshares outstanding", "DilutedShares", False),
     (r"\binventor", "Inventory", None),
     (r"\bcash\b", "CashAndEquivalents", True),
     (r"\bnet (income|loss)|\bprofits?\b|\bearnings\b|\bloss(es)?\b", "NetIncome", True),
 ]
-_DEFAULT_METRICS = ["gross_margin", "operating_margin", "net_margin"]   # first one with data is used
+_DEFAULT_METRICS = ["operating_margin", "gross_margin", "net_margin"]   # first one with data is used
 
 _NAMES = {
     "Revenue": "revenue", "CostOfRevenue": "cost_of_revenue", "GrossProfit": "gross_profit",
@@ -223,9 +223,15 @@ class XbrlFinancialAgent:
         if not ticker or ticker not in self.store.tickers:
             return []
         kind_ = sub_claim.sub_claim_type
-        if kind_ is SubClaimType.HISTORICAL_GROWTH:
+        if kind_ in (SubClaimType.HISTORICAL_GROWTH, SubClaimType.NET_INCOME_GROWTH):
             return self._growth(sub_claim, cutoff_date, retry=feedback is not None)
-        if kind_ is SubClaimType.PROFITABILITY_CASH_LEVERAGE:
+        if kind_ is SubClaimType.LEVERAGE:
+            # The ratio is not returned yet. No evidence means Insufficient Evidence.
+            return []
+        if kind_ in (
+            SubClaimType.PROFITABILITY, SubClaimType.CASH_GENERATION, SubClaimType.LIQUIDITY,
+            SubClaimType.PROFITABILITY_CASH_LEVERAGE,
+        ):
             return self._levels(sub_claim, cutoff_date, pick_metrics(sub_claim.text), use_default=True)
         if kind_ is SubClaimType.OTHER:
             # DECISION: unclassified sub-claims get numbers only when the wording names something measurable.

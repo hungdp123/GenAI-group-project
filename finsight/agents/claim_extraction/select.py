@@ -63,7 +63,8 @@ _GROUPS = {
     "profit": frozenset({"profit", "profits", "earnings", "earning", "income"}),
     "margin": frozenset({"margin", "margins", "profitability"}),
     "cash": frozenset({"cash", "fcf"}),
-    "debt": frozenset({"debt", "leverage"}),
+    "debt": frozenset({"debt"}),
+    "leverage": frozenset({"leverage"}),
     "guidance": frozenset({
         "guidance", "guided", "forecast", "forecasts", "expects", "expected", "expect",
         "continue", "continued", "continuing", "started", "runway",
@@ -83,7 +84,7 @@ _ADVICE = re.compile(
     r"(?:buy|sell)(?:ing)? the (?:stock|shares)|i(?:'ll| will) (?:buy|sell)|committing)\b",
     flags=re.IGNORECASE,
 )
-_MEASURES = frozenset({"revenue", "profit", "margin", "cash", "debt"})
+_MEASURES = frozenset({"revenue", "profit", "margin", "cash", "debt", "leverage"})
 _DIRECTIONS = frozenset({"growth", "decline"})
 _TOPICS = frozenset({"guidance", "risk", "compare"})
 _CUTOFF = re.compile(

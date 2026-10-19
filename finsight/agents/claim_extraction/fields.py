@@ -45,9 +45,11 @@ _METRICS: dict[str, str] = {
     "profit": "profit", "profits": "profit", "earnings": "profit", "income": "profit",
     "margin": "margin", "margins": "margin", "profitability": "margin",
     "cash": "cash", "fcf": "cash",
-    "debt": "debt", "leverage": "debt",
+    "debt": "debt", "leverage": "leverage",
 }
 _PHRASES: tuple[tuple[str, str], ...] = (
+    ("debt-to-equity", "leverage"),
+    ("debt to equity", "leverage"),
     ("free cash flow", "cash"),
     ("operating cash flow", "cash"),
     ("operating profit", "profit"),
@@ -195,6 +197,7 @@ def _metrics(text: str) -> set[str]:
     for phrase, metric in _PHRASES:
         if phrase in lowered:
             found.add(metric)
+            lowered = lowered.replace(phrase, " ")
     for word in _WORD.findall(lowered):
         metric = _METRICS.get(word)
         if metric:

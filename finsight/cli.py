@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -23,27 +22,18 @@ from finsight.config import get_settings
 from finsight.logging.decision_log import format_trace, load_log
 
 
-_CAUSE = re.compile(
-    r"\b(because|driven by|due to|from ai|demand|just getting started|guidance|risk|winner|price target)\b",
-    flags=re.IGNORECASE,
-)
-_GROWTH = re.compile(
-    r"\b(grow|grew|growth|revenues?|sales|earnings|profits?|net income)\b",
-    flags=re.IGNORECASE,
-)
-
-
 def _financial_type(text: str):
-    """Revenue, earnings, margins, cash, liquidity, or leverage. A cause or a forecast is not this agent."""
-    from finsight.agents.financial.agent import pick_metrics
+    """Revenue, earnings, margins, cash, liquidity, or leverage. A debt amount is not this agent."""
+    from finsight.agents.claim_extraction.build import _classify
     from finsight.contracts.schemas import SubClaimType
 
-    if pick_metrics(text):
-        return SubClaimType.PROFITABILITY_CASH_LEVERAGE
-    if _CAUSE.search(text) and not re.search(r"\d", text):
-        return None
-    if _GROWTH.search(text):
-        return SubClaimType.HISTORICAL_GROWTH
+    kind = _classify(text)
+    financial = {
+        "HISTORICAL_GROWTH", "NET_INCOME_GROWTH", "PROFITABILITY",
+        "CASH_GENERATION", "LIQUIDITY", "LEVERAGE",
+    }
+    if kind is not None and kind.type in financial and not kind.expansion:
+        return SubClaimType(kind.type)
     return None
 
 

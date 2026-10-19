@@ -15,7 +15,7 @@ _RULES: list[tuple[SubClaimType, str, str, bool]] = [
      "The user asks what they personally should do with {name}.", False),
     (SubClaimType.HISTORICAL_GROWTH, r"\brevenue\b|\bgrowth\b|\bgrew\b",
      "{name}'s recent revenue growth is strong.", True),
-    (SubClaimType.PROFITABILITY_CASH_LEVERAGE, r"\bmargins?\b|\bcash flow\b|\bdebt\b|\bprofit",
+    (SubClaimType.PROFITABILITY, r"\bmargins?\b|\bcash flow\b|\bprofit",
      "{name}'s margins are expanding.", True),
     (SubClaimType.DEMAND_ATTRIBUTION, r"\bAI\b|\bdemand\b",
      "{name}'s revenue growth is driven by AI infrastructure demand.", False),

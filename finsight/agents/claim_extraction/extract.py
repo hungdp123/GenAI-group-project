@@ -35,6 +35,15 @@ class Extraction:
     miss: str | None = None
 
 
+def _stored_type(row: dict) -> SubClaimType:
+    """Read a stored type. An older merged row is split from its measure or its words."""
+    from finsight.agents.claim_extraction.build import specific_type
+
+    stored = SubClaimType(row["sub_claim_type"])
+    text = str(row.get("text") or row.get("source_span") or "")
+    return SubClaimType(specific_type(stored.value, text, row.get("measure")))
+
+
 def load_stored_claims(path: Path, video_id: str | None, company_ticker: str | None) -> list[SubClaim] | None:
     """Sentences stored for this post when the corpus was built.
 
@@ -56,7 +65,7 @@ def load_stored_claims(path: Path, video_id: str | None, company_ticker: str | N
         if company_ticker and ticker and ticker != company_ticker:
             continue
         try:
-            claim_type = SubClaimType(row["sub_claim_type"])
+            claim_type = _stored_type(row)
         except (KeyError, ValueError):
             continue
         claims.append(SubClaim(
@@ -92,7 +101,7 @@ def load_claim_rows(
         if company_ticker and ticker and ticker != company_ticker:
             continue
         try:
-            claim_type = SubClaimType(row["sub_claim_type"])
+            claim_type = _stored_type(row)
         except (KeyError, ValueError):
             continue
         claim = SubClaim(
@@ -282,9 +291,15 @@ _PRIORITY = {
     SubClaimType.COMPARATIVE: 0,
     SubClaimType.CONTINUATION: 1,
     SubClaimType.DEMAND_ATTRIBUTION: 2,
+    SubClaimType.HISTORICAL_GROWTH: 3,
+    SubClaimType.NET_INCOME_GROWTH: 4,
+    SubClaimType.PROFITABILITY: 5,
+    SubClaimType.CASH_GENERATION: 5,
+    SubClaimType.LIQUIDITY: 5,
+    SubClaimType.LEVERAGE: 5,
+    SubClaimType.PROFITABILITY_CASH_LEVERAGE: 5,
     SubClaimType.BUSINESS_RISK: 6,
 }
-_NET_INCOME = re.compile(r"\b(earnings|profits?|net income)\b", flags=re.IGNORECASE)
 
 
 def keep_within_cap(claims: list[SubClaim]) -> tuple[list[SubClaim], list[str]]:
@@ -301,8 +316,6 @@ def keep_within_cap(claims: list[SubClaim]) -> tuple[list[SubClaim], list[str]]:
 def _rank(claim: SubClaim) -> int:
     if claim.parent_span and claim.expansion_rule in _COMPANY_WIDE:
         return 5
-    if claim.sub_claim_type is SubClaimType.HISTORICAL_GROWTH:
-        return 4 if _NET_INCOME.search(claim.text) else 3
     return _PRIORITY.get(claim.sub_claim_type, 7)
 
 
