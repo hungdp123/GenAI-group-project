@@ -36,7 +36,7 @@ class KnowledgeLayer(BaseModel):
         return self
 
     def rule_for(self, sub_claim_type: SubClaimType) -> KnowledgeRule:
-        """Rule for `sub_claim_type`, or the fallback (both collectors, PARTIALLY_SUPPORTED cap)."""
+        """Rule for `sub_claim_type`, or the fallback row."""
         for rule in self.rules:
             if rule.sub_claim_type is sub_claim_type:
                 return rule

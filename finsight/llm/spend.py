@@ -17,7 +17,11 @@ from pathlib import Path
 
 from finsight.config import local_config_path, read_local_config
 
-_KEY_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+}
 
 
 class MissingAPIKey(RuntimeError):

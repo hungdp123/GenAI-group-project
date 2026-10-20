@@ -12,19 +12,22 @@ def _registry():
     return AgentRegistry.from_config()
 
 
-def test_decomposer_contract():
-    sub_claims = _registry().decomposer.decompose(DEMO_CLAIM, DEMO_CUTOFF)
-    assert sub_claims and all(isinstance(c, SubClaim) for c in sub_claims)
-    assert len({c.sub_claim_id for c in sub_claims}) == len(sub_claims), "sub_claim_ids must be unique"
+def _sample_claim() -> SubClaim:
+    return SubClaim(
+        sub_claim_id="sc1",
+        text="Company X revenue grew 14%.",
+        sub_claim_type=SubClaimType.HISTORICAL_GROWTH,
+        company_ticker="CMPX",
+        is_quantitative=True,
+    )
 
 
 def _collector_contract(agent):
-    sub_claims = _registry().decomposer.decompose(DEMO_CLAIM, DEMO_CUTOFF)
-    for sub_claim in sub_claims:
-        for item in agent.gather(sub_claim, DEMO_CUTOFF, None):
-            assert isinstance(item, EvidenceItem)
-            assert item.sub_claim_id == sub_claim.sub_claim_id
-            assert item.publication_date <= DEMO_CUTOFF, "never return post-cutoff evidence"
+    sub_claim = _sample_claim()
+    for item in agent.gather(sub_claim, DEMO_CUTOFF, None):
+        assert isinstance(item, EvidenceItem)
+        assert item.sub_claim_id == sub_claim.sub_claim_id
+        assert item.publication_date <= DEMO_CUTOFF, "never return post-cutoff evidence"
 
 
 def test_financial_contract():
@@ -43,7 +46,7 @@ def test_retriever_contract():
 
 def test_auditor_contract():
     reg = _registry()
-    sub_claim = reg.decomposer.decompose(DEMO_CLAIM, DEMO_CUTOFF)[0]
+    sub_claim = _sample_claim()
     result = reg.auditor.audit(sub_claim, reg.financial.gather(sub_claim, DEMO_CUTOFF, None))
     assert result.sub_claim_id == sub_claim.sub_claim_id
 

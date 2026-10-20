@@ -20,7 +20,11 @@ from pydantic import BaseModel, ConfigDict, Field
 #      ClaimType -> SubClaimType, ClaimResult -> SubClaimResult, claim_id -> sub_claim_id,
 #      claim_type -> sub_claim_type, claim_results -> sub_claim_results).
 # 0.4: FinalAssessment.claim + summary, SubClaimResult.explanation (plain-language output; all optional).
-SCHEMA_VERSION = "0.4"
+
+# 0.5: SubClaim.source_span, parent_span, expansion_rule, measure, quote_time.
+#      Set when section 6 expands a vague phrase. The report shows that expansion.
+
+SCHEMA_VERSION = "0.5"
 
 
 class _Strict(BaseModel):
@@ -74,14 +78,13 @@ class Verdict(str, Enum):
 
 class SubClaimType(str, Enum):
     HISTORICAL_GROWTH = "HISTORICAL_GROWTH"
-    # TODO(Irine): Irine's 11-type list splits this one into PROFITABILITY, CASH_GENERATION, LIQUIDITY and
-    # LEVERAGE. Remove it after knowledge_layer.yaml, the stubs and the auditor use the new names.
-    PROFITABILITY_CASH_LEVERAGE = "PROFITABILITY_CASH_LEVERAGE"
     NET_INCOME_GROWTH = "NET_INCOME_GROWTH"
     PROFITABILITY = "PROFITABILITY"
     CASH_GENERATION = "CASH_GENERATION"
     LIQUIDITY = "LIQUIDITY"
     LEVERAGE = "LEVERAGE"
+    # Older stored rows. Loaders split these into the four measure types above.
+    PROFITABILITY_CASH_LEVERAGE = "PROFITABILITY_CASH_LEVERAGE"
     DEMAND_ATTRIBUTION = "DEMAND_ATTRIBUTION"
     CONTINUATION = "CONTINUATION"
     COMPARATIVE = "COMPARATIVE"
@@ -132,6 +135,15 @@ class SubClaim(_Strict):
     sub_claim_type: SubClaimType
     company_ticker: str | None = None
     is_quantitative: bool = False
+    source_span: str | None = Field(default=None, description="The quote in the stored post.")
+    parent_span: str | None = Field(
+        default=None, description="The original vague phrase, set only on a section 6 expansion.")
+    expansion_rule: str | None = Field(
+        default=None, description="The section 6 rule, for example financially_strong.")
+    measure: str | None = Field(
+        default=None, description="The measure this child tests, for example profitability or leverage.")
+    quote_time: str | None = Field(
+        default=None, description="A time from the stored post, such as 02:14. Empty when the post has none.")
 
 
 class EvidenceItem(_Strict):
@@ -144,6 +156,9 @@ class EvidenceItem(_Strict):
     company: str
     period: str | None = None
     publication_date: date
+    publication_date_is_estimated: bool = False
+    publication_date_precision: str = "day"
+    publication_date_basis: str | None = None
     url: str | None = None
     citation_span: str | None = None
     produced_by: str = Field(description="Name of the agent that produced this item")
@@ -229,6 +244,8 @@ class FinalAssessment(_Strict):
     request_id: str
     status: AssessmentStatus
     claim: str | None = Field(default=None, description="The claim as the user submitted it")
+    checked_post: str | None = Field(
+        default=None, description="Influencer, title, post id, and publication date of the stored post.")
     summary: str | None = Field(
         default=None, description="Plain-language overall summary shown before the details (built by rule, no LLM)")
     overall_verdict: Verdict | None = None
@@ -334,6 +351,20 @@ class FinSightState(_Strict):
     raw_input: str = ""
     cutoff_input: date | None = None
     company_hint: str | None = None
+    # Empty string means the user answered the influencer question and named nobody.
+    influencer_hint: str | None = None
+    post_id: str | None = None
+    influencer: str | None = None
+    from_stored_post: bool = False
+    # Set when a stored post was chosen: influencer, title, post id, and publication date.
+    checked_post: str | None = None
+    # Sentences chosen for this check: a stored claim, or a transcript line the user confirmed.
+    focus_quotes: list[str] = Field(default_factory=list)
+    # Publication date of the video that was checked. A cut-off typed in the prompt stays on the request.
+    post_published: date | None = None
+    cutoff_from_prompt: bool = False
+    # Set when a one-letter name was corrected, so the report can say who was checked.
+    influencer_note: str | None = None
     # progress
     request: ClaimRequest | None = None
     status: AssessmentStatus | None = None  # set only when the run stops early

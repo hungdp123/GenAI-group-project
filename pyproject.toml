@@ -7,12 +7,28 @@ name = "finsight"
 version = "0.1.0"
 description = "FinSight: multi-agent stress test for company-level investment claims"
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2.6", "langgraph>=0.2", "pyyaml>=6"]
+dependencies = [
+    "beautifulsoup4>=4.12",
+    "langgraph>=0.2",
+    "pydantic>=2.6",
+    "pypdf>=5.0",
+    "pyyaml>=6",
+]
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.40"]
+document-ai = [
+    "docling>=2.139,<3",
+    "openai>=2.38",
+    "pillow>=10",
+    "pypdfium2>=4.30",
+]
 dev = ["pytest>=8", "ruff>=0.6"]
+retrieval = [
+    "qdrant-client>=1.12",
+    "sentence-transformers>=3.0",
+]
 
 [project.scripts]
 finsight = "finsight.cli:main"

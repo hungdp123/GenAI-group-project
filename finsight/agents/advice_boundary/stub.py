@@ -18,6 +18,20 @@ _OUTPUT_PATTERNS = [
     r"\bstrong buy\b",
     r"\bput your savings\b",
 ]
+_SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
+
+
+def without_advice(text: str) -> str:
+    """Drop sentences that tell the reader to buy or sell. The claim text is not passed here."""
+    kept: list[str] = []
+    for match in _SENTENCE.findall(text or ""):
+        sentence = match.strip()
+        if not sentence:
+            continue
+        if any(re.search(pattern, sentence, flags=re.IGNORECASE) for pattern in _OUTPUT_PATTERNS):
+            continue
+        kept.append(sentence)
+    return " ".join(kept).strip()
 
 
 class StubAdviceBoundary:

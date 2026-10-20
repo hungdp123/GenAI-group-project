@@ -26,7 +26,7 @@ class StubFinancialAgent:
         facts = load_xbrl_facts(sub_claim.company_ticker, cutoff_date)
         if sub_claim.sub_claim_type is SubClaimType.HISTORICAL_GROWTH:
             return self._revenue_growth(sub_claim, facts)
-        if sub_claim.sub_claim_type is SubClaimType.PROFITABILITY_CASH_LEVERAGE:
+        if sub_claim.sub_claim_type in (SubClaimType.PROFITABILITY, SubClaimType.PROFITABILITY_CASH_LEVERAGE):
             return self._gross_margin(sub_claim, facts)
         return []
 
