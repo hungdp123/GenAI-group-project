@@ -22,16 +22,12 @@ def test_a_stored_record_is_used_and_the_decomposer_is_not_called(tmp_path):
     assert stored is not None and stored[0].text == "Revenue grew about 14%."
     assert load_stored_claims(path, "missing", "AAPL") is None
 
-    def explode(*_args, **_kwargs):
-        raise AssertionError("decomposer should not run")
-
     out = extract_claims(
         text="ignored transcript",
         cutoff=date(2026, 9, 29),
         company_ticker="AAPL",
         companies={"AAPL": ["Apple"]},
         from_stored_post=True,
-        decomposer=type("D", (), {"decompose": staticmethod(explode)})(),
         knowledge=default_knowledge_layer(),
         call=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("call")),
         stored=stored,

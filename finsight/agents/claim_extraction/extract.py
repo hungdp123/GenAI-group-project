@@ -1,8 +1,8 @@
 """Turn one chosen post into typed claims. Writes no label.
 
-Person 3's decomposer proposes the claims. This step keeps the company named in the prompt,
-drops an advice line inside a stored post, and hands the claims to the orchestrator.
-The post's words stay the claim. A label is decided later.
+Stored claims are the sentences that get checked. This step keeps the company named
+in the prompt, drops an advice line inside a stored post, and hands the claims to
+the orchestrator. The post's words stay the claim. A label is decided later.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from finsight.agents.claim_extraction.prepare import prepare_post
 from finsight.agents.claim_extraction.select import explain_miss, matching_claims
 from finsight.agents.claim_extraction.thesaurus import find_mentions
 from finsight.agents.orchestrator import routing
@@ -47,8 +46,8 @@ def _stored_type(row: dict) -> SubClaimType:
 def load_stored_claims(path: Path, video_id: str | None, company_ticker: str | None) -> list[SubClaim] | None:
     """Sentences stored for this post when the corpus was built.
 
-    None means this post has no stored record yet, so extraction may run once.
-    A list means the record exists and must be used as-is. This is not a vector database.
+    None means this post has no stored record. A list means the record exists and
+    must be used as-is. This is not a vector database.
     """
     if not video_id or not path.exists():
         return None
@@ -196,17 +195,17 @@ def extract_claims(
     company_ticker: str | None,
     companies: dict[str, list[str]],
     from_stored_post: bool,
-    decomposer: Any,
     knowledge: KnowledgeLayer,
     call: Callable[..., tuple[Any, Exception | None]],
     stored: list[SubClaim] | None = None,
     stored_reasons: dict[str, str] | None = None,
     focus: str | None = None,
 ) -> Extraction:
-    """Use stored sentences when the corpus has them. Otherwise call the decomposer once.
+    """Use stored sentences when the corpus has them.
 
     `focus` is the claim the user stated. Only stored rows that match it are checked.
     A transcript line that is not in that list is explained and is not verified.
+    A post with no stored record is not split into new claims.
     """
     out = Extraction()
     if stored is not None:
@@ -215,31 +214,16 @@ def extract_claims(
             out.insufficient_reasons.update(stored_reasons)
         out.notes.append(f"used {len(stored)} stored claim(s)")
     else:
-        model_text = text
-        held: list[SubClaim] = []
-        if from_stored_post:
-            prepared = prepare_post(text, company_ticker)
-            model_text = prepared.text
-            held = prepared.held
-            out.notes.extend(prepared.notes)
-            out.insufficient_reasons.update(prepared.insufficient_reasons)
-            for reason, quote in prepared.dropped:
-                out.notes.append(f"dropped ({reason}): {quote[:180]}")
-        if model_text.strip():
-            sub_claims, error = call("decomposer", decomposer.decompose, model_text, cutoff)
-            if not error and isinstance(sub_claims, list):
-                sub_claims = list(sub_claims) + held
-        elif held:
-            sub_claims, error = held, None
-        else:
-            sub_claims, error = call("decomposer", decomposer.decompose, text, cutoff)
+        sub_claims, error = [], None
+        out.notes.append("no stored claims for this post")
+        out.clarification_question = "This post has no stored claims to check."
     if error or not isinstance(sub_claims, list) or not all(isinstance(c, SubClaim) for c in sub_claims):
         out.status = AssessmentStatus.FAILED
         out.refusal_reason = f"Claim extraction failed: {error or 'invalid output'}"
         return out
     if len({c.sub_claim_id for c in sub_claims}) != len(sub_claims):
         sub_claims = [c.model_copy(update={"sub_claim_id": f"c{i + 1}"}) for i, c in enumerate(sub_claims)]
-        out.notes.append("duplicate sub_claim_ids from decomposer; renumbered")
+        out.notes.append("duplicate sub_claim_ids; renumbered")
     before = len(sub_claims)
     sub_claims = _for_named_company(sub_claims, company_ticker, companies, from_stored_post)
     if len(sub_claims) < before:

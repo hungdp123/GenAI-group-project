@@ -35,16 +35,12 @@ MARGIN = _claim("margin", "Company X margins are expanding.", SubClaimType.PROFI
 
 
 def _extract(text: str, stored: list[SubClaim], focus: str | None):
-    def explode(*_args, **_kwargs):
-        raise AssertionError("decomposer should not run")
-
     return extract_claims(
         text=text,
         cutoff=date(2025, 7, 31),
         company_ticker="CMPX",
         companies={"CMPX": _ALIASES},
         from_stored_post=True,
-        decomposer=type("D", (), {"decompose": staticmethod(explode)})(),
         knowledge=default_knowledge_layer(),
         call=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("call")),
         stored=stored,
@@ -108,31 +104,18 @@ def test_a_sentence_the_build_missed_is_not_verified():
     assert "not in the stored claim list" in message
 
 
-def test_a_compound_sentence_keeps_each_part():
-    from finsight.agents.decomposition.stub import StubDecomposer
-
-    from demo import DEMO_CLAIM
-
-    focus = stated_claim(DEMO_CLAIM, "joseph_carlson", _ALIASES)
+def test_a_post_without_stored_claims_is_not_split():
     out = extract_claims(
-        text=DEMO_CLAIM,
+        text="Company X revenue grew 24% and margins expanded.",
         cutoff=date(2025, 7, 31),
         company_ticker="CMPX",
         companies={"CMPX": _ALIASES},
         from_stored_post=True,
-        decomposer=StubDecomposer(),
         knowledge=default_knowledge_layer(),
-        call=lambda _name, fn, *args, **_kwargs: (fn(*args), None),
-        focus=focus,
+        call=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("call")),
     )
-    kinds = {claim.sub_claim_type for claim in out.sub_claims}
-    assert out.miss is None
-    assert {
-        SubClaimType.HISTORICAL_GROWTH,
-        SubClaimType.DEMAND_ATTRIBUTION,
-        SubClaimType.COMPARATIVE,
-        SubClaimType.CONTINUATION,
-    } <= kinds
+    assert out.sub_claims == []
+    assert out.clarification_question == "This post has no stored claims to check."
 
 
 def test_the_cap_of_8_applies_after_the_match():

@@ -20,8 +20,10 @@ from pydantic import BaseModel, ConfigDict, Field
 #      ClaimType -> SubClaimType, ClaimResult -> SubClaimResult, claim_id -> sub_claim_id,
 #      claim_type -> sub_claim_type, claim_results -> sub_claim_results).
 # 0.4: FinalAssessment.claim + summary, SubClaimResult.explanation (plain-language output; all optional).
+
 # 0.5: SubClaim.source_span, parent_span, expansion_rule, measure, quote_time.
 #      Set when section 6 expands a vague phrase. The report shows that expansion.
+
 SCHEMA_VERSION = "0.5"
 
 
@@ -154,6 +156,9 @@ class EvidenceItem(_Strict):
     company: str
     period: str | None = None
     publication_date: date
+    publication_date_is_estimated: bool = False
+    publication_date_precision: str = "day"
+    publication_date_basis: str | None = None
     url: str | None = None
     citation_span: str | None = None
     produced_by: str = Field(description="Name of the agent that produced this item")

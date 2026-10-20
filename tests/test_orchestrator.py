@@ -4,7 +4,7 @@ import json
 from datetime import date
 
 from finsight import execute
-from finsight.agents.narrative.stub import StubNarrativeAgent
+from finsight.agents.narrative.demo.stub import StubNarrativeAgent
 from finsight.config import AgentRegistry, get_settings
 from finsight.contracts.schemas import (
     AdviceDecision,
@@ -50,15 +50,6 @@ def test_happy_path_demo():
     assert "not a personalized investment recommendation" in fa.boundary_disclaimer
     assert results[SubClaimType.HISTORICAL_GROWTH].supporting[0].computed_value == 0.14
     assert results[SubClaimType.CONTINUATION].challenging, "challenging evidence must be surfaced"
-
-
-def test_pinned_to_stubs_when_a_teammate_swaps_their_agent(monkeypatch):
-    from finsight import config
-
-    # Simulate Person 1 registering a different financial agent in config.py.
-    monkeypatch.setitem(config.DEFAULT_IMPLEMENTATIONS, "financial", "tests_fake_module:DoesNotExist")
-    out = execute(DEMO_CLAIM, DEMO_CUTOFF)
-    assert _by_type(out.assessment)[SubClaimType.HISTORICAL_GROWTH].supporting[0].computed_value == 0.14
 
 
 def test_misregistered_agent_returns_failed_not_crash(monkeypatch):
@@ -229,17 +220,6 @@ def test_agent_exception_does_not_crash_run():
     assert results[SubClaimType.DEMAND_ATTRIBUTION].verdict is Verdict.INSUFFICIENT_EVIDENCE
     failed = [c for c in out.decision_log.agent_calls if not c.success]
     assert failed and "vector DB is down" in failed[0].error
-
-
-class _ExplodingDecomposer:
-    def decompose(self, claim, cutoff_date):
-        raise ValueError("bad prompt")
-
-
-def test_decomposer_exception_returns_failed_not_crash():
-    out = execute(DEMO_CLAIM, DEMO_CUTOFF, registry=AgentRegistry.from_config(decomposer=_ExplodingDecomposer()))
-    assert out.assessment.status is AssessmentStatus.FAILED
-    assert out.decision_log.status is AssessmentStatus.FAILED
 
 
 def test_out_of_scope_is_refused_with_reason():

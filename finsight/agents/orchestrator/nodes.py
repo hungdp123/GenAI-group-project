@@ -345,7 +345,6 @@ class Nodes:
                 company_ticker=req.company_ticker,
                 companies=self.ctx.settings.corpus_companies,
                 from_stored_post=state.from_stored_post,
-                decomposer=self.ctx.registry.decomposer,
                 knowledge=self.ctx.kb,
                 call=self._call,
                 stored=stored,

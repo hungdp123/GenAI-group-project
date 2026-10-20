@@ -1,8 +1,3 @@
-"""Runtime settings and the agent registry. Owner: Person 5 (Hung).
-
-To swap your stub for the real agent, change ONE line in DEFAULT_IMPLEMENTATIONS
-(or set the env var shown next to it, e.g. FINSIGHT_IMPL_FINANCIAL=finsight.agents.financial.agent:XbrlFinancialAgent).
-"""
 
 from __future__ import annotations
 
@@ -19,39 +14,23 @@ from finsight.agents.claim_extraction.thesaurus import corpus_aliases
 from finsight.contracts.interfaces import (
     AdviceBoundary,
     Auditor,
-    Decomposer,
     FinancialAgent,
     NarrativeAgent,
     Retriever,
     TierPolicy,
 )
 
-# The placeholder stubs. Never edit this when you swap in your agent: the end-to-end tests pin to these
-# so demo expectations stay stable while real agents come in one at a time.
-STUB_IMPLEMENTATIONS: dict[str, str] = {
-    "decomposer": "finsight.agents.decomposition.stub:StubDecomposer",
-    "financial": "finsight.agents.financial.stub:StubFinancialAgent",
-    "narrative": "finsight.agents.narrative.stub:StubNarrativeAgent",
-    "retriever": "finsight.agents.narrative.retriever_stub:StubRetriever",
+
+DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
+    "financial": "finsight.agents.financial.agent:XbrlFinancialAgent",
+    "narrative": "finsight.agents.narrative.rag.collect_evidence:NarrativeEvidenceAgent",
+    "retriever": "finsight.agents.narrative.retrieval.retriever:CorpusRetriever",
     "auditor": "finsight.agents.auditor.stub:StubAuditor",
     "advice_boundary": "finsight.agents.advice_boundary.stub:StubAdviceBoundary",
     "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",
 }
 
-# What the app actually runs: slot -> "module:Class". Env override: FINSIGHT_IMPL_<SLOT upper>.
-# SWAP YOUR AGENT HERE: change only your own line(s), so merges never conflict.
-DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
-    "decomposer": "finsight.agents.decomposition.stub:StubDecomposer",  # Person 3
-    "financial": "finsight.agents.financial.agent:XbrlFinancialAgent",  # Person 1
-    "narrative": "finsight.agents.narrative.stub:StubNarrativeAgent",  # Person 2
-    "retriever": "finsight.agents.narrative.retriever_stub:StubRetriever",  # Person 2
-    "auditor": "finsight.agents.auditor.stub:StubAuditor",  # Person 3
-    "advice_boundary": "finsight.agents.advice_boundary.stub:StubAdviceBoundary",  # Person 4
-    "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",  # Person 4
-}
-
 _PROTOCOLS: dict[str, type] = {
-    "decomposer": Decomposer,
     "financial": FinancialAgent,
     "narrative": NarrativeAgent,
     "retriever": Retriever,
@@ -60,8 +39,8 @@ _PROTOCOLS: dict[str, type] = {
     "tier_policy": TierPolicy,
 }
 
-# Companies in the frozen corpus: ticker -> names and product names.
-# The thesaurus is the list. CMPX is the demo placeholder. YouTube is not a search name.
+# Spoken names, legal names, tickers, and product names. The list lives in thesaurus.py.
+# Company X (CMPX) is included there for the demo. YouTube is not a search name.
 CORPUS_COMPANIES: dict[str, list[str]] = corpus_aliases()
 
 # USD per 1M tokens (input, output), standard tier. Real calls to a model missing here are refused.
@@ -157,6 +136,7 @@ def get_settings() -> Settings:
         logs_dir=Path(os.getenv("FINSIGHT_LOGS_DIR", "logs")),
         posts_dir=Path(os.getenv("FINSIGHT_POSTS_DIR", "data/influencers/youtube")),
         max_workers=int(os.getenv("FINSIGHT_MAX_WORKERS", "4")),
+        corpus_companies=dict(CORPUS_COMPANIES),
     )
 
 
@@ -169,7 +149,6 @@ def _load(path: str) -> Any:
 class AgentRegistry:
     """One instance of every agent for a single run. Build a fresh registry per run."""
 
-    decomposer: Decomposer
     financial: FinancialAgent
     narrative: NarrativeAgent
     retriever: Retriever
