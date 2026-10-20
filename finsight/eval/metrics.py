@@ -141,7 +141,8 @@ def write_sub_claims_csv(records: list[RunRecord], path: Path) -> None:
             for idx, (gold, pred, score) in enumerate(align_sub_claims(r.gold_sub_claims, r.predicted_sub_claims)):
                 writer.writerow({
                     "system": r.system, "item_id": r.item_id, "split": r.split, "category": r.category,
-                    "gold_idx": idx, "gold_text": gold.text, "gold_verdict": gold.gold_verdict.value if gold.gold_verdict else "UNLABELED",
+                    "gold_idx": idx, "gold_text": gold.text,
+                    "gold_verdict": gold.gold_verdict.value if gold.gold_verdict else "UNLABELED",
                     "predicted_text": pred.text if pred else "",
                     "predicted_verdict": (pred.verdict.value if pred and pred.verdict else "MISSING"),
                     "match_score": round(score, 3),
