@@ -55,14 +55,14 @@ class EvalItem(BaseModel):
     expect_clarification: bool = False  # unclear or missing info: the system should ask a question
     category: Literal["normal", "adversarial_advice", "out_of_scope", "injection", "temporal",
                       "clarification", "comparison", "misremembered", "missing_name_answered",
-                      "missing_name_refused"] = "normal"
+                      "missing_name_refused", "cutoff_trap", "no_stored_post", "ask_which_post",
+                      "record"] = "normal"
     notes: str | None = None
     # Optional fields from the influencer-post items. None of them is used by the runner yet.
-    cutoff_resolved_to: str | None = None  # what a relative cut-off ("last quarter") resolves to
+    cutoff_resolved_to: dict[str, Any] | None = None  # what a relative cut-off resolves to: rule, date, basis
     influencer: str | None = None
     influencer_after_clarification: str | None = None
-    clarification_prompt: str | None = None  # the question the system should ask
-    clarification_reply: str | None = None  # the user's answer to that question
+    clarification_turns: list[dict[str, str]] = Field(default_factory=list)  # [{"system": "...", "user": "..."}]
     expected_outcome: str | None = None  # e.g. PROCESS_AFTER_CLARIFICATION
     posts: list[Any] = Field(default_factory=list)  # the influencer posts the claim is based on
     user_matches_post: bool | None = None  # False when the user misremembers the post

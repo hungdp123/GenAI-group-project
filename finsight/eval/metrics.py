@@ -21,6 +21,7 @@ class GoldSubClaim(BaseModel):
     evidence: list[str] = Field(default_factory=list, description="Citations that justify the gold label")
     influencer: str | None = None
     rule_note: str | None = None  # which verdict rule decided the label
+    post_id: str | None = None  # which post a sub-claim comes from (record items)
 
 
 class PredictedSubClaim(BaseModel):

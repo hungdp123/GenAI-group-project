@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -41,7 +42,20 @@ CHANNELS = {
     "joseph_carlson_after_hours": "https://www.youtube.com/@JosephCarlsonAfterHours/videos",
     "mark_roussin": "https://www.youtube.com/@MarkRoussinCPA/videos",
     "alex_reffett": "https://www.youtube.com/@TickerSymbolYOU/videos",
+    # Kevin Paffrath posts several videos a day: pass --limit 600 for a six-month window.
+    "meet_kevin": "https://www.youtube.com/@MeetKevin/videos",
+    "stock_curry": "https://www.youtube.com/@StockCurry/videos",
 }
+
+# Names of the corpus companies, for --company-titles. Kept in step with COMPANY_NAMES and
+# PRODUCTS in finsight/agents/claim_extraction/thesaurus.py. Titles only: descriptions carry
+# affiliate boilerplate (a Tesla referral link, "Apple Store" app links) on nearly every video.
+_COMPANY_TITLE = re.compile(
+    r"\b(Apple|AAPL|iPhone|Alphabet|Google|GOOGL?|Microsoft|MSFT|Azure|Netflix|NFLX|NVIDIA|NVDA"
+    r"|Tesla|TSLA|Amazon|AMZN|AWS|Meta|Facebook|Instagram|MercadoLibre|Mercado Libre|MELI"
+    r"|Starbucks|SBUX|Palantir|PLTR|Intel|INTC|Intuit|INTU|Salesforce|CRM|Oracle|ORCL|AMD)\b",
+    flags=re.IGNORECASE,
+)
 
 # How far down a newest-first tab to read before stopping. Both channels post
 # well under this in a three-month window.
@@ -122,13 +136,14 @@ def collect(
     since: datetime | None = None,
     until: datetime | None = None,
     names: list[str] | None = None,
+    limit: int | None = None,
 ) -> tuple[datetime, dict[str, list[dict]]]:
     now = now or datetime.now(UTC)
     cutoff = since or _cutoff(now)
     until_s = (until + timedelta(days=7)).date().isoformat() if until else None
     # Relative labels such as "7 months ago" can place an early-April video in March.
     floor = (since - timedelta(days=45)).date().isoformat() if since else cutoff.date().isoformat()
-    limit = 200 if since else _MAX_LISTED
+    limit = limit or (200 if since else _MAX_LISTED)
     selected = {name: CHANNELS[name] for name in (names or list(CHANNELS))}
     by_influencer: dict[str, list[dict]] = {}
     for name, url in selected.items():
@@ -379,8 +394,24 @@ def fetch_spoken_content(video_id: str) -> dict:
     }
 
 
-def add_transcripts(run_dir: Path, pause_seconds: float = 1.5, stop_on_rate_limit: bool = False) -> None:
-    """Fill transcripts for the jsonl files already written by a listing run."""
+def add_transcripts(
+    run_dir: Path,
+    pause_seconds: float = 1.5,
+    stop_on_rate_limit: bool = False,
+    company_titles: bool = False,
+    window: tuple[str, str] | None = None,
+) -> None:
+    """Fill transcripts for the jsonl files already written by a listing run.
+
+    With `company_titles`, only videos whose title names a corpus company are fetched.
+    With `window` (inclusive since, until), a video whose real upload date is known and
+    outside it is skipped, and so is one whose rough tab date is far outside it. Fetching
+    a transcript also records the real upload date, so no separate details pass is needed.
+    The skipped videos stay listed without a transcript.
+    """
+    if window:
+        slack_low = (datetime.fromisoformat(window[0]) - timedelta(days=45)).date().isoformat()
+        slack_high = (datetime.fromisoformat(window[1]) + timedelta(days=7)).date().isoformat()
     names = [path.stem for path in sorted(run_dir.glob("*.jsonl"))]
     halted = False
     for name in names:
@@ -389,8 +420,22 @@ def add_transcripts(run_dir: Path, pause_seconds: float = 1.5, stop_on_rate_limi
         path = run_dir / f"{name}.jsonl"
         rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
         done = 0
+        wanted = len(rows)
         for index, row in enumerate(rows, start=1):
             video_id = row["video_id"]
+            # A title can name a company without being about it (an "Amazon Prime" cargo-jet crash).
+            # Such rows are marked off_topic by hand and never fetched.
+            if row.get("off_topic") or (company_titles and not _COMPANY_TITLE.search(row.get("title") or "")):
+                wanted -= 1
+                continue
+            if window:
+                exact = row.get("upload_date")
+                rough = row.get("published_at") or ""
+                if (exact and not window[0] <= exact <= window[1]) or (
+                    not exact and not slack_low <= rough <= slack_high
+                ):
+                    wanted -= 1
+                    continue
             if row.get("transcript"):
                 done += 1
                 continue
@@ -426,7 +471,7 @@ def add_transcripts(run_dir: Path, pause_seconds: float = 1.5, stop_on_rate_limi
                 print("stopping caption downloads; YouTube returned 429", flush=True)
                 break
             time.sleep(pause_seconds)
-        print(f"{name}: transcripts {done}/{len(rows)}", flush=True)
+        print(f"{name}: transcripts {done}/{wanted} ({len(rows)} listed)", flush=True)
     summary_path = run_dir / "summary.json"
     if summary_path.exists():
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -449,7 +494,29 @@ def main() -> int:
     parser.add_argument("--until", help="Inclusive end date, YYYY-MM-DD.")
     parser.add_argument("--channels", help="Comma-separated channel keys. Defaults to every channel.")
     parser.add_argument("--pause", type=float, default=2.0, help="Seconds between video-page requests.")
+    parser.add_argument(
+        "--limit", type=int, help="Videos to read from each channel tab, newest first (default 200 with --since)."
+    )
+    parser.add_argument(
+        "--company-titles",
+        action="store_true",
+        help="With --transcripts, fetch only videos whose title names a corpus company.",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=Path,
+        help="Skip listing and fill transcripts in this existing run folder (use with --transcripts).",
+    )
     args = parser.parse_args()
+    if args.run_dir:
+        window = (args.since, args.until) if args.since and args.until else None
+        add_transcripts(
+            args.run_dir, pause_seconds=max(args.pause, 8.0), stop_on_rate_limit=True,
+            company_titles=args.company_titles, window=window,
+        )
+        if window:
+            keep_window(args.run_dir, *window)
+        return 0
     since = datetime.fromisoformat(args.since).replace(tzinfo=UTC) if args.since else None
     until = datetime.fromisoformat(args.until).replace(tzinfo=UTC) if args.until else None
     names = [part.strip() for part in args.channels.split(",") if part.strip()] if args.channels else None
@@ -458,7 +525,7 @@ def main() -> int:
         if unknown:
             raise SystemExit(f"unknown channel key: {', '.join(unknown)}")
     now = datetime.now(UTC)
-    cutoff, by_influencer = collect(now, since=since, until=until, names=names)
+    cutoff, by_influencer = collect(now, since=since, until=until, names=names, limit=args.limit)
     selected = {name: CHANNELS[name] for name in by_influencer}
     out_dir = write_run(cutoff, by_influencer, now, until=until, channels=selected)
     print(f"cutoff {cutoff.date().isoformat()}")
@@ -473,7 +540,9 @@ def main() -> int:
         add_details(out_dir, pause_seconds=args.pause)
         keep_window(out_dir, args.since, args.until)
     if args.transcripts:
-        add_transcripts(out_dir, pause_seconds=max(args.pause, 8.0), stop_on_rate_limit=True)
+        add_transcripts(
+            out_dir, pause_seconds=max(args.pause, 8.0), stop_on_rate_limit=True, company_titles=args.company_titles
+        )
     return 0
 
 
