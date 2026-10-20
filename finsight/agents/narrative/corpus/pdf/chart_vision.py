@@ -167,16 +167,33 @@ class _LeanChartExtraction(StrictModel):
                 normalized = re.sub(r"[$,%\s]", "", value or "")
                 if normalized.startswith("(") and normalized.endswith(")"):
                     normalized = "-" + normalized[1:-1]
-                points.append(VisionDataPoint(metric=series.metric, series_name=series.series_name,
-                    accounting_basis=series.accounting_basis, reporting_period=period, value_text=value,
-                    normalized_value=normalized if re.fullmatch(r"-?\d+(?:\.\d+)?", normalized) else None,
-                    unit=series.unit, confidence=series.confidence,
-                    ambiguity="Unreadable value" if value is None else None, source_ref=""))
-        return VisionChartExtraction(title=self.title, chart_type=self.chart_type, axis_labels=self.axis_labels,
+                points.append(
+                    VisionDataPoint(
+                        metric=series.metric,
+                        series_name=series.series_name,
+                        accounting_basis=series.accounting_basis,
+                        reporting_period=period,
+                        value_text=value,
+                        normalized_value=normalized if re.fullmatch(r"-?\d+(?:\.\d+)?", normalized) else None,
+                        unit=series.unit,
+                        confidence=series.confidence,
+                        ambiguity="Unreadable value" if value is None else None,
+                        source_ref="",
+                    )
+                )
+        return VisionChartExtraction(
+            title=self.title,
+            chart_type=self.chart_type,
+            axis_labels=self.axis_labels,
             financial_metrics=list(dict.fromkeys(s.metric for s in self.series)),
-            reporting_periods=list(dict.fromkeys(p.reporting_period for p in points)), overall_unit=self.overall_unit,
-            legend=self.legend, data_points=points, factual_trend_summary=self.factual_trend_summary,
-            overall_confidence=min((s.confidence for s in self.series), default=0), ambiguities=self.ambiguities)
+            reporting_periods=list(dict.fromkeys(p.reporting_period for p in points)),
+            overall_unit=self.overall_unit,
+            legend=self.legend,
+            data_points=points,
+            factual_trend_summary=self.factual_trend_summary,
+            overall_confidence=min((s.confidence for s in self.series), default=0),
+            ambiguities=self.ambiguities,
+        )
 
 
 class _MatrixColumn(StrictModel):
@@ -218,23 +235,33 @@ class _MatrixChartExtraction(StrictModel):
         # Restore repeated subheaders only when the source text explicitly repeats
         # every period once per group and every row has exactly the matching size.
         if nearby_text:
-            period_headers = [text.strip() for text in nearby_text
-                              if re.fullmatch(r"(?:[1-4]Q\d{2,4}|Q[1-4]['’]?\s*\d{2,4})", text.strip())]
+            period_headers = [
+                text.strip()
+                for text in nearby_text
+                if re.fullmatch(r"(?:[1-4]Q\d{2,4}|Q[1-4]['’]?\s*\d{2,4})", text.strip())
+            ]
             periods = list(dict.fromkeys(period_headers))
-            if (len(periods) >= 2 and self.rows
-                    and all(len(row.values) == len(self.columns) * len(periods) for row in self.rows)
-                    and all(column.reporting_period == periods[0] for column in self.columns)
-                    and all(period_headers.count(period) == len(self.columns) for period in periods)):
-                self.columns = [column.model_copy(update={"reporting_period": period})
-                                for column in self.columns for period in periods]
+            if (
+                len(periods) >= 2
+                and self.rows
+                and all(len(row.values) == len(self.columns) * len(periods) for row in self.rows)
+                and all(column.reporting_period == periods[0] for column in self.columns)
+                and all(period_headers.count(period) == len(self.columns) for period in periods)
+            ):
+                self.columns = [
+                    column.model_copy(update={"reporting_period": period})
+                    for column in self.columns
+                    for period in periods
+                ]
                 self.ambiguities.append("Repeated period subheaders restored from source text; cell strings unchanged.")
             if not re.search(r"\b(?:non[ -]?)?gaap\b", " ".join(nearby_text), re.I):
                 for column in self.columns:
                     column.accounting_basis = "unknown"
         for row in self.rows:
             if len(row.values) != len(self.columns):
-                raise ValueError(f"Table row {row.metric!r} has {len(row.values)} cells; "
-                                 f"expected {len(self.columns)} columns")
+                raise ValueError(
+                    f"Table row {row.metric!r} has {len(row.values)} cells; expected {len(self.columns)} columns"
+                )
             for column, value in zip(self.columns, row.values, strict=True):
                 normalized = None
                 if value is not None:
@@ -244,21 +271,32 @@ class _MatrixChartExtraction(StrictModel):
                         candidate = "-" + candidate[1:-1]
                     if re.fullmatch(r"-?\d+(?:\.\d+)?", candidate):
                         normalized = candidate
-                points.append(VisionDataPoint(
-                    metric=row.metric, series_name=column.series_name,
-                    accounting_basis=column.accounting_basis,
-                    reporting_period=column.reporting_period, value_text=value,
-                    normalized_value=normalized, unit=row.unit or column.unit or self.overall_unit,
-                    confidence=row.confidence, ambiguity="Unreadable table cell" if value is None else None,
-                    source_ref="",
-                ))
+                points.append(
+                    VisionDataPoint(
+                        metric=row.metric,
+                        series_name=column.series_name,
+                        accounting_basis=column.accounting_basis,
+                        reporting_period=column.reporting_period,
+                        value_text=value,
+                        normalized_value=normalized,
+                        unit=row.unit or column.unit or self.overall_unit,
+                        confidence=row.confidence,
+                        ambiguity="Unreadable table cell" if value is None else None,
+                        source_ref="",
+                    )
+                )
         return VisionChartExtraction(
-            title=self.title, chart_type=self.chart_type, axis_labels=self.axis_labels,
+            title=self.title,
+            chart_type=self.chart_type,
+            axis_labels=self.axis_labels,
             financial_metrics=list(dict.fromkeys(row.metric for row in self.rows)),
             reporting_periods=list(dict.fromkeys(column.reporting_period for column in self.columns)),
-            overall_unit=self.overall_unit, legend=self.legend, data_points=points,
+            overall_unit=self.overall_unit,
+            legend=self.legend,
+            data_points=points,
             factual_trend_summary=self.factual_trend_summary,
-            overall_confidence=self.overall_confidence, ambiguities=self.ambiguities,
+            overall_confidence=self.overall_confidence,
+            ambiguities=self.ambiguities,
         )
 
 
@@ -377,6 +415,7 @@ class OllamaChartVisionProvider:
         if self._fatal_error:
             raise RuntimeError(self._fatal_error)
         from PIL import Image
+
         # Keep the original high-resolution crop untouched. Bound the inference
         # image's pixel count so rendered 5,000+px slides do not consume the
         # entire context window before any JSON can be generated.
@@ -385,8 +424,9 @@ class OllamaChartVisionProvider:
             max_pixels = 2_000_000
             scale = min(1.0, (max_pixels / (crop.width * crop.height)) ** 0.5)
             if scale < 1:
-                inference = crop.resize((max(1, int(crop.width * scale)), max(1, int(crop.height * scale))),
-                                        Image.Resampling.LANCZOS)
+                inference = crop.resize(
+                    (max(1, int(crop.width * scale)), max(1, int(crop.height * scale))), Image.Resampling.LANCZOS
+                )
                 buffer = io.BytesIO()
                 inference.save(buffer, format="PNG")
                 image_bytes = buffer.getvalue()
@@ -395,9 +435,10 @@ class OllamaChartVisionProvider:
                 image_bytes = request.image_path.read_bytes()
                 input_size = original_size
         encoded = base64.b64encode(image_bytes).decode("ascii")
-        dense_table = (original_size[0] / original_size[1] >= 3.5 and
-                       sum(bool(re.fullmatch(r"[\d,().%+\-]+", text.strip()))
-                           for text in request.nearby_text) >= 40)
+        dense_table = (
+            original_size[0] / original_size[1] >= 3.5
+            and sum(bool(re.fullmatch(r"[\d,().%+\-]+", text.strip())) for text in request.nearby_text) >= 40
+        )
         extraction_schema = _MatrixChartExtraction if dense_table else _LeanChartExtraction
         context = "\n".join(request.nearby_text)
         prompt = (
@@ -420,9 +461,11 @@ class OllamaChartVisionProvider:
                 "Row confidence applies to the row's cells. Output only compact JSON. /no_think"
             )
         else:
-            prompt += ("\nFor each series, reporting_periods and values are parallel arrays in the same order. "
-                       "Write each displayed value once, with one series per visible metric/group. "
-                       "Do not repeat a series or add commentary inside cell strings.")
+            prompt += (
+                "\nFor each series, reporting_periods and values are parallel arrays in the same order. "
+                "Write each displayed value once, with one series per visible metric/group. "
+                "Do not repeat a series or add commentary inside cell strings."
+            )
         schema = extraction_schema.model_json_schema()
         # Numeric extraction is the task. Small local models can spend thousands
         # of tokens repeating prose after all cells are complete. Leave summaries
@@ -435,7 +478,9 @@ class OllamaChartVisionProvider:
             schema["properties"]["series"]["maxItems"] = min(128, request.series_limit)
         if not dense_table and request.periods_per_series_limit is not None:
             for field in ("values", "reporting_periods"):
-                schema["$defs"]["_LeanSeries"]["properties"][field]["maxItems"] = min(64, request.periods_per_series_limit)
+                schema["$defs"]["_LeanSeries"]["properties"][field]["maxItems"] = min(
+                    64, request.periods_per_series_limit
+                )
         payload = {
             "model": self.model,
             "messages": [
@@ -463,22 +508,27 @@ class OllamaChartVisionProvider:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"Ollama HTTP {exc.code}: {body[:1000]}") from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError(
-                f"Could not reach Ollama at {self.base_url}. Start it with `ollama serve`."
-            ) from exc
+            raise RuntimeError(f"Could not reach Ollama at {self.base_url}. Start it with `ollama serve`.") from exc
 
         # Keep the complete model response next to the source crop. A 1,000-char
         # error excerpt cannot distinguish truncated JSON from schema violations.
         diagnostic_path = request.image_path.with_suffix(".ollama_response.json")
-        diagnostic_path.write_text(json.dumps({
-            "model": self.model,
-            "context_size": self.context_size,
-            "max_output_tokens": self.max_output_tokens,
-            "schema_variant": "matrix" if dense_table else "lean_series",
-            "original_image_size": original_size,
-            "input_image_size": input_size,
-            "response": response_data,
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        diagnostic_path.write_text(
+            json.dumps(
+                {
+                    "model": self.model,
+                    "context_size": self.context_size,
+                    "max_output_tokens": self.max_output_tokens,
+                    "schema_variant": "matrix" if dense_table else "lean_series",
+                    "original_image_size": original_size,
+                    "input_image_size": input_size,
+                    "response": response_data,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
         content = ((response_data.get("message") or {}).get("content") or "").strip()
         if not content:
@@ -512,12 +562,9 @@ class OllamaChartVisionProvider:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=(
-                input_tokens + output_tokens
-                if input_tokens is not None and output_tokens is not None
-                else None
+                input_tokens + output_tokens if input_tokens is not None and output_tokens is not None else None
             ),
         )
         created_at = response_data.get("created_at")
         response_id = f"ollama:{created_at}" if created_at else None
         return VisionResponse(extraction=extraction, response_id=response_id, usage=usage)
-

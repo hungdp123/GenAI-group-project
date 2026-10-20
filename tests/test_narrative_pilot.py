@@ -107,7 +107,9 @@ def test_html_ingestion_removes_page_furniture_and_formats_tables(tmp_path):
     assert "Gross margin — 2025: 63.1%; 2024: 62.6%" in text
     assert "Net income — 2025: $20; 2024: $15" in text
     assert text.index("Before the table") < text.index("Revenue — 2025") < text.index("After the table")
-    assert [block.section for block in blocks if block.section.startswith("Item")] == ["Item 7. Results"]
+    item_sections = [block.section for block in blocks if block.section.startswith("Item")]
+    assert item_sections and set(item_sections) == {"Item 7. Results"}
+    assert text.count("Item 7. Results") == 1
 
 
 def test_chunk_ids_are_stable_and_do_not_cross_documents():

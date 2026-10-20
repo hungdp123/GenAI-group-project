@@ -21,7 +21,9 @@ def legacy_main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     queries = [
         json.loads(line)
-        for line in Path("docs/narrative/evaluation/retrieval_queries_v2.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in Path("docs/narrative/evaluation/retrieval_queries_v2.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
         if line.strip()
     ]
     checks = []
@@ -96,7 +98,6 @@ def legacy_main() -> None:
     print(json.dumps({k: v for k, v in report.items() if k != "checks"}, indent=2))
 
 
-
 def main() -> None:
     """Use isolated experiment indexes when requested; retain the legacy default."""
     import argparse
@@ -111,8 +112,9 @@ def main() -> None:
     parser.add_argument("--experiment-dir", type=Path)
     parser.add_argument("--queries", type=Path)
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--backends", nargs="+", choices=["bm25", "dense", "hybrid"],
-                        default=["bm25", "dense", "hybrid"])
+    parser.add_argument(
+        "--backends", nargs="+", choices=["bm25", "dense", "hybrid"], default=["bm25", "dense", "hybrid"]
+    )
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--candidate-k", type=int, default=50)
     parser.add_argument("--threads", type=int, default=4)
@@ -162,16 +164,23 @@ def main() -> None:
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
         import torch
+
         torch.set_num_threads(args.threads)
         embedding = SentenceTransformersBackend("sentence-transformers/all-MiniLM-L6-v2")
     out.mkdir(parents=True, exist_ok=True)
     checks = []
     report = {
-        "status": "running", "experiment_dir": str(experiment),
-        "query_set": str(args.queries.resolve()), "query_set_sha256": config["questions_sha256"],
-        "claim_count": len(queries), "expected_checks": len(queries) * len(args.backends),
-        "backends": args.backends, "top_k": args.top_k, "candidate_k": args.candidate_k,
-        "stance_method": "exact", "api_requests": 0,
+        "status": "running",
+        "experiment_dir": str(experiment),
+        "query_set": str(args.queries.resolve()),
+        "query_set_sha256": config["questions_sha256"],
+        "claim_count": len(queries),
+        "expected_checks": len(queries) * len(args.backends),
+        "backends": args.backends,
+        "top_k": args.top_k,
+        "candidate_k": args.candidate_k,
+        "stance_method": "exact",
+        "api_requests": 0,
         "scope": "Production Narrative Evidence Agent on isolated canonical92 experiment indexes",
         "limitations": [
             "Integration consistency, not semantic stance or generated-verdict accuracy.",
@@ -186,19 +195,32 @@ def main() -> None:
         for q in queries:
             ticker = q["ticker"]
             cutoff = date.fromisoformat(q["cutoff_date"])
-            print(f"[{len(checks)+1}/{report['expected_checks']}] {ticker} {backend} {q['query_id']}", flush=True)
+            print(f"[{len(checks) + 1}/{report['expected_checks']}] {ticker} {backend} {q['query_id']}", flush=True)
 
             def factory(t):
-                return CorpusRetriever(index_path=index_path(t), company_ticker=t,
-                                       qdrant_dir=experiment / "companies" / t / "qdrant",
-                                       backend=backend, candidate_k=args.candidate_k,
-                                       embedding_backend=embedding)
+                return CorpusRetriever(
+                    index_path=index_path(t),
+                    company_ticker=t,
+                    qdrant_dir=experiment / "companies" / t / "qdrant",
+                    backend=backend,
+                    candidate_k=args.candidate_k,
+                    embedding_backend=embedding,
+                )
 
-            claim = SubClaim(sub_claim_id="task7-" + q["query_id"], text=q["claim"],
-                             company_ticker=ticker, sub_claim_type=SubClaimType.OTHER)
-            agent = NarrativeEvidenceAgent(backend=backend, top_k=args.top_k,
-                                           candidate_k=args.candidate_k, stance_method="exact",
-                                           retriever_factory=factory, index_path_factory=index_path)
+            claim = SubClaim(
+                sub_claim_id="task7-" + q["query_id"],
+                text=q["claim"],
+                company_ticker=ticker,
+                sub_claim_type=SubClaimType.OTHER,
+            )
+            agent = NarrativeEvidenceAgent(
+                backend=backend,
+                top_k=args.top_k,
+                candidate_k=args.candidate_k,
+                stance_method="exact",
+                retriever_factory=factory,
+                index_path_factory=index_path,
+            )
             items, errors = [], []
             try:
                 items = agent.gather(claim, cutoff)
@@ -211,10 +233,16 @@ def main() -> None:
                     if c is None:
                         errors.append(f"Unknown evidence ID: {e.evidence_id}")
                         continue
-                    expected = {"content": c["text"], "company": c["company_name"],
-                                "publication_date": c["publication_date"], "doc_type": c["document_type"],
-                                "source_tier": c["source_tier"], "url": c.get("source_url"),
-                                "citation_span": c.get("citation_span"), "sub_claim_id": claim.sub_claim_id}
+                    expected = {
+                        "content": c["text"],
+                        "company": c["company_name"],
+                        "publication_date": c["publication_date"],
+                        "doc_type": c["document_type"],
+                        "source_tier": c["source_tier"],
+                        "url": c.get("source_url"),
+                        "citation_span": c.get("citation_span"),
+                        "sub_claim_id": claim.sub_claim_id,
+                    }
                     actual = e.model_dump(mode="json")
                     for field, value in expected.items():
                         if actual[field] != value:
@@ -226,20 +254,36 @@ def main() -> None:
             except Exception as exc:
                 errors.append(f"{type(exc).__name__}: {exc}")
             name = f"{ticker}_{backend}_{hashlib.sha256(q['query_id'].encode()).hexdigest()}.json"
-            payload = {"query_id": q["query_id"], "claim": q["claim"], "ticker": ticker,
-                       "backend": backend, "cutoff_date": cutoff.isoformat(),
-                       "queries": build_queries(claim), "errors": errors,
-                       "evidence": [e.model_dump(mode="json") for e in items]}
+            payload = {
+                "query_id": q["query_id"],
+                "claim": q["claim"],
+                "ticker": ticker,
+                "backend": backend,
+                "cutoff_date": cutoff.isoformat(),
+                "queries": build_queries(claim),
+                "errors": errors,
+                "evidence": [e.model_dump(mode="json") for e in items],
+            }
             (out / name).write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-            checks.append({"query_id": q["query_id"], "ticker": ticker, "backend": backend,
-                           "evidence_count": len(items), "errors": errors,
-                           "corpus_fingerprint": indexes[ticker]["corpus_fingerprint"],
-                           "stances": dict(Counter(e.stance.value for e in items)),
-                           "missing_urls": sum(not e.url for e in items), "output": name})
+            checks.append(
+                {
+                    "query_id": q["query_id"],
+                    "ticker": ticker,
+                    "backend": backend,
+                    "evidence_count": len(items),
+                    "errors": errors,
+                    "corpus_fingerprint": indexes[ticker]["corpus_fingerprint"],
+                    "stances": dict(Counter(e.stance.value for e in items)),
+                    "missing_urls": sum(not e.url for e in items),
+                    "output": name,
+                }
+            )
             report.update(check_count=len(checks), error_count=sum(len(c["errors"]) for c in checks))
             (out / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-    report.update(status="complete" if report["error_count"] == 0 else "partial",
-                  completed_at=datetime.now(timezone.utc).isoformat())
+    report.update(
+        status="complete" if report["error_count"] == 0 else "partial",
+        completed_at=datetime.now(timezone.utc).isoformat(),
+    )
     (out / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k != "checks"}, indent=2))
     if report["error_count"]:

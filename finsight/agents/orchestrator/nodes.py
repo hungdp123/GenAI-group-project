@@ -67,6 +67,12 @@ def new_request_id() -> str:
     return f"fs-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
 
 
+def _with_note(state: FinSightState, text: str) -> str:
+    if state.influencer_note:
+        return f"{state.influencer_note} {text}"
+    return text
+
+
 def _stop(status: AssessmentStatus, reason: str) -> dict[str, Any]:
     return {"status": status, "refusal_reason": reason}
 
@@ -656,7 +662,7 @@ class Nodes:
             request_id=state.request.request_id if state.request else "unknown",
             status=status, refusal_reason=state.refusal_reason, clarification_question=question,
             claim=state.request.raw_claim if state.request else state.raw_input,
-            summary=explain.stop_summary(status, state.refusal_reason, question),
+            summary=_with_note(state, explain.stop_summary(status, state.refusal_reason, question)),
             as_of_date=state.request.cutoff_date if state.request else None,
             cutoff_was_defaulted=state.request.cutoff_was_defaulted if state.request else False,
             boundary_disclaimer=BOUNDARY_DISCLAIMER,

@@ -5,42 +5,48 @@ from finsight.agents.orchestrator.stages import StageReporter
 from finsight.cli import main as cli_main
 from finsight.contracts.schemas import AssessmentStatus
 
-from demo import DEMO_CLAIM, DEMO_CUTOFF
+from demo import DEMO_CUTOFF
+from stored_demo import DEMO_PROMPT, prepared_demo
 
 DEMO_STAGES = ["intake", "advice_gate_input", "scope_check", "collect_posts", "extract_claims", "plan",
                "gather_evidence", "audit", "retry_or_accept", "apply_tier_policy", "assemble",
                "advice_gate_output", "finalize"]
 
 
-def test_on_stage_sees_every_node_and_result_is_unchanged():
+def test_on_stage_sees_every_node_and_result_is_unchanged(monkeypatch, tmp_path):
+    prepared_demo(monkeypatch, tmp_path, pin_impl=True)
     seen = []
-    staged = execute(DEMO_CLAIM, DEMO_CUTOFF, on_stage=lambda node, update, rec: seen.append(node))
-    plain = execute(DEMO_CLAIM, DEMO_CUTOFF)
+    staged = execute(DEMO_PROMPT, DEMO_CUTOFF, on_stage=lambda node, update, rec: seen.append(node))
+    plain = execute(DEMO_PROMPT, DEMO_CUTOFF)
     assert seen == DEMO_STAGES
     assert [r.verdict for r in staged.assessment.sub_claim_results] == \
            [r.verdict for r in plain.assessment.sub_claim_results]
     assert staged.decision_log.final_verdicts == plain.decision_log.final_verdicts
 
 
-def test_retry_loop_shows_up_as_repeated_stages(monkeypatch):
+def test_retry_loop_shows_up_as_repeated_stages(monkeypatch, tmp_path):
+    prepared_demo(monkeypatch, tmp_path, pin_impl=True)
     monkeypatch.setenv("FINSIGHT_STUB_FAIL_SUB_CLAIMS", "sc1")
     seen = []
-    execute(DEMO_CLAIM, DEMO_CUTOFF, on_stage=lambda node, update, rec: seen.append(node))
+    execute(DEMO_PROMPT, DEMO_CUTOFF, on_stage=lambda node, update, rec: seen.append(node))
     assert seen.count("gather_evidence") == 2 and seen.count("audit") == 2 and seen.count("retry_or_accept") == 2
 
 
-def test_broken_observer_cannot_break_the_run():
+def test_broken_observer_cannot_break_the_run(monkeypatch, tmp_path):
+    prepared_demo(monkeypatch, tmp_path, pin_impl=True)
+
     def boom(node, update, rec):
         raise RuntimeError("observer bug")
 
-    out = execute(DEMO_CLAIM, DEMO_CUTOFF, on_stage=boom)
+    out = execute(DEMO_PROMPT, DEMO_CUTOFF, on_stage=boom)
     assert out.assessment.status is AssessmentStatus.COMPLETED
 
 
-def test_reporter_lines_for_retry_round_only_show_retried_sub_claim(monkeypatch):
+def test_reporter_lines_for_retry_round_only_show_retried_sub_claim(monkeypatch, tmp_path):
+    prepared_demo(monkeypatch, tmp_path, pin_impl=True)
     monkeypatch.setenv("FINSIGHT_STUB_FAIL_SUB_CLAIMS", "sc1")
     lines: list[str] = []
-    execute(DEMO_CLAIM, DEMO_CUTOFF, on_stage=StageReporter(emit=lines.append))
+    execute(DEMO_PROMPT, DEMO_CUTOFF, on_stage=StageReporter(emit=lines.append))
     text = "\n".join(lines)
     second_gather = text.split("[10] gather_evidence")[1].split("[11]")[0]
     assert "sc1" in second_gather and "sc2" not in second_gather and "sc4" not in second_gather
@@ -48,8 +54,9 @@ def test_reporter_lines_for_retry_round_only_show_retried_sub_claim(monkeypatch)
     assert "1 retries" in text
 
 
-def test_cli_stages_demo(capsys):
-    assert cli_main(["run", DEMO_CLAIM, "--cutoff", "2025-07-31", "--stages", "--no-evidence"]) == 0
+def test_cli_stages_demo(capsys, monkeypatch, tmp_path):
+    prepared_demo(monkeypatch, tmp_path, pin_impl=True)
+    assert cli_main(["run", DEMO_PROMPT, "--cutoff", "2025-07-31", "--stages", "--no-evidence"]) == 0
     out = capsys.readouterr().out
     for i, node in enumerate(DEMO_STAGES, start=1):
         assert f"[{i:>2}] {node}" in out
@@ -67,7 +74,8 @@ def test_cli_stages_stops_at_refusal_and_clarification(capsys):
     assert "needs clarification: Which influencer" in asked and "[ 4] clarification" in asked
 
 
-def test_cli_company_answers_clarification(capsys):
-    cli_main(["run", "Its revenue growth is just getting started.", "--cutoff", "2025-07-31",
-              "--company", "CMPX", "--influencer", "Joseph Carlson"])
+def test_cli_company_answers_clarification(capsys, monkeypatch, tmp_path):
+    sentence = "Its revenue growth is just getting started."
+    prepared_demo(monkeypatch, tmp_path, transcript=sentence, pin_impl=True)
+    cli_main(["run", sentence, "--cutoff", "2025-07-31", "--company", "CMPX", "--influencer", "Joseph Carlson"])
     assert "Overall, this claim is" in capsys.readouterr().out

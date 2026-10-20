@@ -105,9 +105,16 @@ _WHY = {
 }
 
 
+_INSTRUCTION = re.compile(
+    r"ignore previous instructions.*?(?:[.!]|$)"
+    r"|\[?\s*note to the ai model:.*?(?:\]|$)",
+    flags=re.IGNORECASE,
+)
+
+
 def stated_claim(prompt: str, influencer: str | None, aliases: list[str]) -> str | None:
     """The claim in the prompt, or None when the prompt only names the creator and the company."""
-    cleaned = _strip_names(prompt, influencer, aliases)
+    cleaned = _strip_names(_INSTRUCTION.sub(" ", prompt), influencer, aliases)
     if not _features(cleaned):
         return None
     return cleaned

@@ -56,27 +56,49 @@ def summarize(workspace: Path, results_path: Path, queries_path: Path) -> dict[s
         ):
             ranking = result[ranking_key]
             for k in ks:
-                rows.append({"query_id": q["query_id"], "ticker": q["ticker"], "method": result["method"],
-                             "stance": stance, "k": k, **_metrics(ranking, set(q[gold_key]), k)})
-            audit = {"query_id": q["query_id"], "method": result["method"], "stance": stance,
-                     "returned": len(ranking), "cutoff_leaks": 0, "wrong_company_results": 0,
-                     "duplicate_results": len(ranking) - len({c["chunk_id"] for c in ranking}),
-                     "missing_citation_metadata": 0, "index_mismatches": 0, "missing_source_files": 0,
-                     "citation_issues": []}
+                rows.append(
+                    {
+                        "query_id": q["query_id"],
+                        "ticker": q["ticker"],
+                        "method": result["method"],
+                        "stance": stance,
+                        "k": k,
+                        **_metrics(ranking, set(q[gold_key]), k),
+                    }
+                )
+            audit = {
+                "query_id": q["query_id"],
+                "method": result["method"],
+                "stance": stance,
+                "returned": len(ranking),
+                "cutoff_leaks": 0,
+                "wrong_company_results": 0,
+                "duplicate_results": len(ranking) - len({c["chunk_id"] for c in ranking}),
+                "missing_citation_metadata": 0,
+                "index_mismatches": 0,
+                "missing_source_files": 0,
+                "citation_issues": [],
+            }
             for c in ranking:
                 canonical = index.get(c["chunk_id"])
                 audit["cutoff_leaks"] += c["publication_date"] > q["cutoff_date"]
                 audit["wrong_company_results"] += c["company_ticker"].upper() != q["ticker"].upper()
-                missing = [f for f in ("document_id", "text", "source_url", "citation_span", "source_tier")
-                           if not c.get(f)]
+                missing = [
+                    f for f in ("document_id", "text", "source_url", "citation_span", "source_tier") if not c.get(f)
+                ]
                 audit["missing_citation_metadata"] += bool(missing)
                 if missing:
                     audit["citation_issues"].append({"chunk_id": c["chunk_id"], "missing_fields": missing})
-                fields = ("text", "document_id", "source_url", "citation_span", "source_tier",
-                          "company_ticker", "publication_date")
-                audit["index_mismatches"] += canonical is None or any(
-                    canonical.get(f) != c.get(f) for f in fields
+                fields = (
+                    "text",
+                    "document_id",
+                    "source_url",
+                    "citation_span",
+                    "source_tier",
+                    "company_ticker",
+                    "publication_date",
                 )
+                audit["index_mismatches"] += canonical is None or any(canonical.get(f) != c.get(f) for f in fields)
                 source = c.get("local_path")
                 audit["missing_source_files"] += not source or not Path(source).is_file()
             audits.append(audit)
@@ -86,27 +108,60 @@ def summarize(workspace: Path, results_path: Path, queries_path: Path) -> dict[s
         for stance in ("support", "counter"):
             for k in ks:
                 group = [r for r in rows if r["method"] == method and r["stance"] == stance and r["k"] == k]
-                aggregates.append({"method": method, "stance": stance, "k": k, "query_count": len(group),
-                                   **{key: sum(r[key] for r in group) / len(group)
-                                      for key in (f"recall@{k}", f"precision@{k}", "mrr", f"ndcg@{k}")}})
-    checks = {m: {key: sum(a[key] for a in audits if a["method"] == m)
-                  for key in ("returned", "cutoff_leaks", "wrong_company_results", "duplicate_results",
-                              "missing_citation_metadata", "index_mismatches", "missing_source_files")}
-              for m in report["methods"]}
-    return {"created_at": report["created_at"], "raw_results_sha256": hashlib.sha256(raw).hexdigest(),
-            "selected_tickers": report.get("selected_tickers"),
-            "query_set_sha256": fingerprint, "corpus_fingerprints": report["corpus_fingerprints"],
-            "chunk_counts": {t: len(index) for t, index in indexes.items()}, "queries": queries,
-            "embedding_model": report["embedding_model"], "reranker_model": report["reranker_model"],
-            "top_k": report["top_k"], "candidate_k": report["candidate_k"],
-            "aggregates": aggregates, "checks": checks, "per_query": rows, "citation_audits": audits,
-            "limitations": [
-                f"{len(queries)} development claims ({len(queries) * 2} directional queries) with sparse curated labels; no heldout evaluation or method selection.",
-                "Precision counts labeled positives only; unlabelled passages were not judged irrelevant.",
-                "Citation checks establish index consistency and metadata presence, not source-text entailment.",
-                "Recorded retrieval latency covers both queries and all methods together, not each method separately.",
-                "Support/counter ranking overlap is allowed; duplicates are counted within each ranking.",
-            ]}
+                aggregates.append(
+                    {
+                        "method": method,
+                        "stance": stance,
+                        "k": k,
+                        "query_count": len(group),
+                        **{
+                            key: sum(r[key] for r in group) / len(group)
+                            for key in (f"recall@{k}", f"precision@{k}", "mrr", f"ndcg@{k}")
+                        },
+                    }
+                )
+    checks = {
+        m: {
+            key: sum(a[key] for a in audits if a["method"] == m)
+            for key in (
+                "returned",
+                "cutoff_leaks",
+                "wrong_company_results",
+                "duplicate_results",
+                "missing_citation_metadata",
+                "index_mismatches",
+                "missing_source_files",
+            )
+        }
+        for m in report["methods"]
+    }
+    return {
+        "created_at": report["created_at"],
+        "raw_results_sha256": hashlib.sha256(raw).hexdigest(),
+        "selected_tickers": report.get("selected_tickers"),
+        "query_set_sha256": fingerprint,
+        "corpus_fingerprints": report["corpus_fingerprints"],
+        "chunk_counts": {t: len(index) for t, index in indexes.items()},
+        "queries": queries,
+        "embedding_model": report["embedding_model"],
+        "reranker_model": report["reranker_model"],
+        "top_k": report["top_k"],
+        "candidate_k": report["candidate_k"],
+        "aggregates": aggregates,
+        "checks": checks,
+        "per_query": rows,
+        "citation_audits": audits,
+        "limitations": [
+            (
+                f"{len(queries)} development claims ({len(queries) * 2} directional queries) "
+                "with sparse curated labels; no heldout evaluation or method selection."
+            ),
+            "Precision counts labeled positives only; unlabelled passages were not judged irrelevant.",
+            "Citation checks establish index consistency and metadata presence, not source-text entailment.",
+            "Recorded retrieval latency covers both queries and all methods together, not each method separately.",
+            "Support/counter ranking overlap is allowed; duplicates are counted within each ranking.",
+        ],
+    }
 
 
 def main() -> None:

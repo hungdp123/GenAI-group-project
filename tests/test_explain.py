@@ -11,40 +11,43 @@ from finsight.contracts.schemas import (
 )
 
 from demo import DEMO_CLAIM, DEMO_CUTOFF
+from stored_demo import DEMO_PROMPT, demo_registry, prepared_demo
 
 
-def _demo():
-    return execute(DEMO_CLAIM, DEMO_CUTOFF).assessment
+def _demo(monkeypatch, tmp_path, transcript: str | None = None, prompt: str | None = None):
+    prepared_demo(monkeypatch, tmp_path, transcript=transcript or DEMO_CLAIM)
+    return execute(prompt or DEMO_PROMPT, DEMO_CUTOFF, registry=demo_registry()).assessment
 
 
-def test_summary_and_claim_are_returned_for_the_ui():
-    fa = _demo()
-    assert fa.claim == DEMO_CLAIM
+def test_summary_and_claim_are_returned_for_the_ui(monkeypatch, tmp_path):
+    fa = _demo(monkeypatch, tmp_path)
+    assert fa.claim == DEMO_PROMPT
     assert fa.summary == ("Overall, this claim is partly supported. FinSight split it into 4 points and checked "
                           "each against company filings and reports: 1 supported, 2 partly supported, "
                           "1 can't be confirmed.")
     assert all(r.explanation for r in fa.sub_claim_results)
 
 
-def test_explanations_are_plain_and_add_no_numbers():
-    by_verdict = {r.verdict: r.explanation for r in _demo().sub_claim_results}
+def test_explanations_are_plain_and_add_no_numbers(monkeypatch, tmp_path):
+    finished = _demo(monkeypatch, tmp_path)
+    by_verdict = {r.verdict: r.explanation for r in finished.sub_claim_results}
     supported = by_verdict[Verdict.SUPPORTED]
     assert supported.startswith("Backed up by official filings (see the evidence below).")
     assert "Quarterly report (10-Q) filed with the SEC, 25 Jul 2025" in supported
     assert "Where: XBRL us-gaap:Revenues." in supported
     assert "competitors" in by_verdict[Verdict.INSUFFICIENT_EVIDENCE]
-    for r in _demo().sub_claim_results:
+    for r in finished.sub_claim_results:
         assert "_" not in r.explanation, "no internal identifiers like PARTIALLY_SUPPORTED"
 
 
-def test_explanations_never_trip_the_output_advice_gate():
+def test_explanations_never_trip_the_output_advice_gate(monkeypatch, tmp_path):
     gate = StubAdviceBoundary()
-    for r in _demo().sub_claim_results:
+    for r in _demo(monkeypatch, tmp_path).sub_claim_results:
         assert not gate.check(r.explanation, AdviceStage.OUTPUT).flagged
 
 
-def test_reader_view_puts_summary_before_details():
-    text = render_assessment(_demo())
+def test_reader_view_puts_summary_before_details(monkeypatch, tmp_path):
+    text = render_assessment(_demo(monkeypatch, tmp_path))
     assert text.index("SUMMARY") < text.index("DETAILS") < text.index("Evidence for:")
     assert "1. [Supported]" in text and "3. [Can't be confirmed]" in text
     flat = " ".join(text.split())  # source lines wrap in the terminal
@@ -52,8 +55,8 @@ def test_reader_view_puts_summary_before_details():
     assert "[T1 10-Q" not in text, "no cryptic source codes in the reader view"
 
 
-def test_technical_view_is_still_available():
-    text = render_assessment(_demo(), technical=True)
+def test_technical_view_is_still_available(monkeypatch, tmp_path):
+    text = render_assessment(_demo(monkeypatch, tmp_path), technical=True)
     assert "Overall verdict: PARTIALLY_SUPPORTED" in text and "[T1 10-Q 2025-07-25]" in text
 
 
@@ -65,25 +68,26 @@ def test_refusal_and_clarification_summaries_are_readable():
     assert asked.summary.startswith("FinSight needs a bit more information") and "Which influencer" in asked.summary
 
 
-def test_overall_sentence_reads_naturally_for_every_verdict():
+def test_overall_sentence_reads_naturally_for_every_verdict(monkeypatch, tmp_path):
     ranking = SubClaimResult(
         sub_claim=SubClaim(sub_claim_id="c", text="biggest winner", sub_claim_type=SubClaimType.COMPARATIVE),
         verdict=Verdict.INSUFFICIENT_EVIDENCE, rationale="A ranking is not checked against peer filings.",
     )
     text = summary([ranking], Verdict.INSUFFICIENT_EVIDENCE)
     assert text.startswith("Overall, this claim can't be confirmed from the available evidence.")
-    single = execute(
-        "Joseph Carlson said Company X is getting more profitable: its margins keep expanding.",
-        DEMO_CUTOFF).assessment
+    margins = "Joseph Carlson said Company X is getting more profitable: its margins keep expanding."
+    single = _demo(monkeypatch, tmp_path, transcript=margins, prompt=margins)
     assert single.summary == ("Overall, the evidence contradicts this claim. "
                               "FinSight checked it against company filings and reports.")
     assert "claim is can't" not in text
     assert "checked each" not in single.summary  # one point: "checked it"
 
 
-def test_company_given_separately_is_not_shown_as_unknown():
-    fa = execute("Its revenue growth is just getting started.", DEMO_CUTOFF, company_ticker="CMPX",
-                 influencer="Joseph Carlson").assessment
+def test_company_given_separately_is_not_shown_as_unknown(monkeypatch, tmp_path):
+    sentence = "Its revenue growth is just getting started."
+    prepared_demo(monkeypatch, tmp_path, transcript=sentence)
+    fa = execute(sentence, DEMO_CUTOFF, company_ticker="CMPX", influencer="Joseph Carlson",
+                 registry=demo_registry()).assessment
     assert fa.sub_claim_results and not any("UNKNOWN" in r.sub_claim.text for r in fa.sub_claim_results)
 
 

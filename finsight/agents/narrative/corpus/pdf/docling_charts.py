@@ -540,8 +540,15 @@ def extract_positioned_table(document: dict[str, Any], candidate: ChartCandidate
         bbox = _bbox_from_provenance(prov)
         if _intersection_ratio(bbox, candidate.bbox, height) < 0.45:
             continue
-        l, t, r, b = _normalized_edges(bbox, height)
-        spans.append((str(item.get("text", "")).strip(), (l + r) / 2, (t + b) / 2, l, r, b - t))
+        left, top, right, bottom = _normalized_edges(bbox, height)
+        spans.append((
+            str(item.get("text", "")).strip(),
+            (left + right) / 2,
+            (top + bottom) / 2,
+            left,
+            right,
+            bottom - top,
+        ))
     number = re.compile(r"(?:\(?[+\-]?\d[\d,]*(?:\.\d+)?%?\)?|[-\u2013\u2014])")
     cells = [s for s in spans if number.fullmatch(s[0])]
     if len(cells) < 40:
@@ -568,12 +575,18 @@ def extract_positioned_table(document: dict[str, Any], candidate: ChartCandidate
     periods.sort(key=lambda s: s[1])
     if any(abs(p[1] - x) > spacing * 0.2 for p, x in zip(periods, xs)):
         return None
-    headers = [s for s in spans if s[3] > rows[0][0][3] and s[2] < min(p[2] for p in periods) and re.fullmatch(r"[A-Za-z][A-Za-z ]*", s[0])]
+    headers = [
+        s
+        for s in spans
+        if s[3] > rows[0][0][3] and s[2] < min(p[2] for p in periods) and re.fullmatch(r"[A-Za-z][A-Za-z ]*", s[0])
+    ]
     if len(headers) < 2 or len(headers) > count:
         return None
     labels = []
     for row in rows:
-        label = [s for s in spans if s[4] < row[0][3] and abs(s[2] - row[0][2]) <= tolerance and not number.fullmatch(s[0])]
+        label = [
+            s for s in spans if s[4] < row[0][3] and abs(s[2] - row[0][2]) <= tolerance and not number.fullmatch(s[0])
+        ]
         if not label:
             return None
         labels.append(" ".join(s[0] for s in sorted(label, key=lambda s: s[1])))
@@ -586,17 +599,37 @@ def extract_positioned_table(document: dict[str, Any], candidate: ChartCandidate
             normalized = value.replace(",", "").replace("%", "")
             if normalized.startswith("(") and normalized.endswith(")"):
                 normalized = "-" + normalized[1:-1]
-            points.append(VisionDataPoint(metric=metric, series_name=series[index], accounting_basis="unknown",
-                reporting_period=periods[index][0], value_text=value,
-                normalized_value=normalized if NORMALIZED_NUMBER_RE.fullmatch(normalized) else None,
-                unit=unit, confidence=0.95, ambiguity=None, source_ref=""))
-    return VisionChartExtraction(title=candidate.anchor_text, chart_type="table", financial_metrics=labels,
-        reporting_periods=list(dict.fromkeys(p[0] for p in periods)), overall_unit=unit, legend=[], data_points=points,
-        factual_trend_summary="Table cells and headers extracted from saved text positions.", overall_confidence=0.95,
-        ambiguities=["Position-based text extraction; financial accuracy comparison remains deferred."])
+            points.append(
+                VisionDataPoint(
+                    metric=metric,
+                    series_name=series[index],
+                    accounting_basis="unknown",
+                    reporting_period=periods[index][0],
+                    value_text=value,
+                    normalized_value=normalized if NORMALIZED_NUMBER_RE.fullmatch(normalized) else None,
+                    unit=unit,
+                    confidence=0.95,
+                    ambiguity=None,
+                    source_ref="",
+                )
+            )
+    return VisionChartExtraction(
+        title=candidate.anchor_text,
+        chart_type="table",
+        financial_metrics=labels,
+        reporting_periods=list(dict.fromkeys(p[0] for p in periods)),
+        overall_unit=unit,
+        legend=[],
+        data_points=points,
+        factual_trend_summary="Table cells and headers extracted from saved text positions.",
+        overall_confidence=0.95,
+        ambiguities=["Position-based text extraction; financial accuracy comparison remains deferred."],
+    )
 
 
-def extract_positioned_grouped_percent_chart(document: dict[str, Any], candidate: ChartCandidate) -> VisionChartExtraction | None:
+def extract_positioned_grouped_percent_chart(
+    document: dict[str, Any], candidate: ChartCandidate
+) -> VisionChartExtraction | None:
     """Read labelled grouped bars with complete period legends and category labels.
 
     Requires every panel/category to have exactly one displayed percentage per
@@ -611,58 +644,83 @@ def extract_positioned_grouped_percent_chart(document: dict[str, Any], candidate
         bbox = _bbox_from_provenance(prov)
         if _intersection_ratio(bbox, candidate.bbox, height) < 0.8:
             continue
-        l, t, r, b = _normalized_edges(bbox, height)
-        spans.append((str(item.get("text", "")).strip(), (l+r)/2, (t+b)/2, l, r))
+        left, top, right, _bottom = _normalized_edges(bbox, height)
+        spans.append((str(item.get("text", "")).strip(), (left + right) / 2, (top + _bottom) / 2, left, right))
     period_re = re.compile(r"Q[1-4]['\u2019]\d{2,4}")
-    legends = [s for s in spans if len(period_re.findall(s[0])) >= 2
-               and not period_re.sub("", s[0]).strip()]
+    legends = [s for s in spans if len(period_re.findall(s[0])) >= 2 and not period_re.sub("", s[0]).strip()]
     # Separate panels need their own complete legends; single-panel or stacked
     # charts continue through vision extraction.
     if len(legends) < 2:
         return None
     legends.sort(key=lambda s: s[1])
-    bounds = [float("-inf")] + [(a[1]+b[1])/2 for a,b in zip(legends,legends[1:])] + [float("inf")]
-    points, metrics, all_periods, ambiguities = [], [], [], []
+    bounds = [float("-inf")] + [(a[1] + b[1]) / 2 for a, b in zip(legends, legends[1:])] + [float("inf")]
+    points, metrics, all_periods = [], [], []
     for i, legend in enumerate(legends):
-        panel = [s for s in spans if bounds[i] < s[1] <= bounds[i+1]]
+        panel = [s for s in spans if bounds[i] < s[1] <= bounds[i + 1]]
         periods = period_re.findall(legend[0])
-        values = sorted((s for s in panel if re.fullmatch(r"[+\-]?\d+(?:\.\d+)?%", s[0]) and s[2] > legend[2]), key=lambda s:s[1])
-        if len(values) < 3*len(periods):
+        values = sorted(
+            (s for s in panel if re.fullmatch(r"[+\-]?\d+(?:\.\d+)?%", s[0]) and s[2] > legend[2]), key=lambda s: s[1]
+        )
+        if len(values) < 3 * len(periods):
             return None
-        gaps = [b[1]-a[1] for a,b in zip(values,values[1:])]
-        threshold = median(gaps)*1.5
+        gaps = [b[1] - a[1] for a, b in zip(values, values[1:])]
+        threshold = median(gaps) * 1.5
         groups: list[list[tuple]] = [[]]
         for value in values:
-            if groups[-1] and value[1]-groups[-1][-1][1] > threshold:
+            if groups[-1] and value[1] - groups[-1][-1][1] > threshold:
                 groups.append([])
             groups[-1].append(value)
         if any(len(g) != len(periods) for g in groups):
             return None
-        centers = [sum(s[1] for s in g)/len(g) for g in groups]
-        labels = [s for s in panel if s[2] > max(v[2] for v in values) and re.fullmatch(r"[A-Za-z ]+",s[0])]
-        names: dict[int,str] = {}
+        centers = [sum(s[1] for s in g) / len(g) for g in groups]
+        labels = [s for s in panel if s[2] > max(v[2] for v in values) and re.fullmatch(r"[A-Za-z ]+", s[0])]
+        names: dict[int, str] = {}
         for label in labels:
-            covered = [n for n,x in enumerate(centers) if label[3]-8 <= x <= label[4]+8]
-            if len(covered)==1:
-                names[covered[0]]=label[0]
-            elif len(covered)>1 and len(label[0].split())==len(covered):
-                names.update(zip(covered,label[0].split()))
-        if len(names)!=len(groups):
+            covered = [n for n, x in enumerate(centers) if label[3] - 8 <= x <= label[4] + 8]
+            if len(covered) == 1:
+                names[covered[0]] = label[0]
+            elif len(covered) > 1 and len(label[0].split()) == len(covered):
+                names.update(zip(covered, label[0].split()))
+        if len(names) != len(groups):
             return None
-        titles = sorted((s for s in panel if s[2] < legend[2] and not period_re.search(s[0])), key=lambda s:s[2])
+        titles = sorted((s for s in panel if s[2] < legend[2] and not period_re.search(s[0])), key=lambda s: s[2])
         if not titles:
             return None
         metric = " ".join(s[0] for s in titles)
-        metrics.append(metric);all_periods.extend(periods)
-        for n,group in enumerate(groups):
-            for period,value in zip(periods,group):
-                points.append(VisionDataPoint(metric=metric,series_name=names[n],accounting_basis="unknown",
-                    reporting_period=period,value_text=value[0],normalized_value=value[0][:-1],unit="%",
-                    confidence=0.9,ambiguity=None,source_ref=""))
-    return VisionChartExtraction(title=" / ".join(metrics),chart_type="grouped_bar",axis_labels=[],
-        financial_metrics=metrics,reporting_periods=list(dict.fromkeys(all_periods)),overall_unit="%",legend=[],
-        data_points=points,factual_trend_summary="Displayed percentage labels extracted by panel, category and legend order.",
-        overall_confidence=0.9,ambiguities=["Period association follows left-to-right grouped bars and legend order; accuracy comparison remains deferred."])
+        metrics.append(metric)
+        all_periods.extend(periods)
+        for n, group in enumerate(groups):
+            for period, value in zip(periods, group):
+                points.append(
+                    VisionDataPoint(
+                        metric=metric,
+                        series_name=names[n],
+                        accounting_basis="unknown",
+                        reporting_period=period,
+                        value_text=value[0],
+                        normalized_value=value[0][:-1],
+                        unit="%",
+                        confidence=0.9,
+                        ambiguity=None,
+                        source_ref="",
+                    )
+                )
+    return VisionChartExtraction(
+        title=" / ".join(metrics),
+        chart_type="grouped_bar",
+        axis_labels=[],
+        financial_metrics=metrics,
+        reporting_periods=list(dict.fromkeys(all_periods)),
+        overall_unit="%",
+        legend=[],
+        data_points=points,
+        factual_trend_summary="Displayed percentage labels extracted by panel, category and legend order.",
+        overall_confidence=0.9,
+        ambiguities=[
+            "Period association follows left-to-right grouped bars and legend order; "
+            "accuracy comparison remains deferred."
+        ],
+    )
 
 
 def extract_chart(
@@ -676,13 +734,24 @@ def extract_chart(
     if provider is None:
         return _failure_record(source, candidate, "none", None, "skipped", "Vision extraction was not requested")
     try:
-        positioned = ((extract_positioned_table(document, candidate)
-                       or extract_positioned_grouped_percent_chart(document, candidate))
-                      if document is not None else None)
+        positioned = (
+            (
+                extract_positioned_table(document, candidate)
+                or extract_positioned_grouped_percent_chart(document, candidate)
+            )
+            if document is not None
+            else None
+        )
         if positioned is not None:
-            return ChartRecord(status="success", source=source, detection=candidate.detection_evidence(),
-                extraction=positioned, validation=validate_chart_extraction(positioned, source, candidate.nearby_text),
-                provider="docling_text_positions", model=None)
+            return ChartRecord(
+                status="success",
+                source=source,
+                detection=candidate.detection_evidence(),
+                extraction=positioned,
+                validation=validate_chart_extraction(positioned, source, candidate.nearby_text),
+                provider="docling_text_positions",
+                model=None,
+            )
         response = provider.extract(
             VisionRequest(
                 image_path=Path(source.crop_path),
@@ -728,6 +797,7 @@ def render_chart_markdown(record: ChartRecord) -> str:
         "|---|---|---|---|---:|---|---:|",
     ]
     for point in extraction.data_points:
+
         def clean(value: str | None) -> str:
             return (value or "null").replace("|", "\\|").replace("\n", " ")
 
@@ -887,7 +957,9 @@ def process_charts(
             try:
                 cached = ChartRecord.model_validate(_read_json(cache_path))
                 if _record_cache_matches(cached, source, provider) or (
-                    reuse_any_success and cached.status == "success" and cached.extraction is not None
+                    reuse_any_success
+                    and cached.status == "success"
+                    and cached.extraction is not None
                     and cached.source.crop_sha256 == source.crop_sha256
                 ):
                     cached.source = source
@@ -905,8 +977,12 @@ def process_charts(
         candidate, source, cache_path = item
         LOGGER.info("Extracting %s (page %s)", candidate.chart_id, candidate.page_number)
         record = extract_chart(provider, candidate, source, document=document)
-        LOGGER.info("Finished %s: %s (%s data points)", candidate.chart_id, record.status,
-                    len(record.extraction.data_points) if record.extraction else 0)
+        LOGGER.info(
+            "Finished %s: %s (%s data points)",
+            candidate.chart_id,
+            record.status,
+            len(record.extraction.data_points) if record.extraction else 0,
+        )
         return candidate.chart_id, record, cache_path
 
     if pending:
@@ -1028,9 +1104,7 @@ def parse_pdf_with_docling(
     if hasattr(options, "do_picture_classification"):
         options.do_picture_classification = True
 
-    converter = DocumentConverter(
-        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
-    )
+    converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)})
     page_range = (first_page, last_page) if last_page is not None else None
     kwargs = {"page_range": page_range} if page_range else {}
     result = converter.convert(pdf_path, **kwargs)

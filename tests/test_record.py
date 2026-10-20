@@ -4,6 +4,8 @@ from finsight import execute
 from finsight.agents.orchestrator.record import accuracy_sentence, consistency_sentence, directions
 from finsight.contracts.schemas import Verdict
 
+from stored_demo import demo_registry, store_fixture_claims
+
 
 def test_consistency_does_not_ask_which_post():
     out = execute("Has Joseph Carlson been consistent about Company X?")
@@ -25,7 +27,13 @@ def test_accuracy_over_time_counts_labels():
 
 
 def test_a_named_post_stays_one_check():
-    out = execute("Has Joseph Carlson been consistent about Company X?", post_id="demo-2")
+    text = "Joseph Carlson said Company X is getting more profitable: its margins keep expanding."
+    store_fixture_claims("demo-2", text)
+    out = execute(
+        "Has Joseph Carlson been consistent about Company X?",
+        post_id="demo-2",
+        registry=demo_registry(),
+    )
     assert out.assessment.overall_verdict is not None
     assert "record across" not in (out.assessment.summary or "")
 
