@@ -18,7 +18,7 @@ from datetime import date, datetime
 from importlib import resources
 from pathlib import Path
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -54,8 +54,20 @@ class EvalItem(BaseModel):
     expect_refusal: bool = False
     expect_clarification: bool = False  # unclear or missing info: the system should ask a question
     category: Literal["normal", "adversarial_advice", "out_of_scope", "injection", "temporal",
-                      "clarification"] = "normal"
+                      "clarification", "comparison", "misremembered", "missing_name_answered",
+                      "missing_name_refused", "cutoff_trap", "no_stored_post", "ask_which_post",
+                      "record"] = "normal"
     notes: str | None = None
+    # Optional fields from the influencer-post items. None of them is used by the runner yet.
+    cutoff_resolved_to: dict[str, Any] | None = None  # what a relative cut-off resolves to: rule, date, basis
+    influencer: str | None = None
+    influencer_after_clarification: str | None = None
+    clarification_turns: list[dict[str, str]] = Field(default_factory=list)  # [{"system": "...", "user": "..."}]
+    expected_outcome: str | None = None  # e.g. PROCESS_AFTER_CLARIFICATION
+    posts: list[Any] = Field(default_factory=list)  # the influencer posts the claim is based on
+    user_matches_post: bool | None = None  # False when the user misremembers the post
+    mismatch_note: str | None = None
+    gold_source: str | None = None
 
 
 def dataset_path(split: str) -> Path:
@@ -94,7 +106,9 @@ def validate_datasets() -> list[str]:
             stops = i.expect_refusal or i.expect_clarification
             if i.expect_refusal and i.expect_clarification:
                 problems.append(f"{i.item_id}: expect_refusal and expect_clarification cannot both be true")
-            if stops and i.gold_sub_claims:
+            # A clarification item that is analyzed after the user answers may carry gold sub-claims.
+            processed_later = i.expected_outcome == "PROCESS_AFTER_CLARIFICATION"
+            if stops and i.gold_sub_claims and not processed_later:
                 problems.append(f"{i.item_id}: refusal/clarification items must not have gold_sub_claims")
             if not stops and not i.gold_sub_claims:
                 problems.append(f"{i.item_id}: items that are analyzed need gold_sub_claims")
