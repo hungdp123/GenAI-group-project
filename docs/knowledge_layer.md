@@ -64,9 +64,9 @@ The YouTube text is collected when the corpus is built, before any question. Pub
 | Mark Roussin, CPA | https://www.youtube.com/@MarkRoussinCPA | Amazon, Meta, Tesla, Apple, Alphabet, Microsoft, MercadoLibre, Starbucks |
 | Joseph Carlson | Main show, https://www.youtube.com/@JosephCarlsonShow | Meta, Amazon, Intuit, NVIDIA, Salesforce, Microsoft, Google, Oracle, and other companies in the table above when a stored post states the claim |
 | Alex Reffett | https://www.youtube.com/@TickerSymbolYOU | NVIDIA, Alphabet, Amazon, Meta, Microsoft, AMD, Intel, Apple, Tesla, Palantir, and other companies in the table above when a stored post states the claim |
-| Meet Kevin | https://www.youtube.com/channel/UCUvvj5lwue7PspotMDjk5UA | Tesla, Apple, NVIDIA, Palantir, Alphabet, Meta, Salesforce, Oracle, Microsoft, and other companies in the table above when a stored post states the claim |
+| Kevin Paffrath | https://www.youtube.com/@MeetKevin | Tesla, Apple, NVIDIA, Palantir, Alphabet, Meta, Salesforce, Oracle, Microsoft, and other companies in the table above when a stored post states the claim |
 | Joseph Carlson | X, https://x.com/joecarlsonshow | A company in the table above when a stored post states the claim |
-| Mark Roussin, CPA | X, https://x.com/Dividend_Dollar | A company in the table above when a stored post states the claim |
+| Mark Roussin | X, https://x.com/Dividend_Dollar | A company in the table above when a stored post states the claim |
 
 Joseph Carlson is one influencer. After Hours, the main show, and @joecarlsonshow are all his, and a check names him once. Mark Roussin is one influencer. His YouTube channel and @Dividend_Dollar are both his, and a check names him once. Alex Reffett is one influencer, and a check names him once. Meet Kevin is one influencer, and a check names him once. The post may come from any of that influencer's rows. The company column is the coverage recorded for that channel. The user may still ask about another company in the company table when a stored post from that channel states the claim. Sentences in the chosen post about a different company are dropped in section 4. An X post has no separate transcript: the stored text of the post is the post.
 
