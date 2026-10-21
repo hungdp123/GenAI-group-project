@@ -45,9 +45,7 @@ REASON = {
     "date = period end, not filing date": "period end",
     "wrong company": "not the company",
     "missing provenance": "no url",
-    "conflicting evidence": "opposite",
-    "citation doesn't support": "does not support",
-    "stance mislabelled": "opposite",
+    "citation doesn't support": "does not state or contradict",
     "hedged language as proof": "hedged",
     "wrong source tier": "labelled",
 }
@@ -62,6 +60,23 @@ def test_mistake_is_caught_for_the_right_reason(name, base):
     assert not result.passed, result
     assert any(REASON[name] in reason.lower() for reason in result.failure_reasons), result.failure_reasons
     assert result.feedback_for_retry
+
+
+@pytest.mark.parametrize("base", [b for b in injection.BASES if b.kind == "financial"], ids=lambda b: b.base_id)
+def test_conflicting_evidence_is_surfaced_as_counter_evidence(base):
+    """A second source that says the opposite is not a defect: it is judged CHALLENGING and the verdict softens."""
+    sub_claim, evidence = injection.MUTATIONS["conflicting evidence"][1](base)
+    result = audit(sub_claim, evidence)
+    assert result.passed and result.verdict is Verdict.PARTIALLY_SUPPORTED
+    assert result.evidence_stances["ER-CONFLICT"] is Stance.CHALLENGING
+
+
+def test_ruled_out_driver_is_counter_evidence_not_support():
+    base = next(b for b in injection.BASES if b.base_id == "demand")
+    sub_claim, evidence = injection.MUTATIONS["stance mislabelled"][1](base)   # collector says SUPPORTING
+    result = audit(sub_claim, evidence)
+    assert result.passed and result.verdict is Verdict.CONTRADICTED
+    assert result.evidence_stances[evidence[0].evidence_id] is Stance.CHALLENGING
 
 
 @pytest.mark.parametrize("base", [b for b in injection.BASES if b.kind == "financial"], ids=lambda b: b.base_id)
@@ -130,9 +145,9 @@ def test_draft16_margin_that_fell_does_not_support_a_rise():
                "(quarter ended 2025-03-31).")
     args = ("META", "Meta", text, "operating_margin", 0.406, content, "quarter ended 2026-03-31", date(2026, 4, 30))
     kind = {"kind": SubClaimType.PROFITABILITY_CASH_LEVERAGE}
-    assert audit(*_fin(*args, stance=Stance.CHALLENGING, **kind)).verdict is Verdict.CONTRADICTED
-    mislabelled = audit(*_fin(*args, stance=Stance.SUPPORTING, **kind))
-    assert not mislabelled.passed and "margin" in " ".join(mislabelled.failure_reasons)
+    for label in (Stance.NEUTRAL, Stance.SUPPORTING, Stance.CHALLENGING):    # the collector's label is ignored
+        r = audit(*_fin(*args, stance=label, **kind))
+        assert r.verdict is Verdict.CONTRADICTED and r.evidence_stances["XBRL-META-operating_margin"] is Stance.CHALLENGING
 
 
 def _text_item(sub_claim_id, content, doc_type="10-Q", tier=SourceTier.TIER_1, company="Company X"):
@@ -181,21 +196,69 @@ def test_risk_factor_hedging_is_not_a_defect():
     assert r.passed and r.verdict is Verdict.SUPPORTED
 
 
-def test_no_evidence_and_neutral_only_are_insufficient_but_not_a_failure():
+def test_no_evidence_is_insufficient_but_not_a_failure():
     sub_claim = SubClaim(sub_claim_id="sc1", text="x", sub_claim_type=SubClaimType.OTHER)
-    assert audit(sub_claim, []).verdict is Verdict.INSUFFICIENT_EVIDENCE
-    neutral = _text_item("sc1", "Anything.").model_copy(update={"stance": Stance.NEUTRAL})
-    r = audit(sub_claim, [neutral])
+    r = audit(sub_claim, [])
     assert r.passed and r.verdict is Verdict.INSUFFICIENT_EVIDENCE
+
+
+def test_evidence_that_is_all_irrelevant_fails_so_the_collector_can_retry():
+    sub_claim = SubClaim(sub_claim_id="sc1", text="Company X's revenue growth is driven by AI infrastructure demand",
+                         sub_claim_type=SubClaimType.DEMAND_ATTRIBUTION, company_ticker="CMPX")
+    r = audit(sub_claim, [_text_item("sc1", "Anything."), _text_item("sc1", "We lease offices in Austin.")
+                          .model_copy(update={"evidence_id": "N2"})])
+    assert not r.passed and r.verdict is Verdict.INSUFFICIENT_EVIDENCE and r.feedback_for_retry
+    assert r.evidence_stances == {"N1": Stance.NEUTRAL, "N2": Stance.NEUTRAL}
+
+
+def test_irrelevant_passage_with_missing_url_does_not_fail_the_audit():
+    """Retrieval returns candidates; only the ones the auditor judges usable are held to the provenance rules."""
+    good = _text_item("sc1", DEMAND_TEXT_SHORT)
+    junk = _text_item("sc1", "We lease offices in Austin.").model_copy(
+        update={"evidence_id": "N2", "url": None, "citation_span": None})
+    r = audit(DEMAND_SHORT, [good, junk])
+    assert r.passed and r.verdict is Verdict.SUPPORTED and r.evidence_stances["N2"] is Stance.NEUTRAL
 
 
 def test_supporting_and_challenging_give_partially_supported():
     sub_claim = SubClaim(sub_claim_id="sc1", text="Company X's revenue growth is driven by AI infrastructure demand",
                          sub_claim_type=SubClaimType.DEMAND_ATTRIBUTION, company_ticker="CMPX")
     good = _text_item("sc1", "Data Center revenue increased 31%, primarily driven by demand for AI infrastructure.")
-    against = _text_item("sc1", "Revenue growth was weaker in other segments.").model_copy(
-        update={"stance": Stance.CHALLENGING, "evidence_id": "N2"})
-    assert audit(sub_claim, [good, against]).verdict is Verdict.PARTIALLY_SUPPORTED
+    against = _text_item("sc1", "Client segment revenue grew 6%, reflecting PC refresh rather than AI "
+                                "infrastructure demand.").model_copy(update={"evidence_id": "N2"})
+    r = audit(sub_claim, [good, against])
+    assert r.verdict is Verdict.PARTIALLY_SUPPORTED
+    assert r.evidence_stances == {"N1": Stance.SUPPORTING, "N2": Stance.CHALLENGING}
+
+
+# -- 2b. collectors send NEUTRAL (Financial agent always does; Narrative agent almost always) ----------------
+
+DEMAND_SHORT = SubClaim(sub_claim_id="sc1", text="Company X's revenue growth is driven by AI infrastructure demand",
+                        sub_claim_type=SubClaimType.DEMAND_ATTRIBUTION, company_ticker="CMPX")
+DEMAND_TEXT_SHORT = "Data Center revenue increased 31%, primarily driven by customer demand for AI infrastructure."
+
+
+@pytest.mark.parametrize("base", injection.BASES, ids=lambda b: b.base_id)
+def test_neutral_labels_from_collectors_do_not_matter(base):
+    neutral = [e.model_copy(update={"stance": Stance.NEUTRAL}) for e in base.evidence]
+    r = audit(base.sub_claim, neutral)
+    assert r.passed and r.verdict is Verdict.SUPPORTED
+    assert set(r.evidence_stances.values()) == {Stance.SUPPORTING}
+
+
+def test_numeric_stance_follows_the_direction_in_the_sub_claim():
+    base = next(b for b in injection.BASES if b.base_id == "growth")
+    falling = base.sub_claim.model_copy(update={"text": "Company X's revenue fell year over year."})
+    r = audit(falling, [e.model_copy(update={"stance": Stance.NEUTRAL}) for e in base.evidence])   # +14%
+    assert r.passed and r.verdict is Verdict.CONTRADICTED
+    assert r.evidence_stances["XBRL-REV-YOY"] is Stance.CHALLENGING
+
+
+@pytest.mark.parametrize("metric", ["revenue_ttm_growth_yoy", "revenue_ttm_growth_yoy_context"])
+def test_financial_agent_metric_suffixes_are_not_a_wrong_metric(metric):
+    base = next(b for b in injection.BASES if b.base_id == "growth")
+    item = base.evidence[0].model_copy(update={"metric_name": metric, "stance": Stance.NEUTRAL})
+    assert audit(base.sub_claim, [item]).passed
 
 
 # -- 3. LLM entailment path (through the mock provider) -----------------------------------------------------
@@ -234,3 +297,35 @@ def test_passage_text_is_sent_as_data_not_instructions():
 def test_mock_mode_makes_no_llm_call_by_default():
     set_mock_responder(lambda system, prompt: pytest.fail("LLM called in mock mode"))
     assert AuditorAgent().audit(DEMAND, [_text_item("sc1", DEMAND_TEXT)]).passed
+
+
+# -- 2c. collector hints: a flagged CHALLENGING is kept, SUPPORTING is never trusted ---------------------------
+
+COUNTER_TEXT = "Management cautioned that customer budgets are under review."   # nothing the rules can tie to the claim
+
+
+def test_collector_challenging_is_kept_when_the_auditor_cannot_confirm_it():
+    good = _text_item("sc1", DEMAND_TEXT_SHORT)
+    flagged = _text_item("sc1", COUNTER_TEXT).model_copy(update={"evidence_id": "N2", "stance": Stance.CHALLENGING})
+    r = audit(DEMAND_SHORT, [good, flagged])
+    assert r.evidence_stances == {"N1": Stance.SUPPORTING, "N2": Stance.CHALLENGING}
+    assert r.verdict is Verdict.PARTIALLY_SUPPORTED
+
+
+def test_collector_supporting_is_never_trusted():
+    claimed = _text_item("sc1", COUNTER_TEXT).model_copy(update={"stance": Stance.SUPPORTING})
+    r = audit(DEMAND_SHORT, [claimed])
+    assert not r.passed and r.evidence_stances == {"N1": Stance.NEUTRAL}
+
+
+def test_collector_challenging_does_not_override_the_auditors_own_support():
+    both = _text_item("sc1", DEMAND_TEXT_SHORT).model_copy(update={"stance": Stance.CHALLENGING})
+    r = audit(DEMAND_SHORT, [both])
+    assert r.verdict is Verdict.SUPPORTED and r.evidence_stances == {"N1": Stance.SUPPORTING}
+
+
+def test_the_month_may_is_not_hedging_but_the_word_may_is():
+    month = _text_item("sc1", "In May 2025, " + DEMAND_TEXT_SHORT[0].lower() + DEMAND_TEXT_SHORT[1:])
+    assert audit(DEMAND_SHORT, [month]).verdict is Verdict.SUPPORTED
+    hedged = _text_item("sc1", "AI infrastructure demand may drive revenue growth.")
+    assert not audit(DEMAND_SHORT, [hedged]).passed

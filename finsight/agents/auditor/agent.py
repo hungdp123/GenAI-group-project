@@ -15,8 +15,21 @@ Numbers in `EvidenceItem.computed_value` follow the contract: growth rates and m
 not percents. A stated number that is more than 0.5 percentage points from the computed one is CONTRADICTED
 (docs/claim_spec.md, team decision of 14 Oct).
 
+STANCE: the Auditor judges it, collectors do not. Whatever `EvidenceItem.stance` a collector sends (the Financial
+agent sends NEUTRAL, the Narrative agent mostly NEUTRAL) is ignored. Each item gets SUPPORTING, CHALLENGING or NEUTRAL
+(not about this sub-claim / cannot tell) from the evidence itself:
+- numbers: the direction the sub-claim states (grew / fell) against the sign of the computed change;
+- text: ruled-out driver or opposite direction -> CHALLENGING; states the sub-claim -> SUPPORTING; else NEUTRAL.
+One exception, and it only ever softens a verdict: a collector's CHALLENGING is kept when the Auditor's own
+check says NEUTRAL (it cannot confirm it, but counter-evidence is never thrown away). A collector's SUPPORTING is
+never trusted, and the Auditor's SUPPORTING / CHALLENGING judgments are never overridden.
+The judged stances go back in `AuditResult.evidence_stances`; the orchestrator applies them. Only usable
+(non-NEUTRAL) items are checked and counted. If items came back but none is usable, the audit FAILS so the
+collector gets its one retry with feedback.
+
 Entailment ("does the cited passage support the sub-claim?") is rule-based in mock mode so the tests are
-deterministic. With a real LLM provider, `complete()` is asked as well and both must agree.
+deterministic. With a real LLM provider, `complete()` is asked as well; it can only downgrade a SUPPORTING
+judgment or add CHALLENGING, never create support on its own.
 """
 
 from __future__ import annotations
@@ -63,10 +76,15 @@ _UP = re.compile(r"\b(grew|grow\w*|increas\w*|ros[e]|rising|rise[sn]?|expand\w*|
                  r"surg\w*|jump\w*|climb\w*|widen\w*|up)\b", re.I)
 _DOWN = re.compile(r"\b(shrink\w*|shrank|shrunk|declin\w*|fell|fall\w*|decreas\w*|lower|contract\w*|compress\w*|"
                    r"narrow\w*|drop\w*|slow\w*|slid\w*|down|deteriorat\w*|weaken\w*|dipped)\b", re.I)
-_HEDGE = re.compile(r"\b(may|might|could|possibly|potentially|uncertain|unclear|depending on|no assurance|"
+_HEDGE = re.compile(r"\b((?-i:may)|might|could|possibly|potentially|uncertain|unclear|depending on|no assurance|"
                     r"cannot predict)\b", re.I)
 _NEGATED_ATTRIBUTION = re.compile(
     r"(rather than|instead of|not (?:due to|driven by|because of|attributable to)|unrelated to|other than)", re.I)
+_FORWARD = re.compile(r"\b(expect\w*|guid\w*|outlook|anticipat\w*|forecast\w*|continu\w*|will|going forward|"
+                      r"next (?:quarter|year|fiscal)|through (?:the )?next|plans? to|target\w*)\b", re.I)
+_FORWARD_AGAINST = re.compile(r"\b(remain(?:s)? elevated|pressure\w*|headwind\w*|decelerat\w*|soften\w*|weaker|cautio\w*|"
+                              r"uncertain\w*|moderat\w*)\b", re.I)
+_FORWARD_FOR = re.compile(r"\b(strong|robust|continu\w*|accelerat\w*|growth|grow\w*|increas\w*|higher|record)\b", re.I)
 _QOQ = re.compile(r"\bqoq\b|quarter[- ](?:on|over)[- ]quarter|sequential", re.I)
 _QOQ_CLAIM = _QOQ
 
@@ -199,9 +217,9 @@ def _expected_concepts(sub_claim: SubClaim) -> set[str] | None:
 def _concept(metric_name: str) -> str:
     name = metric_name.lower()
     changed = True
-    while changed:                       # "revenue_growth_yoy_qoq" -> "revenue"
+    while changed:                       # "revenue_growth_yoy_qoq" / "revenue_ttm_growth_yoy" -> "revenue"
         changed = False
-        for suffix in ("_trend", "_qoq", "_yoy", "_growth"):
+        for suffix in ("_trend", "_qoq", "_yoy", "_growth", "_ttm", "_context"):
             if name.endswith(suffix):
                 name, changed = name[: -len(suffix)], True
     return name
@@ -242,36 +260,61 @@ class AuditorAgent:
 
     # -- entry point ----------------------------------------------------------------------------
     def audit(self, sub_claim: SubClaim, evidence: list[EvidenceItem]) -> AuditResult:
-        used = [e for e in evidence if e.stance is not Stance.NEUTRAL]   # neutral items never carry a verdict
-        if not used:
+        if not evidence:
             return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
                                verdict=Verdict.INSUFFICIENT_EVIDENCE)
         run = _Run()
-        for item in used:
-            self._hygiene(sub_claim, item, run)
-            if item.computed_value is not None:
+        stances: list[Stance] = []
+        unusable: list[tuple[EvidenceItem, str]] = []
+        for item in evidence:                       # 1. judge the stance (the collector's own label is ignored)
+            numeric = item.computed_value is not None
+            stance, why = self._numeric_stance(sub_claim, item) if numeric else self._text_stance(sub_claim, item)
+            if stance is Stance.NEUTRAL and item.stance is Stance.CHALLENGING:
+                stance, why = Stance.CHALLENGING, ""    # collector flagged counter-evidence we cannot confirm: keep it
+            stances.append(stance)
+            if stance is Stance.NEUTRAL:
+                unusable.append((item, why))
+                continue
+            self._hygiene(sub_claim, item, run)     # 2. only usable items are checked
+            if numeric:
                 self._numeric(sub_claim, item, run)
-            else:
-                self._text(sub_claim, item, run)
+            elif stance is Stance.SUPPORTING:
+                run.citation_checks.append(CitationCheck(evidence_id=item.evidence_id, entails=True))
+        judged = {item.evidence_id: st for item, st in zip(evidence, stances)}
+        used = [(item, st) for item, st in zip(evidence, stances) if st is not Stance.NEUTRAL]
+        if not any(c.entails for c in run.citation_checks):
+            first_text = next((i for i, _ in unusable if i.computed_value is None), None)
+            if first_text is not None and not any(i.computed_value is None for i, _ in used):
+                run.citation_checks.append(CitationCheck(evidence_id=first_text.evidence_id, entails=False))
         numeric = next((c for c in run.numeric_checks if not c.matches), run.numeric_checks[0]
                        if run.numeric_checks else None)
         citation = next((c for c in run.citation_checks if not c.entails), run.citation_checks[0]
                         if run.citation_checks else None)
+        if not used:                                # items came back, none is about the sub-claim: one retry
+            reasons = [f"{i.evidence_id}: {why}" for i, why in unusable]
+            hint = ("return passages that state the sub-claim or contradict it (also risk factors and "
+                    "qualifying remarks), with an exact citation span; for numbers, state the current and "
+                    "prior-year figures in the text.")
+            return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=False,
+                               verdict=Verdict.INSUFFICIENT_EVIDENCE, failure_reasons=reasons,
+                               numeric_check=numeric, citation_check=citation, feedback_for_retry=hint,
+                               evidence_stances=judged)
         if run.defects:
             reasons = [f"{d.evidence_id}: {d.reason}" for d in run.defects]
             feedback = " ".join(f"{d.evidence_id}: {d.hint}" for d in run.defects)
             return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=False,
                                verdict=Verdict.INSUFFICIENT_EVIDENCE, failure_reasons=reasons,
-                               numeric_check=numeric, citation_check=citation, feedback_for_retry=feedback)
+                               numeric_check=numeric, citation_check=citation, feedback_for_retry=feedback,
+                               evidence_stances=judged)
         return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
                            verdict=self._verdict(sub_claim, used, run), numeric_check=numeric,
-                           citation_check=citation)
+                           citation_check=citation, evidence_stances=judged)
 
     # -- verdict --------------------------------------------------------------------------------
     @staticmethod
-    def _verdict(sub_claim: SubClaim, used: list[EvidenceItem], run: _Run) -> Verdict:
-        supporting = [e for e in used if e.stance is Stance.SUPPORTING]
-        challenging = [e for e in used if e.stance is Stance.CHALLENGING]
+    def _verdict(sub_claim: SubClaim, used: list[tuple[EvidenceItem, Stance]], run: _Run) -> Verdict:
+        supporting = [e for e, st in used if st is Stance.SUPPORTING]
+        challenging = [e for e, st in used if st is Stance.CHALLENGING]
         if run.numeric_ok and not any(run.numeric_ok):
             return Verdict.CONTRADICTED                 # the stated number is not the computed number
         if supporting and challenging:
@@ -309,10 +352,6 @@ class AuditorAgent:
                 period_end and item.publication_date.isoformat() <= period_end.group(0))):
             run.add(item, f"publication date {item.publication_date} looks like the period end, not the filing date",
                     "use the date the filing was published (filed), not the period end.")
-        claim_dir, text_dir = _polarity(sub_claim.text, item.content, _polarity_stems(sub_claim))
-        if claim_dir and text_dir and item.stance is Stance.SUPPORTING and claim_dir != text_dir:
-            run.add(item, "labelled SUPPORTING but the text says the opposite of the sub-claim",
-                    "check the stance: this text goes against the sub-claim direction.")
 
     # -- numbers --------------------------------------------------------------------------------
     def _numeric(self, sub_claim: SubClaim, item: EvidenceItem, run: _Run) -> None:
@@ -329,16 +368,6 @@ class AuditorAgent:
         percents = _pcts(item.content)
         if (_is_growth(metric) or _is_margin(metric)) and not metric.endswith("_trend") and percents:
             self._internal_consistency(item, metric, value, percents, run)
-        direction = _direction(sub_claim.text)
-        if _is_growth(metric) and item.stance is Stance.SUPPORTING and (
-                (direction == "up" and value < 0) or (direction == "down" and value > 0)):
-            run.add(item, f"labelled SUPPORTING but the computed value {value:+.3f} goes against the sub-claim",
-                    "check the stance against the sign of the computed growth.")
-        if _is_margin(metric) and len(percents) >= 2 and item.stance is Stance.SUPPORTING:
-            change = percents[0].value - percents[1].value
-            if (direction == "up" and change < 0) or (direction == "down" and change > 0):
-                run.add(item, "labelled SUPPORTING but the margin moved against the sub-claim",
-                        "check the stance against the margin change.")
         self._stated_number(sub_claim, item, metric, value, percents, run)
 
     @staticmethod
@@ -411,40 +440,90 @@ class AuditorAgent:
         run.numeric_ok.append(ok)
         run.numeric_checks.append(NumericCheck(metric_name=metric, stated=stated_frac, computed=value, matches=ok))
 
-    # -- narrative ------------------------------------------------------------------------------
-    def _text(self, sub_claim: SubClaim, item: EvidenceItem, run: _Run) -> None:
-        if item.stance is not Stance.SUPPORTING:
-            return                                          # counter-evidence is not required to entail the claim
-        ok, reason = self._entails(sub_claim, item)
-        run.citation_checks.append(CitationCheck(evidence_id=item.evidence_id, entails=ok))
-        if not ok:
-            run.add(item, f"the cited text does not support the sub-claim ({reason})",
-                    "return a passage that states the sub-claim itself, with an exact citation span.")
+    # -- stance ---------------------------------------------------------------------------------
+    @staticmethod
+    def _movement(metric: str, value: float, item: EvidenceItem) -> float | None:
+        """Change over the comparison period: the growth rate, or current minus prior from the item's own text."""
+        if _is_growth(metric) and not metric.endswith("_trend"):
+            return value
+        percents = _pcts(item.content)
+        if _is_margin(metric) and len(percents) >= 2:
+            return percents[0].value - percents[1].value
+        amounts = _money(item.content)
+        if len(amounts) >= 2 and not _is_margin(metric):
+            return amounts[0] - amounts[1]
+        return None
 
-    def _entails(self, sub_claim: SubClaim, item: EvidenceItem) -> tuple[bool, str]:
+    def _numeric_stance(self, sub_claim: SubClaim, item: EvidenceItem) -> tuple[Stance, str]:
+        """Does the computed figure back the direction the sub-claim states? (The collector's label is ignored.)"""
+        metric, value = item.metric_name or "", float(item.computed_value)
+        direction = _direction(sub_claim.text)
+        if direction is None and _is_growth(metric):
+            direction = "up"                        # "revenue growth is strong": positive growth backs it
+        if direction is None:
+            return Stance.SUPPORTING, ""            # a level claim: a wrong stated number is caught elsewhere
+        change = self._movement(metric, value, item)
+        if change is None:
+            return Stance.NEUTRAL, "cannot tell from the figure and its text whether it moved up or down"
+        backs = change > 0 if direction == "up" else change < 0
+        return (Stance.SUPPORTING if backs else Stance.CHALLENGING), ""
+
+    def _text_stance(self, sub_claim: SubClaim, item: EvidenceItem) -> tuple[Stance, str]:
+        """SUPPORTING if the passage states the sub-claim, CHALLENGING if it rules it out or says the opposite,
+        otherwise NEUTRAL with the reason. Rule-based; with a real LLM the model may only downgrade or challenge."""
         text, passage = sub_claim.text, item.content
+        if sub_claim.sub_claim_type.value == "CONTINUATION":
+            return self._continuation_stance(sub_claim, item)
         key = _stems(text, _alias_words(sub_claim.company_ticker))
         distinctive = key - GENERIC_STEMS
+        coverage = len(key & _stems(passage)) / len(key) if key else 0.0
         for cue in _NEGATED_ATTRIBUTION.finditer(passage):
             if _stems(passage[cue.end(): cue.end() + 60]) & distinctive:
-                return False, "it says the opposite: the claimed driver is ruled out"
+                return Stance.CHALLENGING, "it says the opposite: the claimed driver is ruled out"
+        pol_stems = _polarity_stems(sub_claim)
+        claim_dir, text_dir = _polarity(text, passage, pol_stems)
+        pol_cover = len(pol_stems & _stems(passage)) / len(pol_stems) if pol_stems else 0.0
+        if claim_dir and text_dir and claim_dir != text_dir and pol_cover >= MIN_COVERAGE:
+            return Stance.CHALLENGING, "it says the opposite direction"
+        rules_ok, why = True, ""
         if sub_claim.sub_claim_type.value not in HEDGE_OK_TYPES and _HEDGE.search(passage):
-            return False, "hedged wording is not proof"
-        # every percent and dollar amount the sub-claim states must appear in the passage (as written)
+            rules_ok, why = False, "hedged wording is not proof"
         stated_pct = {p.value for p in _pcts(_PERIOD_NOISE.sub(" ", text))}
         stated_usd = {float(m.group(2).replace(",", "")) for m in _MONEY_RE.finditer(text)}
         shown_pct = {p.value for p in _pcts(passage)}
         shown_usd = {float(m.group(2).replace(",", "")) for m in _MONEY_RE.finditer(passage)}
-        if (stated_pct - shown_pct) or (stated_usd - shown_usd):
-            return False, "the number in the sub-claim is not in the passage"
-        coverage = len(key & _stems(passage)) / len(key) if key else 1.0
-        if coverage < MIN_COVERAGE:
-            return False, f"only {coverage:.0%} of the sub-claim's key words appear"
-        if self._llm_enabled():
+        if rules_ok and ((stated_pct - shown_pct) or (stated_usd - shown_usd)):
+            rules_ok, why = False, "the number in the sub-claim is not in the passage"
+        if rules_ok and coverage < MIN_COVERAGE:
+            rules_ok, why = False, f"only {coverage:.0%} of the sub-claim's key words appear"
+        if self._llm_enabled() and coverage >= 0.3:         # only passages that are about the sub-claim
             verdict = self._ask_llm(text, passage)
-            if verdict is not None and verdict != "ENTAILS":
-                return False, f"the model judged the passage {verdict.lower()}"
-        return True, ""
+            if verdict == "CONTRADICTS":
+                return Stance.CHALLENGING, "the model judged the passage contradicts the sub-claim"
+            if rules_ok and verdict not in (None, "ENTAILS"):
+                return Stance.NEUTRAL, f"the model judged the passage {verdict.lower()}"
+        if rules_ok:
+            return Stance.SUPPORTING, ""
+        return Stance.NEUTRAL, f"the passage does not state or contradict the sub-claim ({why})"
+
+    def _continuation_stance(self, sub_claim: SubClaim, item: EvidenceItem) -> tuple[Stance, str]:
+        """"Growth is just getting started": what counts is a forward-looking statement (guidance, outlook, "expects"),
+        not word overlap with the claim's wording. Pressure / decline / "remain elevated" in it is counter-evidence.
+        Rule-based approximation; the knowledge layer caps this type at PARTIALLY_SUPPORTED, Tier 2."""
+        passage = item.content
+        if not _FORWARD.search(passage):
+            return Stance.NEUTRAL, "the passage has no forward-looking statement (guidance, outlook, expectation)"
+        against = bool(_FORWARD_AGAINST.search(passage) or _DOWN.search(passage))
+        stance = Stance.CHALLENGING if against else Stance.SUPPORTING if _FORWARD_FOR.search(passage) else None
+        if stance is None:
+            return Stance.NEUTRAL, "the forward-looking statement says nothing about growth continuing or slowing"
+        if self._llm_enabled():
+            verdict = self._ask_llm(sub_claim.text, passage)
+            if verdict == "CONTRADICTS":
+                return Stance.CHALLENGING, "the model judged the passage contradicts the sub-claim"
+            if stance is Stance.SUPPORTING and verdict not in (None, "ENTAILS"):
+                return Stance.NEUTRAL, f"the model judged the passage {verdict.lower()}"
+        return stance, ""
 
     def _llm_enabled(self) -> bool:
         if self._use_llm is not None:
