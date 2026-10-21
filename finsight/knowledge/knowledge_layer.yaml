@@ -26,35 +26,35 @@ rules:
     retry_collectors: []
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1]
-    note: "Supported only when the Tier 1 computed record matches value, direction, and period. Use consolidated revenue, not a segment. A wrong number is rewritten from that record. Do not add the narrative agent."
+    note: "Past change in consolidated revenue, operating income, operating cash flow, or diluted earnings per share. The words pick the series. Supported only when the Tier 1 record matches value, direction, and period. Use the consolidated figure, not a segment. A wrong number is rewritten from that record. Do not add the narrative agent."
 
   - sub_claim_type: NET_INCOME_GROWTH
     collectors: [financial]
     retry_collectors: []
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1]
-    note: "Past change in accounting profit. Supported only when the Tier 1 record matches value, direction, and period. Do not add the narrative agent."
+    note: "Past change in reported accounting profit. Supported only when the Tier 1 record matches value, direction, and period. A figure that removes gains is not this type. Do not add the narrative agent."
 
   - sub_claim_type: PROFITABILITY
     collectors: [financial]
     retry_collectors: []
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1]
-    note: "Operating margin, net margin, and gross margin. Gross margin is gross profit divided by revenue. Supported only from a Tier 1 filing. Do not add the narrative agent."
+    note: "Operating margin, net margin, and gross margin. Gross margin is gross profit divided by revenue. A segment margin is not this type. Supported only from a Tier 1 filing. Do not add the narrative agent."
 
   - sub_claim_type: CASH_GENERATION
     collectors: [financial]
     retry_collectors: []
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1]
-    note: "Free cash flow, level and direction. Supported only from a Tier 1 filing. Do not add the narrative agent."
+    note: "Free cash flow, operating cash flow, and free cash flow margin. Free cash flow margin is free cash flow divided by revenue. Supported only from a Tier 1 filing. Do not add the narrative agent."
 
   - sub_claim_type: LIQUIDITY
     collectors: [financial]
     retry_collectors: []
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1]
-    note: "Current ratio, level and direction. Supported only from a Tier 1 filing. Do not add the narrative agent."
+    note: "Current ratio and cash ratio, level and direction. Cash ratio is cash divided by short-term bills. Supported only from a Tier 1 filing. Do not add the narrative agent."
 
   - sub_claim_type: LEVERAGE
     collectors: [financial]
@@ -114,4 +114,4 @@ fallback:
   highest_verdict: SUPPORTED
   tier_requirement: [TIER_1, TIER_2]
   counter_evidence_only: true
-  note: "Not labeled out of scope up front. Search the stored documents. Supported only when a Tier 1 passage states the claim. A Tier 2 remark is at most Partially Supported. Nothing in Tier 1 or Tier 2 means INSUFFICIENT_EVIDENCE. Do not invent a formula."
+  note: "Not labeled out of scope up front. Search the stored documents. Supported only when a Tier 1 passage states the claim. A Tier 2 remark is at most Partially Supported. Nothing in Tier 1 or Tier 2 means INSUFFICIENT_EVIDENCE. Do not invent a formula. Gross-profit growth, a run rate, net income excluding gains, and a segment margin stay here."

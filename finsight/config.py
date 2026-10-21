@@ -26,7 +26,7 @@ DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
     "narrative": "finsight.agents.narrative.rag.collect_evidence:NarrativeEvidenceAgent",
     "retriever": "finsight.agents.narrative.retrieval.retriever:CorpusRetriever",
     "auditor": "finsight.agents.auditor.stub:StubAuditor",
-    "advice_boundary": "finsight.agents.advice_boundary.stub:StubAdviceBoundary",
+    "advice_boundary": "finsight.agents.advice_boundary.agent:AdviceBoundaryAgent",
     "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",
 }
 

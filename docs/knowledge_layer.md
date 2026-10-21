@@ -173,11 +173,11 @@ If the same type, measure, and period appears twice, keep one claim. Keep the ea
 
 | Type | What the post says | Example | Who looks it up | Best label |
 |---|---|---|---|---|
-| Historical growth | Past change in total revenue | "Revenue grew about 14% year over year." | Financial | Supported, from a filing only |
-| Net income growth | Past change in accounting profit | "Profits grew." | Financial | Supported, from a filing only |
+| Historical growth | Past change in total revenue, operating income, operating cash flow, or diluted earnings per share | "Revenue grew about 14% year over year." "Operating income is up 124%." "Operating cash flow grew." "Earnings per share declined." | Financial | Supported, from a filing only |
+| Net income growth | Past change in reported accounting profit | "Profits grew." | Financial | Supported, from a filing only |
 | Profitability | Operating margin, net margin, or gross margin, level and direction | "Margins are healthy and not falling." "Gross margin improved." | Financial | Supported, from a filing only |
-| Cash generation | Free cash flow, level and direction | "The company generates cash." | Financial | Supported, from a filing only |
-| Liquidity | Current ratio, level and direction | "Liquidity is solid." | Financial | Supported, from a filing only |
+| Cash generation | Free cash flow, operating cash flow, or free cash flow margin, level and direction | "The company generates cash." "Free cash flow margin is 15%." | Financial | Supported, from a filing only |
+| Liquidity | Current ratio or cash ratio, level and direction | "Liquidity is solid." "The cash ratio is above 1." | Financial | Supported, from a filing only |
 | Leverage | Debt-to-equity, direction only | "Leverage is under control." | Financial | Insufficient Evidence until the financial agent returns the ratio. Supported once that filing ratio is calculated. |
 | Demand attribution | The post names the cause of a result, such as AI demand or a new product. The check is whether the company itself said that. | "Growth is from AI infrastructure demand." | Narrative | Supported only when a filing gives that cause's share of the result and names no other cause. Any weaker company statement is Partially Supported. |
 | Continuation | A forward-looking claim about demand or guidance | "This growth is just getting started." | Narrative | Partially Supported. The source is management's own remarks. |
@@ -186,6 +186,8 @@ If the same type, measure, and period appears twice, keep one claim. Keep the ea
 | Not in the table | A company fact that matches no row above | "They bought back stock." "Attendance rose." | Narrative, in the documents stored for that company | Supported when a filing states it. An earnings remark can at most be Partially Supported. |
 
 A debt amount is not leverage. "Debt is over $100 billion" goes to the narrative agent, which quotes the figure from a stored filing. Debt tags differ across companies, so the financial agent does not add them up. The narrative agent does not calculate debt ÷ equity. That ratio stays a leverage claim.
+
+Operating-income growth, operating-cash-flow growth, and diluted earnings-per-share growth are historical growth. The financial agent calculates them from the consolidated figures. Gross-profit growth, a run rate, net income with gains removed, and a segment margin are not in section 11. They are not sent to the financial agent. The narrative agent searches the stored documents.
 
 A sentence that fits none of the rows will be checked against the documents stored for that company, then determined whether Out of Scope or not. For example:
 
@@ -222,8 +224,8 @@ Strong, healthy, solid, good, and improving mean the favorable test below. Weak,
 |---|---|---|
 | Historical growth, net income growth | The later figure is higher than the earlier one. | "Strong" or "explosive" means it rose. The size of the rise is not tested. "Weak" means flat or down. |
 | Profitability | Latest operating margin is above zero, and the change from last year is zero or positive. | The company made an operating profit, and the margin did not fall. |
-| Cash generation | Latest free cash flow is above zero, and the change from last year is zero or positive. | Cash left after spending on assets, and that cash did not fall. |
-| Liquidity | Latest current ratio is at least 1, and the change from last year is zero or positive. | Short-term assets cover short-term bills. A ratio of 1 means they match. This is a definition, not a quality ranking. |
+| Cash generation | Latest free cash flow is above zero, and the change from last year is zero or positive. Free cash flow margin uses the same direction test. | Cash left after spending on assets, and that cash did not fall. |
+| Liquidity | Latest current ratio is at least 1, and the change from last year is zero or positive. The cash ratio uses the same test. | Short-term assets cover short-term bills. A ratio of 1 means they match. This is a definition, not a quality ranking. |
 | Leverage | Debt-to-equity did not rise from last year. | Only the direction is used. A positive ratio is not treated as good or bad. "Under control" means it did not rise. "Stretched" means it rose. |
 
 When the phrase names no measure, combine the four children into one label for the parent. For a weak, poor, or in-trouble parent, read "favorable" below as "unfavorable," and the other way around.
@@ -302,12 +304,18 @@ Only these calculations may support a financial claim. The numbers come from the
 | Measure | Inputs | Formula |
 |---|---|---|
 | Revenue growth | Total revenue | Later revenue ÷ earlier revenue − 1 |
-| Net income growth | Accounting profit | Later profit ÷ earlier profit − 1 |
+| Operating income growth | Operating income | Later operating income ÷ earlier operating income − 1 |
+| Operating cash flow growth | Operating cash flow | Later operating cash flow ÷ earlier operating cash flow − 1 |
+| Diluted EPS growth | Diluted earnings per share | Later diluted EPS ÷ earlier diluted EPS − 1 |
+| Net income growth | Reported accounting profit | Later profit ÷ earlier profit − 1 |
 | Operating margin | Operating income, revenue | Operating income ÷ revenue |
 | Gross margin | Gross profit, revenue | Gross profit ÷ revenue |
 | Net margin | Profit, revenue | Profit ÷ revenue |
 | Free cash flow | Cash from operations, capital spending | Cash from operations minus capital spending. Treat capital spending as money going out. If the tagged number is already negative, do not subtract it a second time. |
+| Operating cash flow | Cash from operations | The tagged cash-from-operations figure. This is not free cash flow. |
+| Free cash flow margin | Free cash flow, revenue | Free cash flow ÷ revenue |
 | Current ratio | Short-term assets, short-term bills | Short-term assets ÷ short-term bills. A result of 1 means the assets cover the bills. |
+| Cash ratio | Cash, short-term bills | Cash ÷ short-term bills |
 | Debt-to-equity | Short-term debt, long-term debt, shareholders' equity | (Short-term debt + long-term debt) ÷ equity. For the "financially strong" test, only the direction from last year is used. The financial agent does not return this ratio yet, so a leverage claim is Insufficient Evidence. |
 
 Use total revenue and total profit, not a segment. A segment growth rate presented as if it were the whole company is Insufficient Evidence. A segment figure stated as that segment, such as "AWS grew 17%," is checked as that segment. It is not sent through the total-revenue calculation. The report says it is about that segment, not the whole company. The lookup is a stored passage that states the figure. If no passage states it, the label is Insufficient Evidence.
@@ -340,7 +348,7 @@ Use total revenue and total profit, not a segment. A segment growth rate present
 
 A debt amount, such as "debt is over $100 billion", is not one of these calculations. The narrative agent quotes that figure from a stored filing passage.
 
-Adjusted EBITDA, earnings per share, buybacks, dividends, a cash balance, homes sold, and attendance are not in the table above, so they are not calculated. They are still checked under section 5, by searching the stored documents. The label is Insufficient Evidence only when those documents do not state the claim. A segment figure presented as the whole company stays Insufficient Evidence.
+Adjusted EBITDA, buybacks, dividends, a cash balance, homes sold, and attendance are not in the table above, so they are not calculated. Gross-profit growth, a run rate, net income with gains removed, and a segment margin are not in the table either. The financial agent is not asked to invent those figures. They are checked under section 5, by searching the stored documents. The label is Insufficient Evidence only when those documents do not state the claim. A segment figure presented as the whole company stays Insufficient Evidence.
 
 ## 12. The four labels
 
@@ -353,7 +361,7 @@ Adjusted EBITDA, earnings per share, buybacks, dividends, a cash balance, homes 
 
 | Type | Supported when | Otherwise |
 |---|---|---|
-| Historical growth, net income growth, profitability, cash, liquidity | The filing matches the value, the direction, and the period in section 11 | Missing period or missing tag: Insufficient Evidence |
+| Historical growth (revenue, operating income, operating cash flow, or diluted EPS), net income growth, profitability, cash, liquidity | The filing matches the value, the direction, and the period in section 11 | Missing period or missing tag: Insufficient Evidence |
 | Leverage | Never, until the financial agent returns debt ÷ equity | Insufficient Evidence. The narrative agent cannot calculate the ratio. |
 | Demand attribution | A filing gives that driver's share of growth and names no other driver | Any weaker company statement: Partially Supported. A number with no driver: Insufficient Evidence |
 | Continuation | Never | Management says "expects" or gives guidance: Partially Supported. "Will" or "proves" overstates that. |
