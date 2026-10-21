@@ -467,13 +467,19 @@ class Nodes:
             results = list(pool.map(run, state.pending_sub_claim_ids))
 
         audits, insufficient = dict(state.audits), dict(state.insufficient_reasons)
+        evidence = dict(state.evidence)
         for sub_claim_id, result, error in results:
             if error:
                 insufficient[sub_claim_id] = f"auditor failed ({error})"
                 continue
             audits[sub_claim_id] = result
             self.rec.audit(result)
-        return {"audits": audits, "insufficient_reasons": insufficient}
+            # The Auditor's stances replace the collectors' before retry_or_accept checks the tiers.
+            if result.passed and result.evidence_stances:
+                evidence[sub_claim_id] = [
+                    e.model_copy(update={"stance": result.evidence_stances.get(e.evidence_id, e.stance)})
+                    for e in evidence.get(sub_claim_id, [])]
+        return {"audits": audits, "insufficient_reasons": insufficient, "evidence": evidence}
 
     # -- 8. retry or accept -------------------------------------------------
 
