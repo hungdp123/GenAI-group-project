@@ -56,6 +56,7 @@ class RunRecord(BaseModel):
     overall_verdict: Verdict | None = None
     predicted_sub_claims: list[PredictedSubClaim] = Field(default_factory=list)
     gold_sub_claims: list[GoldSubClaim] = Field(default_factory=list)
+    failed_checks: list[str] = Field(default_factory=list)  # record / two-turn items: which check failed
     error: str | None = None
 
 

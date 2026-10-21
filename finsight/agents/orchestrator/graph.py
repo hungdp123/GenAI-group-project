@@ -20,6 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from langgraph.graph import END, StateGraph
 
@@ -36,11 +37,15 @@ from finsight.contracts.schemas import (
 from finsight.knowledge.loader import KnowledgeLayer, default_knowledge_layer
 from finsight.logging.decision_log import DecisionLogRecorder, write_log
 
+if TYPE_CHECKING:
+    from finsight.agents.orchestrator.record import RecordResult
+
 
 @dataclass
 class RunOutput:
     assessment: FinalAssessment
     decision_log: DecisionLog
+    record: RecordResult | None = None  # set for a consistency/accuracy record: one check per post
 
 
 # -- conditional edges ---------------------------------------------------------
@@ -195,15 +200,15 @@ def execute(
             kinds, video_ids = parsed
             from finsight.agents.orchestrator.record import assess_record
 
-            assessment = assess_record(
+            record = assess_record(
                 claim, kinds=kinds, video_ids=video_ids, cutoff=cutoff,
                 company_ticker=company_ticker, influencer=influencer,
                 posts_root=ctx.settings.posts_dir,
                 run_one=lambda *args, **kwargs: execute(*args, registry=ctx.registry, settings=ctx.settings,
-                                                        kb=ctx.kb, **kwargs).assessment,
+                                                        kb=ctx.kb, **kwargs),
                 on_stage=on_stage,
             )
-            return RunOutput(assessment, result.decision_log)
+            return RunOutput(record.assessment, result.decision_log, record)
         return result
     except Exception as exc:  # noqa: BLE001 - last line of defence: the caller always gets an assessment
         return _crash_output(ctx, claim, exc)
