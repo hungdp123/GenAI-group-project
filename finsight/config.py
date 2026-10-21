@@ -44,7 +44,7 @@ DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
     "financial": "finsight.agents.financial.stub:StubFinancialAgent",  # Person 1
     "narrative": "finsight.agents.narrative.stub:StubNarrativeAgent",  # Person 2
     "retriever": "finsight.agents.narrative.retriever_stub:StubRetriever",  # Person 2
-    "auditor": "finsight.agents.auditor.stub:StubAuditor",  # Person 3
+    "auditor": "finsight.agents.auditor.agent:AuditorAgent",  # Person 3
     "advice_boundary": "finsight.agents.advice_boundary.stub:StubAdviceBoundary",  # Person 4
     "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",  # Person 4
 }

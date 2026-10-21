@@ -1,0 +1,463 @@
+"""Auditor Agent (Person 3, Amelia): number checks by calculation, narrative checks by citation.
+
+It checks the evidence the specialists hand over, then proposes a verdict from the evidence that survives.
+It does NOT apply source-tier caps, the cut-off filter or the retry loop: the orchestrator does those
+(`routing.tier_shortfall`, `routing.split_temporal`, `nodes.retry_or_accept`).
+
+Result semantics (what the orchestrator does with it):
+- `passed=False`: a specialist's evidence is defective (wrong units, wrong metric, no provenance, citation does
+  not support the sub-claim ...). `failure_reasons` says what, `feedback_for_retry` tells the collector how to
+  fix it. The orchestrator re-gathers once, then marks the sub-claim INSUFFICIENT_EVIDENCE.
+- `passed=True`: the evidence is usable. `verdict` is the PROPOSED verdict; the orchestrator applies the
+  knowledge-layer cap and tier rules afterwards.
+
+Numbers in `EvidenceItem.computed_value` follow the contract: growth rates and margins are FRACTIONS (0.14),
+not percents. A stated number that is more than 0.5 percentage points from the computed one is CONTRADICTED
+(docs/claim_spec.md, team decision of 14 Oct).
+
+Entailment ("does the cited passage support the sub-claim?") is rule-based in mock mode so the tests are
+deterministic. With a real LLM provider, `complete()` is asked as well and both must agree.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from finsight.config import CORPUS_COMPANIES, get_settings
+from finsight.contracts.schemas import (
+    AuditResult,
+    CitationCheck,
+    EvidenceItem,
+    NumericCheck,
+    SourceTier,
+    Stance,
+    SubClaim,
+    Verdict,
+)
+from finsight.llm.client import DATA_SAFETY_PREAMBLE, complete, data_block
+
+MATCH_BAND = 0.005          # 0.5 percentage points, as a fraction (knowledge layer section 10)
+MONEY_REL_TOL = 0.01        # a stated dollar amount may differ by 1% (rounding: $109.9bn vs "$110 billion")
+MIN_COVERAGE = 0.6          # share of the sub-claim's key words that the passage must contain
+
+# Sub-claim types whose SUPPORTED verdict needs a Tier 1 computed record (knowledge layer: HISTORICAL_GROWTH,
+# profitability / cash / leverage). Compared by value so new enum members need no change here.
+COMPUTED_TYPES = {
+    "HISTORICAL_GROWTH", "NET_INCOME_GROWTH", "PROFITABILITY_CASH_LEVERAGE", "PROFITABILITY",
+    "CASH_GENERATION", "LIQUIDITY", "LEVERAGE",
+}
+# Types where hedged wording ("may", "could") is what a filing normally says, so it is not a defect.
+HEDGE_OK_TYPES = {"BUSINESS_RISK"}
+
+TIER1_DOCS = {"10-k", "10-q", "xbrl", "20-f"}
+TIER2_DOCS = {"earnings_release", "ir_remarks", "earnings_call", "earnings_slides", "ir_presentation",
+              "investor_day", "press_release"}
+TIER3_DOCS = {"news"}
+
+MARGINS = {"gross_margin", "operating_margin", "net_margin", "fcf_margin"}
+
+# -- wording -------------------------------------------------------------------------------------
+
+_UP = re.compile(r"\b(grew|grow\w*|increas\w*|ros[e]|rising|rise[sn]?|expand\w*|improv\w*|higher|accelerat\w*|"
+                 r"surg\w*|jump\w*|climb\w*|widen\w*|up)\b", re.I)
+_DOWN = re.compile(r"\b(shrink\w*|shrank|shrunk|declin\w*|fell|fall\w*|decreas\w*|lower|contract\w*|compress\w*|"
+                   r"narrow\w*|drop\w*|slow\w*|slid\w*|down|deteriorat\w*|weaken\w*|dipped)\b", re.I)
+_HEDGE = re.compile(r"\b(may|might|could|possibly|potentially|uncertain|unclear|depending on|no assurance|"
+                    r"cannot predict)\b", re.I)
+_NEGATED_ATTRIBUTION = re.compile(
+    r"(rather than|instead of|not (?:due to|driven by|because of|attributable to)|unrelated to|other than)", re.I)
+_QOQ = re.compile(r"\bqoq\b|quarter[- ](?:on|over)[- ]quarter|sequential", re.I)
+_QOQ_CLAIM = _QOQ
+
+_STOP = set("a an the of in on at to for by is are was were be been being it its this that these those and or but "
+            "with as from into than then so such not no over under per also has have had will would can may "
+            "company x year years quarter strongly very".split())
+_SYNONYMS = {
+    "grew": "grow", "growth": "grow", "growing": "grow", "increase": "grow", "increased": "grow",
+    "increases": "grow", "rose": "grow", "rise": "grow", "rising": "grow", "up": "grow",
+    "driven": "driv", "drive": "driv", "drives": "driv", "driving": "driv", "due": "driv",
+    "attributable": "driv", "result": "driv", "resulting": "driv", "reflecting": "driv", "fueled": "driv",
+    "primarily": "", "mainly": "", "largely": "",
+    "topped": "over", "exceeded": "over", "above": "over", "eclipsed": "over",
+    "chips": "chip", "margins": "margin",
+}
+GENERIC_STEMS = {"revenu", "grow", "driv", "increas"}
+
+_NUM = r"\d[\d,]*(?:\.\d+)?"
+_PCT_RE = re.compile(rf"([+\-−])?\s?({_NUM})\s?(?:%|percent\b|per cent\b)", re.I)
+_MONEY_RE = re.compile(rf"(-)?\$\s?({_NUM})\s?(bn|billion|b|million|m|thousand|k)?(?![a-z])", re.I)
+_UNIT = {"bn": 1e9, "billion": 1e9, "b": 1e9, "million": 1e6, "m": 1e6, "thousand": 1e3, "k": 1e3, None: 1.0}
+_PERIOD_NOISE = re.compile(r"\bQ[1-4]\b|\b(?:FY)?\s?(?:19|20)\d{2}\b", re.I)
+
+
+@dataclass
+class _Pct:
+    value: float            # percent as written (14.0 for "+14%")
+    decimals: int
+    signed: bool
+    negative: bool
+
+
+def _pcts(text: str) -> list[_Pct]:
+    out = []
+    for m in _PCT_RE.finditer(text):
+        raw = m.group(2).replace(",", "")
+        decimals = len(raw.split(".")[1]) if "." in raw else 0
+        out.append(_Pct(float(raw), decimals, m.group(1) is not None, m.group(1) in ("-", "−")))
+    return out
+
+
+def _money(text: str) -> list[float]:
+    out = []
+    for m in _MONEY_RE.finditer(text):
+        unit = m.group(3).lower() if m.group(3) else None
+        value = float(m.group(2).replace(",", "")) * _UNIT[unit]
+        out.append(-value if m.group(1) else value)
+    return out
+
+
+def _direction(text: str) -> str | None:
+    up, down = bool(_UP.search(text)), bool(_DOWN.search(text))
+    return "up" if up and not down else "down" if down and not up else None
+
+
+def _stem(word: str) -> str:
+    w = word.lower()
+    if w in _SYNONYMS:
+        return _SYNONYMS[w]
+    for suffix in ("ing", "ed", "es", "s"):
+        if len(w) > 4 and w.endswith(suffix):
+            return w[: -len(suffix)]
+    return w[:-1] if len(w) > 4 and w.endswith("e") else w
+
+
+def _stems(text: str, drop: set[str] | None = None) -> set[str]:
+    out = set()
+    for word in re.findall(r"[A-Za-z][A-Za-z\-]+|\d+", text):
+        if word.lower() in _STOP:
+            continue
+        stem = _stem(word)
+        if stem and stem not in (drop or set()):
+            out.add(stem)
+    return out
+
+
+def _alias_words(ticker: str | None) -> set[str]:
+    words = set()
+    for alias in CORPUS_COMPANIES.get(ticker or "", []):
+        words |= {w.lower() for w in re.findall(r"[A-Za-z]+", alias)}
+    return words
+
+
+def _polarity(claim: str, passage: str, key_stems: set[str]) -> tuple[int, int]:
+    """(claim direction, passage direction) as +1 / -1 / 0, looking only at passage clauses about the claim."""
+    claim_dir = {"up": 1, "down": -1, None: 0}[_direction(claim)]
+    total = 0
+    for clause in re.split(r"\band\b|;|,|\bbut\b|\bwhile\b|\.", passage):
+        if not (_stems(clause) & key_stems):
+            continue
+        up, down = bool(_UP.search(clause)), bool(_DOWN.search(clause))
+        total += (1 if up and not down else -1 if down and not up else 0)
+    return claim_dir, (1 if total > 0 else -1 if total < 0 else 0)
+
+
+def _polarity_stems(sub_claim: SubClaim) -> set[str]:
+    """The words that say what the sub-claim is about: everything but the company name and the direction words."""
+    direction_stems = {_stem(w) for w in _UP.findall(sub_claim.text) + _DOWN.findall(sub_claim.text)}
+    return _stems(sub_claim.text, _alias_words(sub_claim.company_ticker)) - direction_stems
+
+
+# -- concepts ------------------------------------------------------------------------------------
+
+def _expected_concepts(sub_claim: SubClaim) -> set[str] | None:
+    """Metric concepts the sub-claim is about, or None when the wording does not say."""
+    text = sub_claim.text.lower()
+    if re.search(r"\bgross margin", text):
+        return {"gross_margin"}
+    if re.search(r"\boperating margin", text):
+        return {"operating_margin"}
+    if re.search(r"\b(net|profit) margin", text):
+        return {"net_margin"}
+    if re.search(r"\bmargin", text) or re.search(r"\bprofitab", text):
+        return {"gross_margin", "operating_margin", "net_margin"}
+    if re.search(r"\bfree cash flow|\bfcf\b", text):
+        return {"free_cash_flow", "fcf_margin"}
+    if re.search(r"\bcash flow|\bcash generation", text):
+        return {"operating_cash_flow", "free_cash_flow", "fcf_margin"}
+    if sub_claim.sub_claim_type.value in ("HISTORICAL_GROWTH", "NET_INCOME_GROWTH"):
+        if re.search(r"\beps\b|earnings per share", text):
+            return {"diluted_eps"}
+        if re.search(r"operating (income|profit)", text):
+            return {"operating_income"}
+        if re.search(r"net income|\bearnings\b|\bprofits?\b|bottom line", text):
+            return {"net_income"}
+        return {"revenue"}
+    return None
+
+
+def _concept(metric_name: str) -> str:
+    name = metric_name.lower()
+    changed = True
+    while changed:                       # "revenue_growth_yoy_qoq" -> "revenue"
+        changed = False
+        for suffix in ("_trend", "_qoq", "_yoy", "_growth"):
+            if name.endswith(suffix):
+                name, changed = name[: -len(suffix)], True
+    return name
+
+
+def _is_growth(metric_name: str) -> bool:
+    return "_growth" in metric_name.lower()
+
+
+def _is_margin(metric_name: str) -> bool:
+    return _concept(metric_name) in MARGINS
+
+
+@dataclass
+class _Defect:
+    evidence_id: str
+    reason: str
+    hint: str
+
+
+@dataclass
+class _Run:
+    defects: list[_Defect] = field(default_factory=list)
+    numeric_checks: list[NumericCheck] = field(default_factory=list)
+    citation_checks: list[CitationCheck] = field(default_factory=list)
+    numeric_ok: list[bool] = field(default_factory=list)   # stated-number comparisons that were possible
+
+    def add(self, item: EvidenceItem, reason: str, hint: str) -> None:
+        self.defects.append(_Defect(item.evidence_id, reason, hint))
+
+
+class AuditorAgent:
+    name = "auditor_agent"
+
+    def __init__(self, use_llm: bool | None = None) -> None:
+        # None: call the LLM only with a real provider (mock mode stays deterministic).
+        self._use_llm = use_llm
+
+    # -- entry point ----------------------------------------------------------------------------
+    def audit(self, sub_claim: SubClaim, evidence: list[EvidenceItem]) -> AuditResult:
+        used = [e for e in evidence if e.stance is not Stance.NEUTRAL]   # neutral items never carry a verdict
+        if not used:
+            return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
+                               verdict=Verdict.INSUFFICIENT_EVIDENCE)
+        run = _Run()
+        for item in used:
+            self._hygiene(sub_claim, item, run)
+            if item.computed_value is not None:
+                self._numeric(sub_claim, item, run)
+            else:
+                self._text(sub_claim, item, run)
+        numeric = next((c for c in run.numeric_checks if not c.matches), run.numeric_checks[0]
+                       if run.numeric_checks else None)
+        citation = next((c for c in run.citation_checks if not c.entails), run.citation_checks[0]
+                        if run.citation_checks else None)
+        if run.defects:
+            reasons = [f"{d.evidence_id}: {d.reason}" for d in run.defects]
+            feedback = " ".join(f"{d.evidence_id}: {d.hint}" for d in run.defects)
+            return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=False,
+                               verdict=Verdict.INSUFFICIENT_EVIDENCE, failure_reasons=reasons,
+                               numeric_check=numeric, citation_check=citation, feedback_for_retry=feedback)
+        return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
+                           verdict=self._verdict(sub_claim, used, run), numeric_check=numeric,
+                           citation_check=citation)
+
+    # -- verdict --------------------------------------------------------------------------------
+    @staticmethod
+    def _verdict(sub_claim: SubClaim, used: list[EvidenceItem], run: _Run) -> Verdict:
+        supporting = [e for e in used if e.stance is Stance.SUPPORTING]
+        challenging = [e for e in used if e.stance is Stance.CHALLENGING]
+        if run.numeric_ok and not any(run.numeric_ok):
+            return Verdict.CONTRADICTED                 # the stated number is not the computed number
+        if supporting and challenging:
+            return Verdict.PARTIALLY_SUPPORTED
+        if supporting:
+            computed = any(e.computed_value is not None and e.source_tier is SourceTier.TIER_1 for e in supporting)
+            if sub_claim.sub_claim_type.value in COMPUTED_TYPES and not computed:
+                return Verdict.PARTIALLY_SUPPORTED      # quoted from text, no calculation behind it
+            return Verdict.SUPPORTED
+        if challenging:
+            return Verdict.CONTRADICTED
+        return Verdict.INSUFFICIENT_EVIDENCE
+
+    # -- checks that apply to every item --------------------------------------------------------
+    def _hygiene(self, sub_claim: SubClaim, item: EvidenceItem, run: _Run) -> None:
+        if not item.url or not item.citation_span:
+            run.add(item, "no url or citation span, so the quote cannot be checked against its source",
+                    "give the source url and the exact citation span.")
+        aliases = {a.lower() for a in CORPUS_COMPANIES.get(sub_claim.company_ticker or "", [])}
+        if aliases:
+            company = item.company.lower()
+            if not any(a in company or company in a for a in aliases):
+                run.add(item, f"evidence is about {item.company}, not the company in the sub-claim",
+                        f"return evidence about {CORPUS_COMPANIES[sub_claim.company_ticker][0]} only.")
+        doc = item.doc_type.lower().replace(" ", "_")
+        expected = (SourceTier.TIER_1 if doc in TIER1_DOCS else SourceTier.TIER_2 if doc in TIER2_DOCS
+                    else SourceTier.TIER_3 if doc in TIER3_DOCS else None)
+        if expected is not None and item.source_tier is not expected:
+            run.add(item, f"{item.doc_type} is labelled {item.source_tier.value} but is {expected.value}",
+                    f"label {item.doc_type} evidence as {expected.value}.")
+        period_end = re.search(r"\d{4}-\d{2}-\d{2}", item.period or "")
+        on_quarter_end = (item.publication_date.month, item.publication_date.day) in {(3, 31), (6, 30), (9, 30),
+                                                                                       (12, 31)}
+        if doc in ("10-k", "10-q") and (on_quarter_end or (
+                period_end and item.publication_date.isoformat() <= period_end.group(0))):
+            run.add(item, f"publication date {item.publication_date} looks like the period end, not the filing date",
+                    "use the date the filing was published (filed), not the period end.")
+        claim_dir, text_dir = _polarity(sub_claim.text, item.content, _polarity_stems(sub_claim))
+        if claim_dir and text_dir and item.stance is Stance.SUPPORTING and claim_dir != text_dir:
+            run.add(item, "labelled SUPPORTING but the text says the opposite of the sub-claim",
+                    "check the stance: this text goes against the sub-claim direction.")
+
+    # -- numbers --------------------------------------------------------------------------------
+    def _numeric(self, sub_claim: SubClaim, item: EvidenceItem, run: _Run) -> None:
+        metric, value = item.metric_name or "", float(item.computed_value)
+        concept = _concept(metric)
+        expected = _expected_concepts(sub_claim)
+        if metric and expected is not None and concept not in expected:
+            run.add(item, f"metric {metric} does not measure what the sub-claim is about",
+                    f"return {' or '.join(sorted(expected))} for the whole company, not {concept}.")
+        if metric and (_QOQ.search(metric.replace("_", " ")) or _QOQ.search(item.content)) \
+                and not _QOQ_CLAIM.search(sub_claim.text):
+            run.add(item, "quarter-on-quarter figure used where the sub-claim compares with a year earlier",
+                    "compare with the same period one year earlier (year on year).")
+        percents = _pcts(item.content)
+        if (_is_growth(metric) or _is_margin(metric)) and not metric.endswith("_trend") and percents:
+            self._internal_consistency(item, metric, value, percents, run)
+        direction = _direction(sub_claim.text)
+        if _is_growth(metric) and item.stance is Stance.SUPPORTING and (
+                (direction == "up" and value < 0) or (direction == "down" and value > 0)):
+            run.add(item, f"labelled SUPPORTING but the computed value {value:+.3f} goes against the sub-claim",
+                    "check the stance against the sign of the computed growth.")
+        if _is_margin(metric) and len(percents) >= 2 and item.stance is Stance.SUPPORTING:
+            change = percents[0].value - percents[1].value
+            if (direction == "up" and change < 0) or (direction == "down" and change > 0):
+                run.add(item, "labelled SUPPORTING but the margin moved against the sub-claim",
+                        "check the stance against the margin change.")
+        self._stated_number(sub_claim, item, metric, value, percents, run)
+
+    @staticmethod
+    def _internal_consistency(item: EvidenceItem, metric: str, value: float, percents: list[_Pct],
+                              run: _Run) -> None:
+        if _is_growth(metric):
+            signed = [p for p in percents if p.signed]
+            headline = signed[-1] if signed else percents[0]
+        else:
+            headline = percents[0]
+        shown = (-headline.value if headline.negative else headline.value) / 100
+        if not headline.signed:
+            shown, check = abs(shown), abs(value)
+        else:
+            check = value
+        tolerance = 0.5 * 10 ** (-headline.decimals) / 100 + 1e-4
+        if abs(check - shown) > tolerance:
+            scale = abs(value / shown) if shown else 0
+            if 90 <= scale <= 110:
+                reason = (f"computed_value {value} is a percent; the contract expects a fraction "
+                          f"(the text says {headline.value:g}%)")
+                hint = "report growth rates and margins as fractions (0.14 for 14%), not percents."
+            else:
+                reason = f"computed_value {value:.4f} does not match the {headline.value:g}% stated in the text"
+                hint = "recompute the figure from the filing values and make the text match."
+            run.add(item, reason, hint)
+            run.numeric_checks.append(NumericCheck(metric_name=metric, stated=shown, computed=value, matches=False))
+            return
+        if _is_growth(metric) and re.search(r"\bvs\.?\b|versus|compared with", item.content, re.I):
+            amounts = _money(item.content)
+            if len(amounts) >= 2 and amounts[1]:
+                growth = amounts[0] / amounts[1] - 1
+                if abs(growth - value) > MATCH_BAND:
+                    run.add(item, f"the two amounts in the text give {growth:+.1%}, not the computed {value:+.1%}",
+                            "recompute the growth from the two reported amounts.")
+                    run.numeric_checks.append(
+                        NumericCheck(metric_name=metric, stated=growth, computed=value, matches=False))
+                    return
+        run.numeric_checks.append(NumericCheck(metric_name=metric, stated=None, computed=value, matches=True))
+
+    @staticmethod
+    def _stated_number(sub_claim: SubClaim, item: EvidenceItem, metric: str, value: float,
+                       percents: list[_Pct], run: _Run) -> None:
+        """Compare the number the sub-claim states with the computed record."""
+        direction = _direction(sub_claim.text)
+        stated_pcts = _pcts(sub_claim.text)
+        matches: list[bool] = []
+        stated_frac = None
+        if stated_pcts and (_is_growth(metric) or _is_margin(metric)):
+            first = stated_pcts[0]
+            stated_frac = first.value / 100
+            if _is_growth(metric):
+                signed = -stated_frac if (first.negative or (direction == "down" and not first.signed)) \
+                    else stated_frac
+                matches.append(abs(signed - value) <= MATCH_BAND + 1e-9)
+            else:
+                candidates = [value]                       # "margin is 52%"
+                if len(percents) >= 2:                     # "margin fell 2.2 points" / "fell 4%"
+                    cur, prev = percents[0].value / 100, percents[1].value / 100
+                    candidates += [abs(cur - prev)]
+                    candidates += [abs((cur - prev) / prev)] if prev else []
+                matches.append(any(abs(stated_frac - c) <= MATCH_BAND + 1e-9 for c in candidates))
+        stated_money = _money(sub_claim.text)
+        content_money = _money(item.content)
+        if len(stated_money) == 1 and content_money:
+            matches.append(abs(stated_money[0] - content_money[0]) <= MONEY_REL_TOL * abs(content_money[0]))
+        if not matches:
+            return
+        ok = all(matches)
+        run.numeric_ok.append(ok)
+        run.numeric_checks.append(NumericCheck(metric_name=metric, stated=stated_frac, computed=value, matches=ok))
+
+    # -- narrative ------------------------------------------------------------------------------
+    def _text(self, sub_claim: SubClaim, item: EvidenceItem, run: _Run) -> None:
+        if item.stance is not Stance.SUPPORTING:
+            return                                          # counter-evidence is not required to entail the claim
+        ok, reason = self._entails(sub_claim, item)
+        run.citation_checks.append(CitationCheck(evidence_id=item.evidence_id, entails=ok))
+        if not ok:
+            run.add(item, f"the cited text does not support the sub-claim ({reason})",
+                    "return a passage that states the sub-claim itself, with an exact citation span.")
+
+    def _entails(self, sub_claim: SubClaim, item: EvidenceItem) -> tuple[bool, str]:
+        text, passage = sub_claim.text, item.content
+        key = _stems(text, _alias_words(sub_claim.company_ticker))
+        distinctive = key - GENERIC_STEMS
+        for cue in _NEGATED_ATTRIBUTION.finditer(passage):
+            if _stems(passage[cue.end(): cue.end() + 60]) & distinctive:
+                return False, "it says the opposite: the claimed driver is ruled out"
+        if sub_claim.sub_claim_type.value not in HEDGE_OK_TYPES and _HEDGE.search(passage):
+            return False, "hedged wording is not proof"
+        # every percent and dollar amount the sub-claim states must appear in the passage (as written)
+        stated_pct = {p.value for p in _pcts(_PERIOD_NOISE.sub(" ", text))}
+        stated_usd = {float(m.group(2).replace(",", "")) for m in _MONEY_RE.finditer(text)}
+        shown_pct = {p.value for p in _pcts(passage)}
+        shown_usd = {float(m.group(2).replace(",", "")) for m in _MONEY_RE.finditer(passage)}
+        if (stated_pct - shown_pct) or (stated_usd - shown_usd):
+            return False, "the number in the sub-claim is not in the passage"
+        coverage = len(key & _stems(passage)) / len(key) if key else 1.0
+        if coverage < MIN_COVERAGE:
+            return False, f"only {coverage:.0%} of the sub-claim's key words appear"
+        if self._llm_enabled():
+            verdict = self._ask_llm(text, passage)
+            if verdict is not None and verdict != "ENTAILS":
+                return False, f"the model judged the passage {verdict.lower()}"
+        return True, ""
+
+    def _llm_enabled(self) -> bool:
+        if self._use_llm is not None:
+            return self._use_llm
+        return get_settings().llm_provider != "mock"
+
+    @staticmethod
+    def _ask_llm(sub_claim_text: str, passage: str) -> str | None:
+        resp = complete(
+            system=DATA_SAFETY_PREAMBLE + "You check whether a quoted passage states, or directly supports, a "
+                   "sub-claim. Answer with exactly one word: ENTAILS, NEUTRAL or CONTRADICTS.",
+            prompt=data_block("sub_claim", sub_claim_text) + "\n" + data_block("passage", passage),
+            max_tokens=200,
+        )
+        match = re.search(r"\b(ENTAILS|NEUTRAL|CONTRADICTS)\b", resp.text.upper())
+        return match.group(1) if match else None
