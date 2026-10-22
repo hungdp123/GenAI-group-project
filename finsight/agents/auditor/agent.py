@@ -31,7 +31,8 @@ WHAT THE SUB-CLAIM STATES (read from its wording; the contract has no comparator
 "less than 10% growth") is compared as a bound, not as a target; "turned negative" is decided by the sign of the
 computed figure; "doubled" means 1 + growth in 1.9-2.1 (team rule); a stated dollar amount matches after rounding to
 the precision it is stated in ("$110 billion" -> +-$0.5bn); a direction needs the current and prior figure in the
-evidence text (percents, dollar amounts, or a plain pair such as "2.60 vs 2.98").
+evidence: `comparison_value` (the prior-year figure of a level metric) when present, else the evidence text
+(percents, dollar amounts, or a plain pair such as "2.60 vs 2.98").
 
 Entailment ("does the cited passage support the sub-claim?") is rule-based in mock mode so the tests are
 deterministic. With a real LLM provider, `complete()` is asked as well; it can only downgrade a SUPPORTING
@@ -352,9 +353,14 @@ class AuditorAgent:
                                verdict=Verdict.INSUFFICIENT_EVIDENCE)
         run = _Run()
         stances: list[Stance] = []
+        has_main = any(not (i.metric_name or "").endswith("_context") for i in evidence)
         unusable: list[tuple[EvidenceItem, str]] = []
         for item in evidence:                       # 1. judge the stance (the collector's own label is ignored)
             numeric = item.computed_value is not None
+            if (item.metric_name or "").endswith("_context") and has_main:   # information only: it never moves the label
+                stances.append(Stance.NEUTRAL)
+                unusable.append((item, "context only (team ruling, 18 Oct): it does not change the label"))
+                continue
             stance, why = self._numeric_stance(sub_claim, item) if numeric else self._text_stance(sub_claim, item)
             if stance is Stance.NEUTRAL and item.stance is Stance.CHALLENGING:
                 stance, why = Stance.CHALLENGING, ""    # collector flagged counter-evidence we cannot confirm: keep it
@@ -545,6 +551,9 @@ class AuditorAgent:
         """Change over the comparison period: the growth rate, or current minus prior from the item's own text."""
         if _is_growth(metric) and not metric.endswith("_trend"):
             return value
+        prior = getattr(item, "comparison_value", None)      # level metric: the same figure a year earlier (schema 0.7)
+        if prior is not None and not metric.endswith("_trend"):
+            return value - float(prior)
         percents = _pcts(item.content)
         if _is_margin(metric) and len(percents) >= 2:
             return percents[0].value - percents[1].value

@@ -97,7 +97,7 @@ From the **Narrative agent**: counter-evidence as well as supporting passages (r
 
 ## Known limits
 
-- **Direction basis is read from text.** There are no `comparison_value` / `comparison_period` fields in `EvidenceItem`, so a direction claim whose evidence text lacks the prior figure fails and retries. A structured basis would be more robust (needs a contract change by Hung).
+- **Direction basis.** For level metrics the Auditor uses `comparison_value` (contract 0.7, the prior-year figure) when present, and otherwise reads the current and prior figures from the evidence text. With neither, the item is sent back once. Growth items use the growth rate itself.
 - **Sign is not matched across wording.** "A $200m loss" in the evidence against "net income of $200m" in the claim is not caught.
 - **Leverage metrics:** metric names are not validated until the Financial agent defines them.
 - **Segment figures** (AWS, Azure) go through the text path only: the stated number must appear in the passage.

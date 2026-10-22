@@ -383,3 +383,24 @@ def test_ratio_direction_ignores_the_dates_in_the_financial_agents_wording():
     content = "Current ratio was 2.60x as at 2026-06-30 vs 2.98x a year earlier (as at 2025-06-30)."
     assert _verdict("Meta's current ratio fell", "current_ratio", 2.60, content, PCF).verdict is Verdict.SUPPORTED
     assert _verdict("Meta's current ratio rose", "current_ratio", 2.60, content, PCF).verdict is Verdict.CONTRADICTED
+
+
+def test_context_only_item_never_changes_the_label():
+    sc, [main] = _fin("META", "Meta", "Meta's revenue grew 33%", "revenue_growth_yoy", 0.331,
+                      "Revenue was $56.31bn in the quarter ended 2026-03-31 vs $42.31bn a year earlier: +33.1% year on year.",
+                      "quarter ended 2026-03-31", date(2026, 4, 30))
+    ctx = main.model_copy(update={"evidence_id": "ctx", "metric_name": "revenue_ttm_growth_yoy_context", "computed_value": -0.05,
+                                  "content": "Context only. Revenue was $200bn in the last 12 months vs $210bn: -4.8% year on year."})
+    r = audit(sc, [main, ctx])
+    assert r.passed and r.verdict is Verdict.SUPPORTED and r.evidence_stances["ctx"] is Stance.NEUTRAL
+
+
+@pytest.mark.skipif("comparison_value" not in EvidenceItem.model_fields, reason="needs contract 0.7")
+def test_level_direction_uses_comparison_value_when_the_text_has_no_prior_figure():
+    sc, [item] = _fin("META", "Meta", "Meta's free cash flow went down last quarter", "free_cash_flow", 1.7e9,
+                      "Free cash flow was $1.70bn in the quarter ended 2026-06-30.", "quarter ended 2026-06-30", FILED,
+                      kind=PCF)
+    down = item.model_copy(update={"comparison_value": 9.0e9, "comparison_period": "quarter ended 2025-06-30"})
+    assert audit(sc, [down]).verdict is Verdict.SUPPORTED
+    up = item.model_copy(update={"comparison_value": 0.5e9, "comparison_period": "quarter ended 2025-06-30"})
+    assert audit(sc, [up]).verdict is Verdict.CONTRADICTED
