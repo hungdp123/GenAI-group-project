@@ -1,5 +1,5 @@
-""" 
-Reports which concepts and metrics are available per company + where the concept mapping needs additions.  
+"""
+Reports which concepts and metrics are available per company + where the concept mapping needs additions.
 Prints two grids (latest quarter, latest annual) and writes <data>/processed/coverage.csv.
 Codes:  R reported   D derived from year-to-date figures   F fallback formula   - missing
 """

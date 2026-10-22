@@ -123,10 +123,14 @@ def validate(experiment: Path, queries_path: Path) -> dict:
         "companies": checks,
         "limitations": [
             "Checks saved ranked passage identity, metadata, date scope, citation metadata and source-map identity.",
-            "Does not rerun retrieval, judge relevance or entailment, inspect original PDF accuracy, "
-            "or validate generated answers.",
-            "Recorded character spans are checked for shape and source identity; "
-            "source-text OCR and extraction accuracy is outside this audit.",
+            (
+                "Does not rerun retrieval, judge relevance/entailment, inspect original PDF "
+                "accuracy, or validate generated answers."
+            ),
+            (
+                "Recorded character spans are checked for shape and source identity; "
+                "source-text OCR/extraction accuracy is outside this audit."
+            ),
         ],
     }
 

@@ -3,6 +3,35 @@
 # Switch with `finsight mode mock` / `finsight mode paid [--model gpt-5.4]`.
 llm_provider: mock
 # llm_model: gpt-5.4-nano       # paid testing default; use gpt-5.4 for final reported runs
-openai_api_key: "sk-..."
+openai_api_key: "YOUR_OPENAI_API_KEY"
 # OPENAI_API_KEY takes precedence over this file if both are set.
 # anthropic_api_key: "sk-ant-..."
+
+# Narrative orchestrator: LLM evidence preparation, without stance or verdict.
+# Commands below are PowerShell ENVIRONMENT settings, not YAML fields.
+# Requires company indexes and a real model/key (private config.yaml) or Ollama.
+# Copy commands without the leading '# '. Detailed schema: Week 2 summary Section 10.
+#
+# $env:FINSIGHT_CORPUS_PROFILE = "canonical"
+# $env:FINSIGHT_IMPL_NARRATIVE = "finsight.agents.narrative.stub:NarrativeAgent"
+# $env:FINSIGHT_IMPL_RETRIEVER = "finsight.agents.narrative.retriever_stub:NarrativeRetriever"
+# $env:FINSIGHT_NARRATIVE_BACKEND = "bm25"
+# $env:FINSIGHT_NARRATIVE_ANALYSIS = "evidence"
+# $env:FINSIGHT_NARRATIVE_ANALYSIS_MAX_TOKENS = "1500"
+# $env:FINSIGHT_NARRATIVE_STANCE_METHOD = "none"
+# $env:FINSIGHT_NARRATIVE_TOP_K = "3"
+# $env:FINSIGHT_LLM_PROVIDER = "openai"
+# $env:FINSIGHT_LLM_MODEL = "gpt-5.4"
+#
+# python -m finsight.agents.narrative.rag.basic_rag --ticker META --claim "META's performance is driven by strong demand" --cutoff 2025-07-31 --backend bm25 --top-k 3 --max-tokens 1500
+#
+# The LLM selects relevant IDs, extracts exact-source facts and writes a cited
+# evidence summary. It does not assign stance or decide a claim verdict.
+# BM25/dense/hybrid search remains separate from the LLM processing step.
+# Orchestrator local alternative: FINSIGHT_NARRATIVE_OLLAMA_MODEL=qwen3-vl:4b-instruct
+# and optional FINSIGHT_NARRATIVE_OLLAMA_CONTEXT=20000. Other agents' shared LLM
+# provider settings are independent of this Narrative-local model override.
+# Explicit opt-out: FINSIGHT_NARRATIVE_ANALYSIS=retrieval for the registry,
+# or --retrieval-only for the basic_rag / collect_evidence commands.
+# Internal EvidenceItem.stance remains an unassessed NEUTRAL contract placeholder;
+# the auditor/policy handoff still needs updating before verdicts are meaningful.

@@ -3,6 +3,8 @@
 import json
 from datetime import date
 
+import pytest
+
 from finsight.agents.narrative.rag.collect_evidence import NarrativeEvidenceAgent, SEARCH_RECORD_VERSION
 from finsight.contracts.schemas import EvidenceItem, SourceTier, Stance, SubClaim, SubClaimType
 
@@ -41,7 +43,7 @@ def test_both_searches_are_appended(tmp_path, monkeypatch):
         return [_item("support-hit", claim_text)]
 
     agent = NarrativeEvidenceAgent(
-        corpus_root=tmp_path, backend="bm25", stance_method="exact",
+        corpus_root=tmp_path, backend="bm25", stance_method="none",
         retriever_factory=lambda ticker: type("R", (), {"retrieve": staticmethod(retrieve)})(),
     )
     claim = SubClaim(
@@ -50,7 +52,7 @@ def test_both_searches_are_appended(tmp_path, monkeypatch):
     )
     found = agent.gather(claim, date(2025, 7, 31))
     assert [item.evidence_id for item in found] == ["support-hit", "counter-hit"]
-    assert found[0].stance is Stance.SUPPORTING
+    assert found[0].stance is Stance.NEUTRAL  # Shared-contract placeholder, not assessed.
     assert found[1].stance is Stance.NEUTRAL
 
     record = json.loads(log_path.read_text(encoding="utf-8"))
@@ -60,6 +62,29 @@ def test_both_searches_are_appended(tmp_path, monkeypatch):
     assert "reported results drivers evidence" in record["support_query"]
     assert "contrary evidence" in record["counter_query"]
     assert record["support"][0]["chunk_id"] == "support-hit"
-    assert record["support"][0]["stance"] == "SUPPORTING"
+    assert record["assessment_status"] == "NOT_ASSESSED"
+    assert record["stance_method"] == "none"
+    assert record["support"][0]["assessment_status"] == "NOT_ASSESSED"
+    assert "stance" not in record["support"][0]
     assert record["counter"][0]["chunk_id"] == "counter-hit"
     assert record["counter"][0]["rank"] == 1
+
+
+@pytest.mark.parametrize("empty_index", [False, True])
+def test_empty_search_records_queries_without_undefined_variables(tmp_path, monkeypatch, empty_index):
+    log_path = tmp_path / "search.jsonl"
+    monkeypatch.setenv("FINSIGHT_NARRATIVE_SEARCH_LOG", str(log_path))
+    if empty_index:
+        index = tmp_path / "NVDA" / "indexes" / "index.json"
+        index.parent.mkdir(parents=True)
+        index.write_text(json.dumps({"schema_version": "1.0", "chunks": []}), encoding="utf-8")
+    agent = NarrativeEvidenceAgent(corpus_root=tmp_path, backend="bm25", stance_method="none")
+    claim = SubClaim(sub_claim_id="sc1", text="NVIDIA revenue grew.", company_ticker="NVDA",
+                     sub_claim_type=SubClaimType.HISTORICAL_GROWTH)
+    assert agent.gather(claim, date(2025, 7, 31)) == []
+    record = json.loads(log_path.read_text(encoding="utf-8"))
+    assert record["reason"] == ("no_eligible_passages" if empty_index else "no_index")
+    assert "reported results drivers evidence" in record["support_query"]
+    assert "contrary evidence" in record["counter_query"]
+    assert record["support"] == record["counter"] == []
+    assert record["stance_method"] == "none"

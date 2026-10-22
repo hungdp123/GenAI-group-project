@@ -2,10 +2,10 @@
 
 Input (one claim per sub-claim; see README section 1):
   sub_claim.sub_claim_id, sub_claim.company_ticker, sub_claim.text   one claim: one company, one measure, with the
-                                                                     period and stated figure if the influencer gave them
+                                                                   period and stated figure if the influencer gave them
   cutoff_date                                                        resolved by the orchestrator; None = latest data
   feedback                                                           the Auditor's reason on the retry, else None
-  (optional) sub_claim.user_prompt                                   only needed when `text` is not narrowed to one claim
+  (optional) sub_claim.user_prompt                                 only needed when `text` is not narrowed to one claim
 
 How it works (an LLM understands the claim, Python computes, code enforces the rules):
   1. Understand: the model (team LLM client) reads the claim and decides what it needs. Its first action is
@@ -66,11 +66,11 @@ from finsight.llm.usage import record_tool_call
 
 from . import planner
 from .claim_reader import (GROWTH_MEASURES, LEVEL_MEASURES, LEVERAGE, SEGMENT_NOTE, Point, Reading,
-                           minimum_percent, named_period, read_claim)
+                           minimum_percent, read_claim)
 from .concepts import CONCEPTS, TAG_TO_CONCEPT, kind, unit
 from .schema import FinancialEvidence
 from .store import DEFAULT_DATA_DIR, FactStore, _iso, _read_csv
-from .tools import (_ANCHORS, _near, _period_ends, compute_growth, compute_metric, compute_trend, compute_ttm,
+from .tools import (_ANCHORS, _near, _period_ends, compute_growth, compute_metric, compute_ttm,
                     compute_ttm_growth, get_financial_fact, prior_year_end)
 
 try:   # the report shows the spoken company name ("Alphabet"), from Claim extraction's thesaurus

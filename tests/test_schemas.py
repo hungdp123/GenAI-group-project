@@ -27,9 +27,16 @@ def test_extra_fields_forbidden():
 
 def test_evidence_roundtrip():
     item = EvidenceItem(
-        evidence_id="e1", sub_claim_id="sc1", stance=Stance.SUPPORTING, content="Revenue +14%",
-        source_tier=SourceTier.TIER_1, doc_type="10-Q", company="CMPX",
-        publication_date=date(2025, 7, 25), produced_by="financial", computed_value=0.14,
+        evidence_id="e1",
+        sub_claim_id="sc1",
+        stance=Stance.SUPPORTING,
+        content="Revenue +14%",
+        source_tier=SourceTier.TIER_1,
+        doc_type="10-Q",
+        company="CMPX",
+        publication_date=date(2025, 7, 25),
+        produced_by="financial",
+        computed_value=0.14,
     )
     assert EvidenceItem.model_validate_json(item.model_dump_json()) == item
 

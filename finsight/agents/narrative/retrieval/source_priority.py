@@ -43,8 +43,8 @@ def assign_priority(chunk: dict, aliases: list[dict], config: dict) -> dict:
 def period_anchors(query: str) -> list[str]:
     """Use only the actual query; never inspect labels or required gold context."""
     pattern = (
-        r"\b(?:20\d{2}|19\d{2}|q[1-4]|january|february|march|april|may|june|july|august|"
-        r"september|october|november|december)\b"
+        r"\b(?:20\d{2}|19\d{2}|q[1-4]|january|february|march|april|may|june|july|"
+        r"august|september|october|november|december)\b"
     )
     return sorted(set(re.findall(pattern, query.lower())))
 
@@ -63,10 +63,8 @@ def sufficiency_diagnostic(query: str, candidates: list[dict]) -> dict:
     return {
         "status": "UNKNOWN",
         "expand_medium": True,
-        "reason": (
-            "No validated semantic sufficiency checker; "
-            "keyword or context presence cannot establish evidence sufficiency"
-        ),
+        "reason": "No validated semantic sufficiency checker; keyword/context presence cannot "
+        "establish evidence sufficiency",
         "candidate_count": len(candidates),
         "query_period_anchors": period_anchors(query),
         "period_tokens_present": all(y in text for y in years) if years else None,

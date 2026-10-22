@@ -143,10 +143,8 @@ def main() -> None:
     parser.add_argument(
         "--all-documents",
         action="store_true",
-        help=(
-            "Process all eligible NVDA records into the canonical processed/NVDA corpus; "
-            "the default pilot writes to experiments/NVDA_pilot."
-        ),
+        help="Process all eligible NVDA records into the canonical processed/NVDA "
+        "corpus; the default pilot writes to experiments/NVDA_pilot.",
     )
     args = parser.parse_args()
     workspace = args.workspace.resolve()

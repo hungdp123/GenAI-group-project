@@ -540,15 +540,8 @@ def extract_positioned_table(document: dict[str, Any], candidate: ChartCandidate
         bbox = _bbox_from_provenance(prov)
         if _intersection_ratio(bbox, candidate.bbox, height) < 0.45:
             continue
-        left, top, right, bottom = _normalized_edges(bbox, height)
-        spans.append((
-            str(item.get("text", "")).strip(),
-            (left + right) / 2,
-            (top + bottom) / 2,
-            left,
-            right,
-            bottom - top,
-        ))
+        left_edge, t, r, b = _normalized_edges(bbox, height)
+        spans.append((str(item.get("text", "")).strip(), (left_edge + r) / 2, (t + b) / 2, left_edge, r, b - t))
     number = re.compile(r"(?:\(?[+\-]?\d[\d,]*(?:\.\d+)?%?\)?|[-\u2013\u2014])")
     cells = [s for s in spans if number.fullmatch(s[0])]
     if len(cells) < 40:
@@ -644,8 +637,8 @@ def extract_positioned_grouped_percent_chart(
         bbox = _bbox_from_provenance(prov)
         if _intersection_ratio(bbox, candidate.bbox, height) < 0.8:
             continue
-        left, top, right, _bottom = _normalized_edges(bbox, height)
-        spans.append((str(item.get("text", "")).strip(), (left + right) / 2, (top + _bottom) / 2, left, right))
+        left_edge, t, r, b = _normalized_edges(bbox, height)
+        spans.append((str(item.get("text", "")).strip(), (left_edge + r) / 2, (t + b) / 2, left_edge, r))
     period_re = re.compile(r"Q[1-4]['\u2019]\d{2,4}")
     legends = [s for s in spans if len(period_re.findall(s[0])) >= 2 and not period_re.sub("", s[0]).strip()]
     # Separate panels need their own complete legends; single-panel or stacked

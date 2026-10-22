@@ -1,6 +1,12 @@
-"""Old command. The tool lives in corpus.maintenance."""
+"""Compatibility entry point for corpus.maintenance.generate_catalog."""
+from finsight.agents.narrative.corpus.maintenance import generate_catalog as _implementation
 
-from finsight.agents.narrative.corpus.maintenance.generate_catalog import main
+main = _implementation.main
+
+
+def __getattr__(name: str):
+    return getattr(_implementation, name)
+
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

@@ -1,6 +1,6 @@
-""" Concepts based on us-gaap tags 
+""" Concepts based on us-gaap tags
 
-Only concepts whose tags have one clear, consistent meaning across companies are listed. 
+Only concepts whose tags have one clear, consistent meaning across companies are listed.
 
 Each entry: (kind, tags, unit, additive)
   kind      "duration" (with start and end) or "instant" (as of; with end only)
