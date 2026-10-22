@@ -94,7 +94,7 @@ _GROWTH_MEASURE = re.compile(
 _DIRECTION = re.compile(
     r"\b(grew|growth|rose|risen|doubled|fell|fallen|decline|declined|declining|"
     r"expanded|expanding|improved|improving|strong|weak|solid|healthy|higher|lower)\b"
-    r"|\b(up|down)\b|shot up|year[- ]over[- ]year",
+    r"|\b(up|down)\b|shot up|year[- ]over[- ]year|all[- ]time highs?",
     flags=re.IGNORECASE,
 )
 _OPERATING_INCOME = re.compile(r"\boperating (income|profits?)\b", flags=re.IGNORECASE)
@@ -126,7 +126,11 @@ def claims_path(posts_dir: Path) -> Path:
 
 def claims_catalog_path(posts_dir: Path) -> Path:
     """The field catalog when it has been built, otherwise the original claim list."""
-    updated = posts_dir.parent / "claims" / "claims_updated.jsonl"
+    claims_dir = posts_dir.parent / "claims"
+    versioned = claims_dir / "claim_update_v3.json"
+    if versioned.exists():
+        return versioned
+    updated = claims_dir / "claims_updated.jsonl"
     if updated.exists():
         return updated
     return claims_path(posts_dir)
@@ -214,7 +218,168 @@ def build_claims(posts_dir: Path, out_path: Path | None = None) -> dict:
     return {"path": str(destination), "counts": counts, "rows": rows}
 
 
+_PRICE_TALK = re.compile(
+    r"\b(share price|stock price|price target|p\s*/\s*e\b|peg\b|"
+    r"price\s*[- ]\s*to\s*[- ]\s*(?:earnings|sales))\b",
+    flags=re.IGNORECASE,
+)
+_FORECAST_LINE = re.compile(r"\b(forecasts?|will report|forward estimates?)\b", flags=re.IGNORECASE)
+_VERSUS = re.compile(r"\b(versus|vs\.?|compared with|compared to)\b", flags=re.IGNORECASE)
+_CLAIM_SPLIT = re.compile(r",\s+|;\s+|\band\b|\bwith\b|\bgiving them\b", flags=re.IGNORECASE)
+_LEAD_IN = re.compile(r"^(?:and|but)\s+", flags=re.IGNORECASE)
+# Longer phrases first, so "operating margin" is not also counted as "margin" or "profit".
+_PIECE_MEASURES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("fcf_margin", re.compile(r"\b(?:free cash flow|fcf) margins?\b", flags=re.IGNORECASE)),
+    ("operating_margin", re.compile(r"\boperating margins?\b", flags=re.IGNORECASE)),
+    ("gross_margin", re.compile(r"\bgross margins?\b", flags=re.IGNORECASE)),
+    ("net_margin", re.compile(r"\b(?:net|profit) margins?\b", flags=re.IGNORECASE)),
+    ("cash_ratio", re.compile(r"\bcash ratio\b", flags=re.IGNORECASE)),
+    ("current_ratio", re.compile(r"\bcurrent ratio\b", flags=re.IGNORECASE)),
+    ("operating_cash_flow", re.compile(r"\b(?:operating cash flow|cash from operations)\b", flags=re.IGNORECASE)),
+    ("free_cash_flow", re.compile(r"\bfree cash flow\b|\bfcf\b", flags=re.IGNORECASE)),
+    ("operating_income", re.compile(r"\boperating (?:income|profits?)\b|\bebit\b", flags=re.IGNORECASE)),
+    ("eps", re.compile(r"\bearnings per share\b|\beps\b", flags=re.IGNORECASE)),
+    ("gross_profit", re.compile(r"\bgross profits?\b", flags=re.IGNORECASE)),
+    ("net_income", re.compile(r"\bnet income\b|\bnet profits?\b", flags=re.IGNORECASE)),
+    ("revenue", re.compile(r"\b(?:revenues?|sales|top[- ]line)\b", flags=re.IGNORECASE)),
+    ("profit", re.compile(r"\b(?:profits?|earnings|bottom line)\b", flags=re.IGNORECASE)),
+    ("margin", re.compile(r"\bmargins?\b", flags=re.IGNORECASE)),
+)
+_MEASURE_KIND = {
+    "revenue": ("HISTORICAL_GROWTH", "revenue"),
+    "operating_income": ("HISTORICAL_GROWTH", "operating_income"),
+    "eps": ("HISTORICAL_GROWTH", "diluted_eps"),
+    "net_income": ("NET_INCOME_GROWTH", "net_income"),
+    "profit": ("NET_INCOME_GROWTH", "net_income"),
+    "operating_margin": ("PROFITABILITY", "operating_margin"),
+    "gross_margin": ("PROFITABILITY", "gross_margin"),
+    "net_margin": ("PROFITABILITY", "net_margin"),
+    "margin": ("PROFITABILITY", None),
+    "fcf_margin": ("CASH_GENERATION", "fcf_margin"),
+    "free_cash_flow": ("CASH_GENERATION", "free_cash_flow"),
+    "operating_cash_flow": ("CASH_GENERATION", "operating_cash_flow"),
+    "gross_profit": ("OTHER", "gross_profit"),
+    "cash_ratio": ("LIQUIDITY", "cash_ratio"),
+    "current_ratio": ("LIQUIDITY", "current_ratio"),
+}
+_SPECIFIC_MARGIN = frozenset({"operating_margin", "gross_margin", "net_margin", "fcf_margin"})
+_SPECIFIC_PROFIT = frozenset({"operating_income", "eps", "net_income"})
+
+
+def _piece_measure(clause: str) -> str | None:
+    for name, pattern in _PIECE_MEASURES:
+        if pattern.search(clause):
+            return name
+    return None
+
+
+def _keep_whole(text: str) -> bool:
+    """A forecast, a comparison, a price remark, or a segment line stays one claim."""
+    blocked = (
+        _FORWARD.search(text) or _FORECAST_LINE.search(text) or _PRICE_TALK.search(text)
+        or _SEGMENT.search(text) or _VERSUS.search(text)
+    )
+    if blocked:
+        return True
+    named = [ticker for ticker, _surface, _start in find_mentions(text) if ticker != "CMPX"]
+    return len(dict.fromkeys(named)) >= 2
+
+
+def _collapse_measure(measure: str, chosen: list[str]) -> str | None:
+    if measure == "margin" and _SPECIFIC_MARGIN.intersection(chosen):
+        return None
+    if measure == "profit" and _SPECIFIC_PROFIT.intersection(chosen):
+        return None
+    return measure
+
+
+def _kind_for_piece(measure: str, quote: str) -> Kind:
+    if _no_financial_formula(quote) and measure in {"eps", "net_income", "profit", "gross_profit"}:
+        return Kind("OTHER", measure=measure)
+    if measure == "operating_cash_flow" and _ocf_growth(quote):
+        return Kind("HISTORICAL_GROWTH", measure="operating_cash_flow")
+    claim_type, stored_measure = _MEASURE_KIND[measure]
+    return Kind(claim_type, measure=stored_measure)
+
+
+def split_financial_measures(text: str) -> list[tuple[str, Kind]]:
+    """One claim per stated result. A trailing figure with no new measure stays on the previous piece.
+
+    Returns an empty list when the sentence should stay whole: one measure, a forecast,
+    a comparison, a share-price remark, or a segment line.
+    """
+    if not text or _keep_whole(text):
+        return []
+    groups: list[tuple[str, list[str]]] = []
+    for raw in _CLAIM_SPLIT.split(text):
+        part = _LEAD_IN.sub("", raw).strip(" ,.;")
+        if not part:
+            continue
+        measure = _piece_measure(part)
+        if measure is None or not _moving(part):
+            if groups:
+                groups[-1][1].append(part)
+            continue
+        measure = _collapse_measure(measure, [name for name, _parts in groups])
+        if measure is None:
+            groups[-1][1].append(part)
+            continue
+        if groups and groups[-1][0] == measure:
+            groups[-1][1].append(part)
+            continue
+        groups.append((measure, [part]))
+    if len({name for name, _parts in groups}) < 2:
+        return []
+    return [(", ".join(parts), _kind_for_piece(name, ", ".join(parts))) for name, parts in groups]
+
+
+def expand_stored_row(row: dict) -> list[dict]:
+    """Replace one stored sentence with one row per measure. An unsplit row is returned unchanged."""
+    if row.get("expansion_rule") or str(row.get("sub_claim_type") or "") in _LEAVE_TYPE:
+        return [row]
+    text = str(row.get("text") or row.get("source_span") or "")
+    pieces = split_financial_measures(text)
+    if len(pieces) < 2:
+        return [row]
+    from finsight.agents.claim_extraction.fields import company_source, parse_fields
+
+    base_id = str(row.get("sub_claim_id") or "c")
+    ticker = row.get("company_ticker")
+    expanded = []
+    for quote, kind in pieces:
+        slug = kind.measure or kind.type.lower()
+        piece = dict(row)
+        piece.update({
+            "text": quote,
+            "source_span": quote,
+            "parent_span": text,
+            "sub_claim_type": kind.type,
+            "measure": kind.measure,
+            "sub_claim_id": f"{base_id}-{slug}",
+            "is_quantitative": bool(_NUMBER.search(quote)),
+            "quote_time": _quote_time(quote),
+            "fields": parse_fields(quote, company=ticker).as_dict(),
+            "company_source": company_source(quote, ticker),
+        })
+        expanded.append(piece)
+    return expanded
+
+
 def _rows_for(sentence: str, video_id: str, influencer: str, title: str, upload_date: str) -> list[dict]:
+    measured = split_financial_measures(sentence)
+    if len(measured) >= 2:
+        rows = []
+        for quote, kind in measured:
+            if _ADVICE_OR_PRICE.search(quote):
+                continue
+            ticker = _subject(quote, _subject(sentence, None))
+            if ticker is None:
+                continue
+            rows.extend(_materialize(quote, kind, ticker, video_id, influencer, title, upload_date))
+            for extra in _extra_kinds(quote, kind):
+                rows.extend(_materialize(quote, extra, ticker, video_id, influencer, title, upload_date))
+        if rows:
+            return rows
     clauses = [part.strip(" ,") for part in re.split(r",\s+|;\s+", sentence) if part.strip()]
     typed = [(clause, kind) for clause in clauses if (kind := _classify(clause)) is not None]
     signatures = {(kind.type, kind.measure, kind.reason, kind.expansion) for _clause, kind in typed}
