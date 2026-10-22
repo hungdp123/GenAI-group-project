@@ -23,8 +23,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # 0.5: SubClaim.source_span, parent_span, expansion_rule, measure, quote_time.
 #      Set when section 6 expands a vague phrase. The report shows that expansion.
+# 0.6: AuditResult.evidence_stances (the Auditor's own stance per evidence item; optional).
 
-SCHEMA_VERSION = "0.5"
+SCHEMA_VERSION = "0.6"
 
 
 class _Strict(BaseModel):
@@ -191,6 +192,8 @@ class AuditResult(_Strict):
     numeric_check: NumericCheck | None = None
     citation_check: CitationCheck | None = None
     feedback_for_retry: str | None = None
+    # The Auditor's own judgment of every evidence item (evidence_id -> stance towards the sub-claim).
+    evidence_stances: dict[str, Stance] = Field(default_factory=dict)
 
 
 class AdviceDecision(_Strict):
