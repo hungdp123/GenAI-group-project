@@ -1,6 +1,6 @@
 """A stored video keeps each company's sentence. The quote stays the post's words."""
 
-from finsight.agents.claim_extraction.build import claims_from_transcript, specific_type
+from finsight.agents.claim_extraction.build import claims_from_transcript, expand_stored_row, specific_type
 
 
 def _rows(text: str) -> list[dict]:
@@ -67,6 +67,39 @@ def test_cash_formulas_the_financial_agent_can_compute_are_routed_to_it():
     assert by_text["Nvidia's cash ratio is 1.2."]["sub_claim_type"] == "LIQUIDITY"
     assert by_text["Nvidia's free cash flow grew."]["sub_claim_type"] == "CASH_GENERATION"
     assert specific_type("OTHER", "the cash ratio is 1.2", None) == "LIQUIDITY"
+
+
+def test_three_stated_results_become_three_claims():
+    text = (
+        "Revenues are at all-time highs, operating profits at all-time highs, "
+        "operating margins are at 41% trailing only 2024 when margins reached 42% "
+        "over the course of the past 7 years."
+    )
+    pieces = expand_stored_row({
+        "video_id": "1-jC6oE5Ffo",
+        "company_ticker": "META",
+        "sub_claim_id": "1-jC6oE5Ffo-META-t21",
+        "sub_claim_type": "PROFITABILITY_CASH_LEVERAGE",
+        "text": text,
+    })
+    assert [piece["text"] for piece in pieces] == [
+        "Revenues are at all-time highs",
+        "operating profits at all-time highs",
+        "operating margins are at 41% trailing only 2024 when margins reached 42% "
+        "over the course of the past 7 years",
+    ]
+    assert [piece["sub_claim_type"] for piece in pieces] == [
+        "HISTORICAL_GROWTH", "HISTORICAL_GROWTH", "PROFITABILITY",
+    ]
+    assert pieces[1]["measure"] == "operating_income"
+    assert pieces[2]["measure"] == "operating_margin"
+    kept = expand_stored_row({
+        "sub_claim_id": "rev",
+        "sub_claim_type": "HISTORICAL_GROWTH",
+        "text": "Company X reported revenues of 96.2 billion, up 106% year-over-year.",
+    })
+    assert len(kept) == 1
+    assert kept[0]["sub_claim_id"] == "rev"
 
 
 def test_a_claim_with_no_formula_stays_off_the_financial_agent():
