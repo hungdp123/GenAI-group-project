@@ -70,6 +70,20 @@ and you get the `finsight` command. Re-activate the virtual environment in every
 
 ## Quick start
 
+### Narrative RAG: cited evidence preparation
+
+Narrative uses an LLM to select relevant source passages, extract exact facts and
+write a cited evidence summary, without stance labels or a claim verdict. See
+[the Narrative handoff](docs/narrative/workflow/orchestrator_narrative_handoff.md#llm-evidence-preparation-without-stance-or-verdict)
+and [Week 2 Section 10](docs/narrative/workflow/summary_week_2.md#10-current-narrative-rag-output-cited-evidence-without-stance-or-verdict)
+for commands, required data, provider settings and output fields. Configuration
+examples are in [config.example.yaml](config.example.yaml). BM25/dense/hybrid
+search and LLM evidence processing are separate steps. The auditor/policy handoff
+still needs updating to assess evidence; the current demo decomposer/auditor
+remain limitations. Explicit retrieval-only mode is available when desired.
+
+### Offline demo
+
 ```bash
 finsight run "A finfluencer I follow said Company X's revenue growth proves it is the biggest winner from AI infrastructure demand, and that this growth is just getting started." --cutoff 2025-07-31
 finsight trace <request_id>      # the decision log for the run above (id is printed at the bottom)

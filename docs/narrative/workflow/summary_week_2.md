@@ -6,6 +6,18 @@ This is the practical workflow and GitHub handoff for the Narrative workstream. 
 
 ## 1. Full workflow
 
+The Narrative flow now preserves the LLM for **relevance selection, exact-source
+fact extraction and a cited evidence summary**, without stance labels or a claim
+verdict. Both `rag.basic_rag` and the registry's NarrativeAgent use the shared
+`rag/evidence_summary.py` helper on already-retrieved passages. Original content
+and provenance are retained. The auditor remains responsible for claim assessment.
+Use `FINSIGHT_NARRATIVE_ANALYSIS=evidence` for the orchestrator, or run the
+basic_rag command normally; explicit retrieval-only mode is still available.
+Current output/configuration details are in Section 10 and the
+[handoff guide](orchestrator_narrative_handoff.md#llm-evidence-preparation-without-stance-or-verdict).
+No tests or model/API calls were run for this change; only syntax parsing was
+performed. Historical results below retain their original scope.
+
 There are two operational stages: prepare searchable company evidence, then answer a claim using that evidence. Retrieval evaluation, provenance validation and integration checks accompany those stages. Chunking/retrieval research uses separate experiment artifacts.
 
 ```mermaid
@@ -34,7 +46,7 @@ flowchart TD
     J --> P
     K --> P
     P --> Q[W2-Q: deduplicate and preserve source citations]
-    Q --> R[W2-R: optional evidence stance classification]
+    Q --> R[W2-R: LLM relevance, exact facts and cited summary]
     R --> T[W2-T: opt-in application integration]
     T --> U[W2-U: integration checks]
     L --> U
@@ -49,6 +61,8 @@ flowchart TD
 W2-A through W2-U retain their meanings from the recap. The Basic RAG branch adds final answer generation and validation. Its CLI gathers evidence using exact stance mode, then makes one generation call. Iterative Agentic RAG is outside the current scope.
 
 ## 2. Execution map and files to commit
+
+Orchestrator handoff: [three entry files, shared contracts and runtime configuration](orchestrator_narrative_handoff.md). Real classes are now exposed as `finsight.agents.narrative.stub:NarrativeAgent` and `finsight.agents.narrative.retriever_stub:NarrativeRetriever`, and exported from the package initializer. The Narrative registry defaults select these classes; retained demo classes are available through compatibility imports. `WORKFLOW_MODULES` in the initializer maps preparation, inference and experiments to their existing implementations.
 
 **Folder organization:** modules now live under `acquisition/`, `processing/`, `pdf/`, `retrieval/`, `rag/`, `evaluation/`, `maintenance/` and `demo/` inside `finsight/agents/narrative/`. Commands below use these new paths. The [migration guide](../reference/narrative_module_migration.md) maps all 40 former flat module paths to their new locations. Use it to update commands or local registry settings outside the repository.
 
@@ -266,9 +280,9 @@ The report is written to `data/narrative/experiments/narrative_rag/20261018_all1
 
 **Latest saved result:** complete; 92 claims, 16 companies, 368 rankings and 3,680 ranked passages checked; **0 errors** and 196 missing-URL occurrences. The missing URLs are counted separately from provenance errors. This validates recorded passage and source metadata; it does not verify PDF extraction accuracy or whether a passage supports a claim.
 
-### Step 6. Collect Evidence and Assign Stance
+### Step 6. Collect and prepare source evidence without a verdict
 
-Collect evidence and assign stance for a claim. Both examples below use the production META index for one query/claim; Section 5.2 checks all 92 claims against the isolated experiment indexes.
+Collect original source evidence without assessing passage stance. Both examples below use the production META index for one query/claim; Section 5.2 checks all 92 claims against the isolated experiment indexes.
 
 **Optional diagnostic: inspect raw retrieval results**
 
@@ -283,7 +297,7 @@ python -m finsight.agents.narrative.retrieval.retriever --ticker META --query "D
 This builds support/counter searches from your claim, retrieves and deduplicates passages, preserves provenance and assigns passage stance. Run this command when you want the complete evidence-collection step, without generating a final verdict.
 
 ```powershell
-python -m finsight.agents.narrative.rag.collect_evidence --ticker META --sub-claim-id sc1 --claim-type OTHER --claim "DAP was 3.27 billion on average for June 2024" --cutoff 2025-07-31 --backend bm25 --stance-method exact
+python -m finsight.agents.narrative.rag.collect_evidence --ticker META --sub-claim-id sc1 --claim-type OTHER --claim "DAP was 3.27 billion on average for June 2024" --cutoff 2025-07-31 --backend bm25 --stance-method none
 ```
 
 `exact` uses deterministic stance handling; `llm` selects the configured shared LLM for stance classification. This agent returns evidence. Step 7 adds the final generated assessment. The cutoff filters publication dates; it is an input for each request, not a permanent limit of 2025-07-31.
@@ -348,27 +362,27 @@ This documentation update read existing artifacts only; it did not rerun retriev
 
 ## 6. Generate and validate an answer: Steps 7-8
 
-### Step 7. Run end-to-end Basic Narrative RAG
+### Step 7. Prepare a cited Narrative evidence summary with an LLM
 
 ```powershell
-python -u -m finsight.agents.narrative.rag.basic_rag --ticker META --claim "DAP was 3.27 billion on average for June 2024" --cutoff 2025-07-31 --backend bm25 --top-k 3 --max-tokens 1500 --ollama-context 20000 --ollama-model qwen3-vl:4b-instruct
+python -u -m finsight.agents.narrative.rag.basic_rag --ticker META --claim "DAP was 3.27 billion on average for June 2024" --cutoff 2025-07-31 --backend bm25 --top-k 3
 ```
 
-This command retrieves support/counter passages, deduplicates them, makes one LLM call and validates the answer. `--top-k 3` applies to each search; up to six unique passages can reach generation. Omit `--ollama-model` and `--ollama-context` to use the configured cloud provider. `--max-tokens` limits generated tokens; it does not cap the prompt or impose a dollar budget. Local context size must fit the machine/model.
+This command retrieves candidates and makes one LLM call to select relevant sources, extract exact-source facts and write a cited summary. It does not classify stance or decide a verdict. Python validates selected IDs and exact quotes; original source text is preserved. `--top-k 3` applies to each directional search. `--max-tokens` limits the one evidence-preparation response. OpenAI/shared-provider configuration is used unless an explicit Ollama model is supplied. `--retrieval-only` skips this LLM step intentionally. See Section 10.
 
 If `--output` is omitted, the report is saved automatically to:
 
 ```text
-data/narrative/experiments/narrative_basic_rag/<TICKER>-<MODEL>-<TIMESTAMP>.json
+data/narrative/experiments/narrative_basic_rag/<TICKER>-<MODEL>-evidence-<TIMESTAMP>.json
 ```
 
-**Run all 92 development claims in one batch using the experiment indexes:**
+**Historical verdict-baseline batch (separate from the stance-only command):**
 
 ```powershell
 python -u -m finsight.agents.narrative.evaluation.run_basic_rag_batch --experiment-dir data/narrative/experiments/narrative_rag/20261018_all16_v1/retrieval_canonical/canonical92_v1 --queries data/narrative/experiments/narrative_rag/20261018_all16_v1/labels/evidence_labels_v3/dev/questions.jsonl --output-dir data/narrative/experiments/narrative_basic_rag/canonical92_ollama_v1 --backend bm25 --top-k 3 --max-tokens 1500 --ollama-context 20000 --ollama-model qwen3-vl:4b-instruct --allow-draft --resume
 ```
 
-The batch reuses `rag/basic_rag.py` and explicitly reads `canonical92_v1/companies/<TICKER>/index.json`. It checks that the questions hash matches the experiment and processes 92 claims sequentially with exact stance during collection plus one generation call per attempted claim. It does not activate experimental P1/P2 priority. The production agent's support/counter query generation differs from Step 4's original-claim queries.
+The verdict-generation batch now explicitly uses `rag/verdict_baseline.py` and explicitly reads `canonical92_v1/companies/<TICKER>/index.json`. It checks that the questions hash matches the experiment and processes 92 claims sequentially with exact stance during collection plus one generation call per attempted claim. It does not activate experimental P1/P2 priority. The production agent's support/counter query generation differs from Step 4's original-claim queries.
 
 Outputs are under `data/narrative/experiments/narrative_basic_rag/canonical92_ollama_v1/`: `cases/` contains one latest result per claim, `attempts/` preserves every saved attempt including retries, `configuration.json` records settings/input/code hashes, and `report.json` aggregates technical status, verdict counts, tokens, estimated cost and timing. Generation failures without returned usage have unknown usage/cost. Ollama calls have no OpenAI API charges.
 
@@ -376,7 +390,7 @@ Outputs are under `data/narrative/experiments/narrative_basic_rag/canonical92_ol
 
 **Latest saved batch status: `complete_with_errors`.** All 92 claims were processed: 63 passed technical validation and 29 returned `INVALID_GENERATION`. Results and usage are in Section 6.2. Twelve focused implementation tests previously passed with mocked generation. Verdict accuracy remains unscored because the expected verdict labels require independent review.
 
-Successful generation reports include `status`, `answer`, `retrieval`, `retrieved_evidence`, `citation_validation`, `consistency_check`, `llm` and `raw_model_output`. Check `answer.verdict`, `answer.explanation`, exact citations, numeric-check status and usage. Error reports may contain fewer fields. `status=OK` establishes technical validity; general semantic correctness still requires evaluation.
+Historical verdict-baseline reports include `status`, `answer`, `retrieval`, `retrieved_evidence`, `citation_validation`, `consistency_check`, `llm` and `raw_model_output`. Current stance-only reports use `evidence` with per-passage `stance`; they have no `answer` or whole-claim `verdict`. Section 10 documents the current schema. For the historical baseline only: Check `answer.verdict`, `answer.explanation`, exact citations, numeric-check status and usage. Error reports may contain fewer fields. `status=OK` establishes technical validity; general semantic correctness still requires evaluation.
 
 For clear single-value margin/DAP claims, the deterministic checker compares reliable cited evidence for the same metric and explicit period, with basis checks and a displayed-precision half-up rounding rule. A conflicting value yields `REFUTED`; numerical closeness alone does not support it. Ambiguous or unrecognized claims are left outside this narrow check. `PARTIALLY_SUPPORTED` is reserved in the prompt for mixed outcomes across independently verifiable parts of a multi-part claim. Exact source quotes and retrieved citation IDs remain mandatory.
 
@@ -643,7 +657,7 @@ An 8-K/6-K **exhibit** follows its classified content: an earnings-release exhib
 
 These are document-type priorities, separate from source tiers. For example, an official earnings release can be Tier 2 and High priority. See [narrative_priority_config_v1.json](../config/narrative_priority_config_v1.json) and `finsight/agents/narrative/retrieval/source_priority.py` for the configured assignments.
 
-**Current Basic RAG behavior:** `rag/basic_rag.py` retrieves through `rag/collect_evidence.py` and `retrieval/retriever.py`; it does not expose or apply these experimental P1/P2 policies. Running the priority experiment does not activate document priority in Basic RAG.
+**Current stance-only command behavior:** `rag/basic_rag.py` retrieves through `rag/collect_evidence.py` and `retrieval/retriever.py`; it does not expose or apply these experimental P1/P2 policies. Running the priority experiment does not activate document priority in Basic RAG.
 
 ### 8.4 Run canonical chunking on the same 92 development claims
 
@@ -689,3 +703,244 @@ Status checked against the saved artifacts. Figures are scoped to the listed run
 | Basic RAG 92-claim generation batch | All 92 processed; 63 technically valid (68.48%), 29 invalid; 43.24 minutes; 394,169 total tokens; $0 local API cost | `complete_with_errors`; citation failures need review; verdict accuracy and faithfulness remain unscored; see Section 6.2 |
 
 The previously recorded full suite had 204 passes, 14 expected failures and one chart test failure due to invalid fake PNG fixture bytes. Resolve or document that check before reporting a fully green suite. For detailed evidence and limitations, follow the reports linked above.
+
+## 10. Current Narrative RAG output: cited evidence, without stance or verdict
+
+The LLM is retained for selecting relevant evidence, extracting exact source
+facts and writing a cited factual summary. It does not decide the claim verdict
+or assign SUPPORTING/CHALLENGING/NEUTRAL labels. This supersedes the intermediate
+retrieval-only implementation. Existing historical reports are not rewritten.
+
+### 10.1 Current workflow and commands
+
+```text
+Claim + ticker + publication cutoff
+  -> BM25 / dense / hybrid candidate retrieval
+  -> Python verifies source IDs, original text, company/date scope and deduplication
+  -> one LLM call selects relevant candidates and extracts exact-source facts
+  -> same call writes a factual evidence summary with source IDs
+  -> Python validates output structure, selected IDs, quotes and summary references
+  -> return selected original passages and save the cited summary
+  -> auditor performs the separate claim assessment
+```
+
+The search backend is independent of the LLM. For example, `--backend bm25`
+selects BM25 search; the configured OpenAI model can still prepare its results.
+The LLM currently acts after candidate retrieval; it does not rewrite the initial
+queries, perform iterative searches, or activate experimental priority policies.
+
+With the shared online provider configured:
+
+```powershell
+$env:FINSIGHT_LLM_PROVIDER = "openai"
+$env:FINSIGHT_LLM_MODEL = "gpt-5.4"
+python -u -m finsight.agents.narrative.rag.basic_rag --ticker META --claim "META's performance is driven by strong demand" --cutoff 2025-07-31 --backend bm25 --top-k 3 --max-tokens 1500
+```
+
+The private local `config.yaml` must contain `openai_api_key`, or use an
+intentional OPENAI_API_KEY environment variable. API charges apply. For local
+Ollama instead:
+
+```powershell
+python -u -m finsight.agents.narrative.rag.basic_rag --ticker META --claim "META's performance is driven by strong demand" --cutoff 2025-07-31 --backend bm25 --top-k 3 --max-tokens 1500 --ollama-model qwen3-vl:4b-instruct --ollama-context 20000
+```
+
+`--max-tokens` now limits the single evidence-preparation response, not a
+per-passage classification call. Add `--retrieval-only` only when you intentionally
+want to skip LLM selection/facts/summary. Mock mode is not accepted as a real
+model judgment: it records a preparation error and retains original passages.
+
+### 10.2 Output fields and who produces them
+
+| Field | Purpose | Producer |
+|---|---|---|
+| `status` | Overall evidence-preparation outcome: OK, NO_EVIDENCE, INVALID_GENERATION or GENERATION_ERROR | Python |
+| `pipeline` | narrative_evidence_rag, or narrative_evidence_retrieval when explicitly requested | Python |
+| `ticker`, `claim`, `cutoff_date`, `backend` | Input scope and requested search configuration | User/default, normalized/recorded by Python |
+| `assessment_status` | NOT_ASSESSED means no claim stance/verdict assessment was done; it does not mean the LLM was skipped | Python |
+| `evidence_preparation_status` | COMPLETED, FAILED, SKIPPED_NO_EVIDENCE or SKIPPED_RETRIEVAL_ONLY | Python, based on execution/validation |
+| `retrieval` | Original candidate count, IDs, queries and retrieval timing | Python search pipeline |
+| `candidate_evidence` | All original retrieved passages and provenance before model selection | Canonical indexed sources, copied by Python |
+| `selected_evidence_ids` | Relevant candidate IDs in model-selected order | LLM, accepted only after Python validation |
+| `facts` | Exact source quotes tied to selected IDs | LLM extracts; Python checks exact source membership |
+| `summary` | Factual evidence-summary sentences, each with cited IDs | LLM; Python checks references, not semantic entailment |
+| `selection` | Count/IDs of original passages actually returned by basic_rag | Python |
+| `selection_applied` | Whether the validated model selection was applied | Python; false on fallback/error |
+| `evidence` | Returned original passages/provenance, without public stance labels | Python selects existing EvidenceItems; source text is never rewritten |
+| `llm` | Provider/model, token usage, timing and estimated cost | Provider response plus Python accounting |
+| `citation_validation` | Format, selection, quote and summary-reference checks | Python |
+| `consistency_check` | NOT_APPLICABLE: no verdict is generated or numerically corrected here | Python |
+| `raw_model_output` | Original model response before parsing/acceptance | LLM text recorded by Python |
+| `generation_error` | Error details, only on preparation failure | Python exception handling |
+| `contract_note` | Explains the mandatory internal unassessed NEUTRAL placeholder | Python |
+
+An OK result establishes only that preparation passed the implemented technical
+checks. It does not establish correct relevance judgments, faithful summaries,
+full evidence coverage or a true claim. NO_EVIDENCE means no candidates were
+retrieved; a valid empty model selection instead means it selected no relevant
+passages from available candidates. Read retrieval/selection counts together.
+
+### 10.3 Example: relevant evidence, extracted facts and cited summary
+
+Illustrative format, not an additional saved experimental result:
+
+```json
+{
+  "status": "OK",
+  "pipeline": "narrative_evidence_rag",
+  "assessment_status": "NOT_ASSESSED",
+  "evidence_preparation_status": "COMPLETED",
+  "selected_evidence_ids": ["passage-1"],
+  "facts": [
+    {
+      "evidence_id": "passage-1",
+      "quote": "Data center segment revenue increased year over year."
+    }
+  ],
+  "summary": [
+    {
+      "text": "The source reports year-over-year growth in data center segment revenue.",
+      "evidence_ids": ["passage-1"]
+    }
+  ]
+}
+```
+
+There is no `answer.verdict`, predicted stance or claim-correctness decision.
+Facts are copied from sources; a summary may paraphrase them but must reference
+selected IDs with exact-source facts. Prompt instructions require original
+metrics, values, units, periods, scope and accounting basis to be preserved and
+prohibit invented calculations. These semantic requirements still need evaluation;
+reference validation alone does not prove faithful interpretation.
+
+### 10.4 `citation_validation`: precise Python rules
+
+Python requires:
+
+1. A JSON object with exactly selected_evidence_ids, facts and summary.
+2. All three fields are arrays; selected IDs are unique and belong to candidates.
+3. Every fact contains exactly evidence_id and quote, cites a selected ID and
+   contains a nonempty exact substring of that source passage.
+4. Identical ID-and-quote pairs are rejected. Different exact quotes from one
+   passage are allowed. Every selected ID must have at least one valid fact.
+5. Each summary item contains exactly text and evidence_ids, with nonempty text
+   and at least one ID backed by an exact-source fact.
+6. A nonempty selection requires a cited summary. An empty selection requires
+   empty facts and summary, so unsupported generated content cannot accompany it.
+7. A response stopped because of the output limit is not accepted.
+
+Extra root-level stance/verdict fields fail schema validation. No source text is
+replaced with generated content. The collector has already verified original IDs,
+content, company scope and publication cutoff. These checks do not establish
+semantic entailment, relevance or summary accuracy, and do not verify OCR/PDF
+extraction accuracy or whether source URLs remain accessible.
+
+### 10.5 `llm`: usage, cost and limits
+
+| Field | Meaning |
+|---|---|
+| `provider`, `model` | Configured shared provider/model, or explicit Ollama model |
+| `api_requests` | Preparation completion attempts, normally one for a nonempty collection; an adapter/setup failure can occur before reaching the provider |
+| `input_tokens`, `output_tokens` | Actual returned usage for the preparation response, not token limits |
+| `cost_usd` | Local estimate from returned usage; not an account balance or authoritative bill |
+| `generation_ms` | Time around evidence preparation |
+| `max_output_tokens` | Requested response-token budget |
+| `context_window_tokens` | Requested Ollama context size; null for the shared online path, not unlimited context |
+
+On failed completion without usage, tokens/cost are null rather than asserted
+zero. If no evidence exists or retrieval-only mode is chosen, no call is made.
+Local Ollama's zero API cost does not price hardware/electricity. Other agents
+and previous/team runs are not included in this report. Source selection and
+summary use one call, not one separate call for every passage.
+
+### 10.6 Error handling and original evidence preservation
+
+INVALID_GENERATION means a response failed validation. GENERATION_ERROR means
+preparation could not complete. Both record evidence_preparation_status=FAILED,
+selection_applied=false, and no accepted generated facts/summary. Original
+candidate passages remain the returned evidence, so a malformed answer does not
+erase valid retrieval. Raw invalid model text remains diagnostic only. The CLI
+saves the report and exits nonzero; the orchestrator collector logs a warning
+and returns original candidates. Do not interpret fallback evidence as model
+selected. Retrieval/source-verification failures still propagate separately.
+
+### 10.7 `consistency_check` and assessment status
+
+consistency_check remains NOT_APPLICABLE because this stage makes no claim
+verdict or deterministic verdict correction. assessment_status=NOT_ASSESSED
+specifically refers to claim stance/verdict assessment. Use the separate
+evidence_preparation_status to see whether LLM preparation ran successfully.
+The auditor is responsible for interpreting the evidence and assessing the claim.
+
+### 10.8 Orchestrator handoff
+
+```powershell
+$env:FINSIGHT_CORPUS_PROFILE = "canonical"
+$env:FINSIGHT_IMPL_NARRATIVE = "finsight.agents.narrative.stub:NarrativeAgent"
+$env:FINSIGHT_IMPL_RETRIEVER = "finsight.agents.narrative.retriever_stub:NarrativeRetriever"
+$env:FINSIGHT_NARRATIVE_BACKEND = "bm25"
+$env:FINSIGHT_NARRATIVE_TOP_K = "3"
+$env:FINSIGHT_NARRATIVE_ANALYSIS = "evidence"
+$env:FINSIGHT_NARRATIVE_ANALYSIS_MAX_TOKENS = "1500"
+$env:FINSIGHT_NARRATIVE_STANCE_METHOD = "none"
+$env:FINSIGHT_LLM_PROVIDER = "openai"
+$env:FINSIGHT_LLM_MODEL = "gpt-5.4"
+python -m finsight run "META's performance is driven by strong demand." --company META --cutoff 2025-07-31 --stages --technical
+```
+
+The registry adapter calls the same helper on its already-retrieved passages.
+It returns selected original EvidenceItems, not generated summary text, preserving
+the existing gather return contract. The full summary, facts, validation and
+usage are in its saved report and last_analysis attribute. A separate interface
+extension would be needed to pass the summary itself directly to the auditor;
+this change does not alter shared contracts or another workstream's auditor.
+
+The mandatory internal EvidenceItem.stance still uses NEUTRAL as an unassessed
+placeholder; public evidence omits it. The current stub auditor and tier policy
+still consume stance labels, so their verdicts are not meaningful until they can
+assess the evidence and pass their assessed labels to policy. The stub decomposer
+can also still rewrite your original claim. LLM evidence preparation does not fix
+those separate components. Check stage 4 and the report's claim before interpreting
+the sources. FINSIGHT_NARRATIVE_ANALYSIS=retrieval explicitly skips the LLM.
+
+For local orchestrator evidence preparation, use
+FINSIGHT_NARRATIVE_OLLAMA_MODEL, optional FINSIGHT_NARRATIVE_OLLAMA_HOST and
+FINSIGHT_NARRATIVE_OLLAMA_CONTEXT; these configure this Narrative helper only,
+not the shared client for all other agents.
+
+### 10.9 Output locations and inspection
+
+New standalone reports use:
+
+`data/narrative/experiments/narrative_basic_rag/<TICKER>-<MODEL>-evidence-<TIME>.json`
+
+The registry collector saves unique JSON under
+`data/narrative/experiments/orchestrator_narrative/`. Old verdict, stance and
+retrieval-only files are preserved with their original schemas.
+
+```powershell
+$evidenceReportPath = "data/narrative/experiments/narrative_basic_rag/YOUR_REPORT.json"
+$evidenceReport = Get-Content -Raw -LiteralPath $evidenceReportPath | ConvertFrom-Json
+$evidenceReport | Select-Object status, assessment_status, evidence_preparation_status
+$evidenceReport.facts | Format-List
+$evidenceReport.summary | ConvertTo-Json -Depth 6
+$evidenceReport.citation_validation | ConvertTo-Json -Depth 5
+$evidenceReport.llm | Format-List
+```
+
+### 10.10 Evaluation and historical scope
+
+Evaluate retrieval relevance independently of passage stance. The new LLM
+selection and factual summary require their own relevance, source-coverage,
+quote/citation accuracy and faithfulness evaluation. Technical source membership
+checks are not a substitute for those measures. No historical metric proves the
+quality of this new evidence-preparation flow. Candidate passages are retained
+so selection omissions can be reviewed.
+
+Historical answer-generation comparisons explicitly use rag.verdict_baseline
+and the existing verdict batch; those are not invoked by this Narrative flow.
+No source/index files, gold labels or saved experimental results are changed.
+Use new versioned output folders after code/schema changes. Implementation
+references: rag/evidence_summary.py, rag/basic_rag.py and the NarrativeAgent
+adapter in stub.py. No tests or model/API calls were run for this change; only
+syntax parsing was performed.

@@ -1,1 +1,1 @@
-"""Narrative demo modules."""
+"""Compatibility imports for the registry's preserved demo implementations."""
