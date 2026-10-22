@@ -23,8 +23,8 @@ from finsight.contracts.interfaces import (
 
 DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
     "financial": "finsight.agents.financial.agent:XbrlFinancialAgent",
-    "narrative": "finsight.agents.narrative.rag.collect_evidence:NarrativeEvidenceAgent",
-    "retriever": "finsight.agents.narrative.retrieval.retriever:CorpusRetriever",
+    "narrative": "finsight.agents.narrative.stub:NarrativeAgent",
+    "retriever": "finsight.agents.narrative.retriever_stub:NarrativeRetriever",
     "auditor": "finsight.agents.auditor.stub:StubAuditor",
     "advice_boundary": "finsight.agents.advice_boundary.agent:AdviceBoundaryAgent",
     "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",

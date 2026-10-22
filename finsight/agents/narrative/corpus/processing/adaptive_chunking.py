@@ -17,8 +17,8 @@ from functools import lru_cache
 
 CRITERIA = ("structural_integrity", "context_completeness", "semantic_coherence", "length_efficiency")
 STOP = set(
-    "a an the and or of to in for on with at is are was were be by as from that this it "
-    "our we its their fiscal quarter year million billion percent".split()
+    "a an the and or of to in for on with at is are was were be by as from that "
+    "this it our we its their fiscal quarter year million billion percent".split()
 )
 FACT = re.compile(r"revenue|sales|income|margin|cash|earnings|subscribers?|active people|expenses", re.I)
 FIELDS = {
@@ -319,8 +319,6 @@ def choose_plan(block, tokenizer, limit: int, config: AdaptiveConfig) -> tuple[l
         "selected_candidate": record["candidate_id"],
         "selected_scores": record["scores"],
         "selected_weighted_score": record["weighted_score"],
-        "reason": (
-            "Highest configured weighted score among hard-valid complete plans; "
-            "ties: fewer chunks, larger target, candidate ID."
-        ),
+        "reason": "Highest configured weighted score among hard-valid complete plans; ties: "
+        "fewer chunks, larger target, candidate ID.",
     }

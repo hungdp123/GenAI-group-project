@@ -454,8 +454,8 @@ def parse_pdf(document: CorpusDocument) -> tuple[list[ProcessedBlock], list[str]
                 from rapidocr import RapidOCR
             except ImportError:
                 warnings.append(
-                    f"{document.document_id}: PDF page {page_number} has no native text "
-                    "and OCR dependencies are unavailable"
+                    f"{document.document_id}: PDF page {page_number} has no native text and OCR "
+                    f"dependencies are unavailable"
                 )
                 continue
             if pdfium_document is None:

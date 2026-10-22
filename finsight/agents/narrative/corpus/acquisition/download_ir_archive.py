@@ -142,20 +142,37 @@ KNOWN_DATES_BY_FILENAME = {
 }
 
 NVDA_PUBLICATION_DATES = {
-    (2024, 1): "2023-05-24", (2024, 2): "2023-08-23",
-    (2024, 3): "2023-11-21", (2024, 4): "2024-02-21",
-    (2025, 1): "2024-05-22", (2025, 2): "2024-08-28",
-    (2025, 3): "2024-11-20", (2025, 4): "2025-02-26",
-    (2026, 1): "2025-05-28", (2026, 2): "2025-08-27",
-    (2026, 3): "2025-11-19", (2026, 4): "2026-02-25",
-    (2027, 1): "2026-05-20", (2027, 2): "2026-08-26",
+    (2024, 1): "2023-05-24",
+    (2024, 2): "2023-08-23",
+    (2024, 3): "2023-11-21",
+    (2024, 4): "2024-02-21",
+    (2025, 1): "2024-05-22",
+    (2025, 2): "2024-08-28",
+    (2025, 3): "2024-11-20",
+    (2025, 4): "2025-02-26",
+    (2026, 1): "2025-05-28",
+    (2026, 2): "2025-08-27",
+    (2026, 3): "2025-11-19",
+    (2026, 4): "2026-02-25",
+    (2027, 1): "2026-05-20",
+    (2027, 2): "2026-08-26",
 }
 
 MONTHS: dict[str, int] = {}
 for month_number, month_name in enumerate(
     (
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     ),
     start=1,
 ):
@@ -216,23 +233,45 @@ def _classify(href: str, label: str) -> str | None:
     value = html.unescape(f"{href} {label}").lower()
     if "transcript" in value or "pre-recorded-earnings-call" in value:
         return "earnings_call_transcript"
-    if any(term in value for term in (
-        "prepared-remarks", "prepared remarks", "commentary", "letter-to-shareholders",
-        "letter to shareholders",
-    )):
+    if any(
+        term in value
+        for term in (
+            "prepared-remarks",
+            "prepared remarks",
+            "commentary",
+            "letter-to-shareholders",
+            "letter to shareholders",
+        )
+    ):
         return "prepared_remarks"
     if any(term in value for term in ("investor-day", "investor day", "analyst-day", "capital-markets-day")):
         return "investor_day_presentation"
     earnings_terms = (
-        "earnings-presentation", "earnings presentation", "results-presentation", "shareholder-deck",
-        "quarterly revenue trend", "quarterly presentation", "earnings-supplement", "earnings supplement",
+        "earnings-presentation",
+        "earnings presentation",
+        "results-presentation",
+        "shareholder-deck",
+        "quarterly revenue trend",
+        "quarterly presentation",
+        "earnings-supplement",
+        "earnings supplement",
     )
     if any(term in value for term in earnings_terms):
         return "earnings_presentation"
-    if any(term in value for term in (
-        "investor-presentation", "investor presentation", "investor-deck", "investor deck",
-        "strategic-transformation", "strategic update", "presentation", "slides", "deck",
-    )):
+    if any(
+        term in value
+        for term in (
+            "investor-presentation",
+            "investor presentation",
+            "investor-deck",
+            "investor deck",
+            "strategic-transformation",
+            "strategic update",
+            "presentation",
+            "slides",
+            "deck",
+        )
+    ):
         return "special_presentation"
     return None
 
@@ -302,8 +341,7 @@ def _microsoft_pages() -> list[tuple[str, str, str]]:
     for fiscal_year in range(2021, 2027):
         for quarter in range(1, 5):
             url = (
-                f"https://www.microsoft.com/en-us/investor/events/fy-{fiscal_year}/"
-                f"earnings-fy-{fiscal_year}-q{quarter}"
+                f"https://www.microsoft.com/en-us/investor/events/fy-{fiscal_year}/earnings-fy-{fiscal_year}-q{quarter}"
             )
             rows.append((url, f"Microsoft FY{str(fiscal_year)[-2:]} Q{quarter} earnings call transcript", url))
     return rows
@@ -339,12 +377,10 @@ def _alphabet_pages() -> list[tuple[str, str, str]]:
         (2025, 1): "https://abc.xyz/investor/events/event-details/2025/2025-Q1-Earnings-Call/",
         (2025, 2): "https://abc.xyz/investor/events/event-details/2025/2025-Q2-Earnings-Call/",
         (2025, 3): (
-            "https://abc.xyz/investor/events/event-details/2025/"
-            "2025-Q3-Earnings-Call-2025-4OI4Bac_Q9/default.aspx"
+            "https://abc.xyz/investor/events/event-details/2025/2025-Q3-Earnings-Call-2025-4OI4Bac_Q9/default.aspx"
         ),
         (2025, 4): (
-            "https://abc.xyz/investor/events/event-details/2026/"
-            "2025-Q4-Earnings-Call-2026-Dr_C033hS6/default.aspx"
+            "https://abc.xyz/investor/events/event-details/2026/2025-Q4-Earnings-Call-2026-Dr_C033hS6/default.aspx"
         ),
     }
     for (year, quarter), url in event_pages.items():
@@ -444,45 +480,49 @@ def _nvidia_pages() -> list[tuple[str, str, str]]:
         for quarter in range(1, 5):
             folder = f"Q{quarter}FY{year_suffix}" if fiscal_year == 2024 else f"Q{quarter}{year_suffix}"
             publication_date = NVDA_PUBLICATION_DATES.get((fiscal_year, quarter), "")
-            rows.extend((
+            rows.extend(
                 (
-                    f"{cdn}/{fiscal_year}/{folder}/Q{quarter}FY{year_suffix}-CFO-Commentary.pdf",
-                    f"NVIDIA Q{quarter} FY{fiscal_year} CFO commentary {publication_date}",
-                    source_page,
-                ),
-                (
-                    f"{cdn}/{fiscal_year}/{folder}/Rev_by_Mkt_Qtrly_Trend_Q{quarter}{year_suffix}.pdf",
-                    f"NVIDIA Q{quarter} FY{fiscal_year} quarterly revenue trend {publication_date}",
-                    source_page,
-                ),
-                (
-                    f"{cdn}/{fiscal_year}/q{quarter}/NVDA-F{quarter}Q{year_suffix}-Quarterly-Presentation-FINAL.pdf",
-                    f"NVIDIA Q{quarter} FY{fiscal_year} quarterly presentation {publication_date}",
-                    source_page,
-                ),
-                (
-                    f"{cdn}/{fiscal_year}/{folder}/NVDA-F{quarter}Q{year_suffix}-Quarterly-Presentation-FINAL.pdf",
-                    f"NVIDIA Q{quarter} FY{fiscal_year} quarterly presentation {publication_date}",
-                    source_page,
-                ),
-            ))
-    rows.extend((
+                    (
+                        f"{cdn}/{fiscal_year}/{folder}/Q{quarter}FY{year_suffix}-CFO-Commentary.pdf",
+                        f"NVIDIA Q{quarter} FY{fiscal_year} CFO commentary {publication_date}",
+                        source_page,
+                    ),
+                    (
+                        f"{cdn}/{fiscal_year}/{folder}/Rev_by_Mkt_Qtrly_Trend_Q{quarter}{year_suffix}.pdf",
+                        f"NVIDIA Q{quarter} FY{fiscal_year} quarterly revenue trend {publication_date}",
+                        source_page,
+                    ),
+                    (
+                        f"{cdn}/{fiscal_year}/q{quarter}/NVDA-F{quarter}Q{year_suffix}-Quarterly-Presentation-FINAL.pdf",
+                        f"NVIDIA Q{quarter} FY{fiscal_year} quarterly presentation {publication_date}",
+                        source_page,
+                    ),
+                    (
+                        f"{cdn}/{fiscal_year}/{folder}/NVDA-F{quarter}Q{year_suffix}-Quarterly-Presentation-FINAL.pdf",
+                        f"NVIDIA Q{quarter} FY{fiscal_year} quarterly presentation {publication_date}",
+                        source_page,
+                    ),
+                )
+            )
+    rows.extend(
         (
-            f"{cdn}/2027/Q127/Rev_by_Mkt_Qtrly_Trend_Q127-NEW-v3.pdf",
-            "NVIDIA Q1 FY2027 quarterly revenue trend 2026-05-20",
-            source_page,
-        ),
-        (
-            f"{cdn}/2027/Q227/Q227-Revenue-by-Market-Platform-Slides.pdf",
-            "NVIDIA Q2 FY2027 quarterly revenue trend 2026-08-26",
-            source_page,
-        ),
-        (
-            f"{cdn}/2026/q4/NVDA-Q4-2026-Earnings-Call-25-February-2026-5_00-PM-ET.pdf",
-            "NVIDIA Q4 FY2026 earnings call transcript February 25, 2026",
-            source_page,
-        ),
-    ))
+            (
+                f"{cdn}/2027/Q127/Rev_by_Mkt_Qtrly_Trend_Q127-NEW-v3.pdf",
+                "NVIDIA Q1 FY2027 quarterly revenue trend 2026-05-20",
+                source_page,
+            ),
+            (
+                f"{cdn}/2027/Q227/Q227-Revenue-by-Market-Platform-Slides.pdf",
+                "NVIDIA Q2 FY2027 quarterly revenue trend 2026-08-26",
+                source_page,
+            ),
+            (
+                f"{cdn}/2026/q4/NVDA-Q4-2026-Earnings-Call-25-February-2026-5_00-PM-ET.pdf",
+                "NVIDIA Q4 FY2026 earnings call transcript February 25, 2026",
+                source_page,
+            ),
+        )
+    )
     return rows
 
 
@@ -564,17 +604,12 @@ def main() -> int:
         if core_manifest_path.exists()
         else {}
     )
-    canonical_output = (
-        args.output.parent.name == "raw"
-        and args.output.parent.parent.name == "narrative"
-    )
+    canonical_output = args.output.parent.name == "raw" and args.output.parent.parent.name == "narrative"
     canonical_manifest_name = {
         "official_ir": "manifest_official_ir.json",
     }.get(args.output.name, f"manifest_{args.output.name}.json")
     existing_manifest = (
-        args.output.parent / canonical_manifest_name
-        if canonical_output
-        else args.output / "manifest.json"
+        args.output.parent / canonical_manifest_name if canonical_output else args.output / "manifest.json"
     )
     cached_files: dict[str, Path] = {}
     cached_failures: dict[str, str] = {}
@@ -661,13 +696,12 @@ def main() -> int:
                 year = int(date_value)
                 starts_after_year_start = year == args.from_date.year and args.from_date != date(year, 1, 1)
                 ends_before_year_end = year == args.cutoff.year and args.cutoff != date(year, 12, 31)
-                outside_window = (
+                if (
                     year < args.from_date.year
                     or year > args.cutoff.year
                     or starts_after_year_start
                     or ends_before_year_end
-                )
-                if outside_window:
+                ):
                     continue
             # Keep the manifest under raw/<corpus>/ and source files grouped
             # under raw/<ticker>/<corpus>/.
@@ -682,23 +716,25 @@ def main() -> int:
                 estimated_date, estimate_basis = estimate_publication_date(
                     ticker, label, target.as_posix(), period_lookup
                 )
-            entries.append(IrEntry(
-                document_id=f"{ticker}-IR-{digest[:16]}",
-                company_ticker=ticker,
-                document_type=document_type,
-                publication_date=date_value if precision == "day" else None,
-                date_precision=precision,
-                retrieval_eligible=precision == "day",
-                source_tier=2,
-                source_origin="Official company investor-relations website",
-                source_page=source_page,
-                source_url=url,
-                local_path=target.as_posix(),
-                sha256=digest,
-                link_text=label,
-                estimated_publication_date=estimated_date,
-                estimated_publication_date_basis=estimate_basis,
-            ))
+            entries.append(
+                IrEntry(
+                    document_id=f"{ticker}-IR-{digest[:16]}",
+                    company_ticker=ticker,
+                    document_type=document_type,
+                    publication_date=date_value if precision == "day" else None,
+                    date_precision=precision,
+                    retrieval_eligible=precision == "day",
+                    source_tier=2,
+                    source_origin="Official company investor-relations website",
+                    source_page=source_page,
+                    source_url=url,
+                    local_path=target.as_posix(),
+                    sha256=digest,
+                    link_text=label,
+                    estimated_publication_date=estimated_date,
+                    estimated_publication_date_basis=estimate_basis,
+                )
+            )
 
     manifest: dict[str, Any] = {
         "schema_version": "1.0",
@@ -707,9 +743,7 @@ def main() -> int:
         "cutoff_date": args.cutoff.isoformat(),
         "documents": [asdict(entry) for entry in entries],
         "warnings": warnings,
-        "review_required": [
-            entry.document_id for entry in entries if not entry.retrieval_eligible
-        ],
+        "review_required": [entry.document_id for entry in entries if not entry.retrieval_eligible],
     }
     if canonical_output:
         manifest_path = args.output.parent / canonical_manifest_name

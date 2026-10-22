@@ -1,6 +1,12 @@
-"""Old command. The tool lives in corpus.maintenance."""
+"""Compatibility entry point for corpus.maintenance.pilot."""
+from finsight.agents.narrative.corpus.maintenance import pilot as _implementation
 
-from finsight.agents.narrative.corpus.maintenance.pilot import main
+main = _implementation.main
+
+
+def __getattr__(name: str):
+    return getattr(_implementation, name)
+
 
 if __name__ == "__main__":
     main()

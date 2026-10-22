@@ -154,7 +154,7 @@ def summarize(workspace: Path, results_path: Path, queries_path: Path) -> dict[s
         "limitations": [
             (
                 f"{len(queries)} development claims ({len(queries) * 2} directional queries) "
-                "with sparse curated labels; no heldout evaluation or method selection."
+                f"with sparse curated labels; no heldout evaluation or method selection."
             ),
             "Precision counts labeled positives only; unlabelled passages were not judged irrelevant.",
             "Citation checks establish index consistency and metadata presence, not source-text entailment.",

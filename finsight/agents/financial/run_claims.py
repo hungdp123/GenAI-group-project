@@ -62,8 +62,11 @@ def main():
             continue
         r = json.loads(line)
         text = r.get("text") or ""
-        if (args.ticker and r.get("company_ticker") != args.ticker) or (args.type and r["sub_claim_type"] != args.type) \
-                or (args.with_number and not re.search(r"\d\s*(%|percent|billion|million|bn\b)", text)):
+        if (
+            (args.ticker and r.get("company_ticker") != args.ticker)
+            or (args.type and r["sub_claim_type"] != args.type)
+            or (args.with_number and not re.search(r"\d\s*(%|percent|billion|million|bn\b)", text))
+        ):
             continue
         if args.limit and seen >= args.limit:
             break

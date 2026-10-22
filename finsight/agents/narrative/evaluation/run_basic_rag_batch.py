@@ -14,7 +14,7 @@ from pathlib import Path
 import time
 import uuid
 
-from finsight.agents.narrative.rag.basic_rag import run_basic_narrative_rag
+from finsight.agents.narrative.rag.verdict_baseline import run_basic_narrative_rag
 from finsight.config import PRICE_TABLE, get_settings
 
 
@@ -101,7 +101,7 @@ def run_batch(args) -> dict:
         "model": args.ollama_model or settings.llm_model,
         "index_sha256": {t: digest(companies / t / "index.json") for t in experiment_config["tickers"]},
         "code_sha256": {name: digest(Path(__file__).parent.parent / name) for name in (
-            "evaluation/run_basic_rag_batch.py", "rag/basic_rag.py", "rag/collect_evidence.py",
+            "evaluation/run_basic_rag_batch.py", "rag/verdict_baseline.py", "rag/collect_evidence.py",
             "retrieval/retriever.py")},
     }
     configuration_hash = hashlib.sha256(json.dumps(configuration, sort_keys=True).encode()).hexdigest()

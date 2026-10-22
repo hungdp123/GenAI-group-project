@@ -158,7 +158,10 @@ def named_period(text: str, is_field: bool = False) -> tuple | None:
         a, b = m.groups()
         q, y = (a, b) if m.re.pattern.startswith(r"\bq") else (b, a)
         return ("fiscal_q", _year(y), int(q))
-    m = re.search(rf"\bfiscal (?:q([1-4])|(first|second|third|fourth) quarter)(?:\s+(?:of\s+)?(?:{_FISCAL})?{_YEAR})?", t)
+    m = re.search(
+        rf"\bfiscal (?:q([1-4])|(first|second|third|fourth) quarter)"
+        rf"(?:\s+(?:of\s+)?(?:{_FISCAL})?{_YEAR})?", t,
+    )
     if m:
         return ("fiscal_q", _year(m.group(3)), int(m.group(1)) if m.group(1) else _QORD[m.group(2)])
     m = re.search(rf"\b{_FISCAL}{_YEAR}\b", t) or re.search(rf"\bfull[- ]year\s+{_YEAR}\b", t)

@@ -1,5 +1,5 @@
-""" 
-Turns raw SEC Company Facts / submissions JSON into flat rows 
+"""
+Turns raw SEC Company Facts / submissions JSON into flat rows
 """
 
 from datetime import date
@@ -50,7 +50,8 @@ def normalize_companyfacts(raw: dict, ticker: str, stats: dict | None = None) ->
             if cls is None:
                 stats["unusual_period_length"] = stats.get("unusual_period_length", 0) + 1
                 continue
-            if cls == "FY" and f["form"].startswith("10-Q"):   # trailing-twelve-month figures which are not a fiscal year
+            # Trailing-twelve-month figures which are not a fiscal year.
+            if cls == "FY" and f["form"].startswith("10-Q"):
                 stats["trailing_twelve_months"] = stats.get("trailing_twelve_months", 0) + 1
                 continue
             if (cls == "I") != (kind(concept) == "instant"):

@@ -1,4 +1,4 @@
-""" 
+"""
 Pulls SEC Company Facts
 """
 
