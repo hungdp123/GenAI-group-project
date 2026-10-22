@@ -124,7 +124,7 @@ class LLMStanceClassifier:
 
 
 # Bump this when retrieval or stance labeling changes, so older lines stay comparable.
-SEARCH_RECORD_VERSION = "1-friend"
+SEARCH_RECORD_VERSION = "2-unassessed"
 _SEARCH_LOCK = threading.Lock()
 
 
@@ -138,11 +138,11 @@ def search_log_path() -> Path | None:
     return Path(os.getenv("FINSIGHT_LOGS_DIR", "logs")) / "narrative_searches.jsonl"
 
 
-def _search_hit(rank: int, item: EvidenceItem, stance: Stance) -> dict:
+def _search_hit(rank: int, item: EvidenceItem) -> dict:
     return {
         "rank": rank,
         "chunk_id": item.evidence_id,
-        "stance": stance.value,
+        "assessment_status": "NOT_ASSESSED",
         "doc_type": item.doc_type,
         "publication_date": item.publication_date.isoformat(),
         "citation_span": item.citation_span,
@@ -217,16 +217,11 @@ class NarrativeEvidenceAgent:
         self.index_path_factory = index_path_factory
         self.last_search: dict | None = None
 
-    def _stance_method(self) -> str:
-        return "llm" if isinstance(self.classifier, LLMStanceClassifier) else "exact"
-
     def _record_search(
         self, sub_claim: SubClaim, cutoff_date: date, feedback: str | None, reason: str,
         support_query: str = "", counter_query: str = "",
         support: list[EvidenceItem] | None = None, counter: list[EvidenceItem] | None = None,
-        stances: dict[str, Stance] | None = None,
     ) -> None:
-        labeled = stances or {}
         record = {
             "at": datetime.now(timezone.utc).isoformat(),
             "version": SEARCH_RECORD_VERSION,
@@ -239,13 +234,14 @@ class NarrativeEvidenceAgent:
             "cutoff": cutoff_date.isoformat(),
             "feedback": feedback,
             "backend": self.backend,
-            "stance_method": self._stance_method(),
+            "assessment_status": "NOT_ASSESSED",
+            "stance_method": "none",
             "top_k": self.top_k,
             "support_query": support_query,
             "counter_query": counter_query,
-            "support": [_search_hit(rank, item, labeled.get(item.evidence_id, Stance.NEUTRAL))
+            "support": [_search_hit(rank, item)
                         for rank, item in enumerate(support or [], start=1)],
-            "counter": [_search_hit(rank, item, labeled.get(item.evidence_id, Stance.NEUTRAL))
+            "counter": [_search_hit(rank, item)
                         for rank, item in enumerate(counter or [], start=1)],
         }
         self.last_search = record
@@ -264,6 +260,8 @@ class NarrativeEvidenceAgent:
         if sub_claim.sub_claim_type == SubClaimType.PERSONALIZED_ADVICE:
             self._record_search(sub_claim, cutoff_date, feedback, "advice")
             return []
+        scoped = sub_claim.model_copy(update={"company_ticker": ticker})
+        support_query, counter_query = build_queries(scoped, feedback)
         path = (
             self.index_path_factory(ticker)
             if self.index_path_factory
@@ -293,8 +291,6 @@ class NarrativeEvidenceAgent:
                 candidate_k=self.candidate_k,
             )
         )
-        scoped = sub_claim.model_copy(update={"company_ticker": ticker})
-        support_query, counter_query = build_queries(scoped, feedback)
         support = retriever.retrieve(support_query, self.top_k, cutoff_date)
         counter = retriever.retrieve(counter_query, self.top_k, cutoff_date)
         items: list[EvidenceItem] = []
@@ -328,8 +324,7 @@ class NarrativeEvidenceAgent:
             items.append(original)
             seen.add(item.evidence_id)
         self._record_search(
-            sub_claim, cutoff_date, feedback, "ok", support_query, counter_query, support, counter,
-            {item.evidence_id: item.stance for item in items})
+            sub_claim, cutoff_date, feedback, "ok", support_query, counter_query, support, counter)
         return items
 
 

@@ -147,14 +147,24 @@ available in the saved report and last_analysis; they are not inserted into the
 source content or passed to the auditor as a new interface field. The internal
 mandatory NEUTRAL stance is an unassessed compatibility placeholder, omitted
 from public evidence. The stub auditor/tier policy still rely on stance labels
-and need their own assessment handoff update. The decomposer's hardcoded claim
-rewriting also remains. This implementation does not change shared schemas,
+and need their own assessment handoff update. The merged main workflow now uses
+claim extraction/selection instead of the older default stub decomposer. Do not
+restore the stale decomposer registry slot: it no longer matches AgentRegistry.
+The single registry preserves main's XbrlFinancialAgent and AdviceBoundaryAgent
+and selects the Narrative wrapper/retriever only for the Narrative-owned slots.
+This implementation does not change shared schemas,
 interfaces, the auditor, tier policy, or orchestrator renderer.
 
 Reports remain in data/narrative/experiments/orchestrator_narrative/. New
 standalone reports use ticker-model-evidence-time filenames. Historical verdict,
-stance and retrieval-only outputs are preserved. The subsequent CI repair passed Ruff and the full local suite: 133 tests
-passed with 14 expected failures. Narrative evidence preparation and its source
+stance and retrieval-only outputs are preserved. The current main-merge repair
+passed Ruff and the full local suite: 210 tests passed with 14 expected failures.
+The corpus tooling now lives under narrative/corpus/; old pilot/catalog entry
+points delegate there. Narrative retrieval uses the new shared company thesaurus.
+Search logs record unassessed evidence and safely handle absent/empty indexes.
+Narrative evidence preparation and its source
 validation/fallback are tested with mocked responses; no paid API calls were
-made. Dataset validation, the mock demo, graph freshness and tracked-file secret
-checks passed locally. Commit/push the repair for a fresh remote CI result.
+made. Dataset validation, graph freshness and the tracked-file secret guard passed.
+The CI mock demo exits successfully but requests an influencer in the new main
+workflow, rather than finishing an evidence assessment. Commit/push the repair
+for a fresh remote CI matrix result.

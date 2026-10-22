@@ -23,23 +23,11 @@ from finsight.contracts.interfaces import (
 
 DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
     "financial": "finsight.agents.financial.agent:XbrlFinancialAgent",
-    "narrative": "finsight.agents.narrative.rag.collect_evidence:NarrativeEvidenceAgent",
-    "retriever": "finsight.agents.narrative.retrieval.retriever:CorpusRetriever",
+    "narrative": "finsight.agents.narrative.stub:NarrativeAgent",
+    "retriever": "finsight.agents.narrative.retriever_stub:NarrativeRetriever",
     "auditor": "finsight.agents.auditor.stub:StubAuditor",
     "advice_boundary": "finsight.agents.advice_boundary.agent:AdviceBoundaryAgent",
     "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",
-}
-
-# What the app actually runs: slot -> "module:Class". Env override: FINSIGHT_IMPL_<SLOT upper>.
-# SWAP YOUR AGENT HERE: change only your own line(s), so merges never conflict.
-DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
-    "decomposer": "finsight.agents.decomposition.stub:StubDecomposer",  # Person 3
-    "financial": "finsight.agents.financial.stub:StubFinancialAgent",  # Person 1
-    "narrative": "finsight.agents.narrative.stub:NarrativeAgent",  # Person 2
-    "retriever": "finsight.agents.narrative.retriever_stub:NarrativeRetriever",  # Person 2
-    "auditor": "finsight.agents.auditor.stub:StubAuditor",  # Person 3
-    "advice_boundary": "finsight.agents.advice_boundary.stub:StubAdviceBoundary",  # Person 4
-    "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",  # Person 4
 }
 
 _PROTOCOLS: dict[str, type] = {

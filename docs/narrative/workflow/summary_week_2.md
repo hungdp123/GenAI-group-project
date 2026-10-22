@@ -15,10 +15,16 @@ Use `FINSIGHT_NARRATIVE_ANALYSIS=evidence` for the orchestrator, or run the
 basic_rag command normally; explicit retrieval-only mode is still available.
 Current output/configuration details are in Section 10 and the
 [handoff guide](orchestrator_narrative_handoff.md#llm-evidence-preparation-without-stance-or-verdict).
-The subsequent CI repair passed local Ruff checks and the full test suite
-(133 passed, 14 expected failures), with mocked LLM responses and no paid requests.
-Dataset validation, the mock demo, graph freshness and tracked-file secret checks
-also passed locally. GitHub must rerun CI after the repair is committed/pushed.
+The current main-merge repair passed local Ruff checks and the full test suite
+(210 passed, 14 expected failures), with mocked LLM responses and no paid requests.
+It reconciles the moved `narrative/corpus/` modules, removes the duplicate registry
+that overwrote main's financial/advice implementations, adopts the unified company
+thesaurus, and fixes empty-index search logging. Search logs now mark evidence
+NOT_ASSESSED rather than recording predicted stance labels. Shared schema tests
+follow main's version 0.7. Dataset validation, graph freshness and the tracked-file
+secret guard passed. The current CI demo exits successfully with an influencer
+clarification request; it is not a completed real-claim assessment. GitHub must
+rerun its Linux/Windows matrix after this repair is committed/pushed.
 Historical results below retain their original scope.
 
 There are two operational stages: prepare searchable company evidence, then answer a claim using that evidence. Retrieval evaluation, provenance validation and integration checks accompany those stages. Chunking/retrieval research uses separate experiment artifacts.

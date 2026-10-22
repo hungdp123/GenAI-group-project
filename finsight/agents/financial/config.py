@@ -1,4 +1,4 @@
-""" 
+"""
 Companies in project scope
 """
 
@@ -7,19 +7,19 @@ from datetime import date
 # ticker -> industry
 COMPANIES = {
     "AAPL": "Consumer electronics",
-    "GOOGL": "Internet / advertising",      
+    "GOOGL": "Internet / advertising",
     "MSFT": "Software",
     "NFLX": "Streaming",
     "NVDA": "Semiconductors",
     "TSLA": "Automotive",
     "AMZN": "E-commerce / cloud",
     "META": "Social media / advertising",
-    "MELI": "E-commerce / fintech",           
-    "SBUX": "Restaurants",                     
-    "PLTR": "Software",                        
+    "MELI": "E-commerce / fintech",
+    "SBUX": "Restaurants",
+    "PLTR": "Software",
     "INTC": "Semiconductors",
-    "INTU": "Software",                      
-    "CRM": "Software",                         
+    "INTU": "Software",
+    "CRM": "Software",
     "ORCL": "Software",
     "AMD": "Semiconductors",
 }

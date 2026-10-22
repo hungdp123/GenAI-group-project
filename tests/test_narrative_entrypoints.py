@@ -7,10 +7,10 @@ from types import SimpleNamespace
 import pytest
 
 from finsight.agents.narrative import NarrativeAgent, NarrativeRetriever, WORKFLOW_MODULES
-from finsight.agents.narrative.processing.chunk import chunk_blocks
-from finsight.agents.narrative.processing.index import build_index
-from finsight.agents.narrative.processing.ingest import ProcessedBlock
-from finsight.config import AgentRegistry, STUB_IMPLEMENTATIONS, _load
+from finsight.agents.narrative.corpus.processing.chunk import chunk_blocks
+from finsight.agents.narrative.corpus.processing.index import build_index
+from finsight.agents.narrative.corpus.processing.ingest import ProcessedBlock
+from finsight.config import AgentRegistry, _load
 from finsight.contracts.interfaces import NarrativeAgent as NarrativeProtocol, Retriever
 from finsight.contracts.schemas import EvidenceItem, Stance, SubClaim, SubClaimType
 
@@ -128,8 +128,8 @@ def test_feedback_and_tuning_are_forwarded(corpus_root, monkeypatch):
 
 
 def test_demo_paths_remain_loadable_and_separate_from_real_entries():
-    demo_agent = _load(STUB_IMPLEMENTATIONS["narrative"])()
-    demo_retriever = _load(STUB_IMPLEMENTATIONS["retriever"])()
+    demo_agent = _load("finsight.agents.narrative.demo.stub:StubNarrativeAgent")()
+    demo_retriever = _load("finsight.agents.narrative.demo.retriever_stub:StubRetriever")()
     assert demo_agent.name == "narrative_stub"
     assert demo_retriever.name == "retriever_stub"
     assert not isinstance(demo_agent, NarrativeAgent)
@@ -139,6 +139,16 @@ def test_demo_paths_remain_loadable_and_separate_from_real_entries():
     assert callable(run_basic_narrative_rag)
     assert WORKFLOW_MODULES["extract_pdf_charts_and_promote"].endswith("pdf_chart_processing")
     assert WORKFLOW_MODULES["generate_92_claim_answers"].endswith("run_basic_rag_batch")
+
+
+def test_registry_matches_new_main_slots_and_preserves_other_agents():
+    from finsight.config import DEFAULT_IMPLEMENTATIONS
+
+    assert set(DEFAULT_IMPLEMENTATIONS) == set(AgentRegistry.__dataclass_fields__)
+    assert DEFAULT_IMPLEMENTATIONS["financial"] == "finsight.agents.financial.agent:XbrlFinancialAgent"
+    assert DEFAULT_IMPLEMENTATIONS["advice_boundary"] == "finsight.agents.advice_boundary.agent:AdviceBoundaryAgent"
+    assert DEFAULT_IMPLEMENTATIONS["narrative"] == "finsight.agents.narrative.stub:NarrativeAgent"
+    assert DEFAULT_IMPLEMENTATIONS["retriever"] == "finsight.agents.narrative.retriever_stub:NarrativeRetriever"
 
 
 @pytest.fixture

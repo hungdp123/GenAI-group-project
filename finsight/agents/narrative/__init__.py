@@ -16,11 +16,11 @@ from importlib import import_module
 __all__ = ["NarrativeAgent", "NarrativeRetriever", "run_basic_narrative_rag", "WORKFLOW_MODULES"]
 
 WORKFLOW_MODULES = {
-    "acquire_core_documents": "finsight.agents.narrative.acquisition.download_corpus",
-    "acquire_supplemental_documents": "finsight.agents.narrative.acquisition.download_supplemental_corpus",
-    "catalog": "finsight.agents.narrative.maintenance.generate_catalog",
-    "process_text_and_build_bm25": "finsight.agents.narrative.processing.process_corpus",
-    "extract_pdf_charts_and_promote": "finsight.agents.narrative.pdf.pdf_chart_processing",
+    "acquire_core_documents": "finsight.agents.narrative.corpus.acquisition.download_corpus",
+    "acquire_supplemental_documents": "finsight.agents.narrative.corpus.acquisition.download_supplemental_corpus",
+    "catalog": "finsight.agents.narrative.corpus.maintenance.generate_catalog",
+    "process_text_and_build_bm25": "finsight.agents.narrative.corpus.processing.process_corpus",
+    "extract_pdf_charts_and_promote": "finsight.agents.narrative.corpus.pdf.pdf_chart_processing",
     "build_vectors": "finsight.agents.narrative.retrieval.build_vector_databases",
     "retrieve": "finsight.agents.narrative.retrieval.retriever",
     "collect_evidence": "finsight.agents.narrative.rag.collect_evidence",

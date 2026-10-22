@@ -20,7 +20,7 @@ import urllib.request
 
 from bs4 import BeautifulSoup
 
-from finsight.agents.narrative.acquisition.download_event_reports import _save_json
+from finsight.agents.narrative.corpus.acquisition.download_event_reports import _save_json
 
 
 # Issuer identities, not accession-number/filing-agent prefixes.

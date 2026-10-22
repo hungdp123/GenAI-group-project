@@ -13,7 +13,7 @@ from pathlib import Path
 
 from finsight.agents.demo_corpus import NARRATIVE_CHUNKS
 from finsight.agents.narrative.retrieval.retriever import CorpusRetriever
-from finsight.config import CANONICAL_COMPANIES
+from finsight.agents.claim_extraction.thesaurus import corpus_aliases
 from finsight.contracts.schemas import EvidenceItem, Stance
 from finsight.llm.usage import record_tool_call
 
@@ -51,7 +51,7 @@ class NarrativeRetriever:
         ticker = self.company_ticker
         if ticker is None:
             candidates = {
-                company for company, aliases in CANONICAL_COMPANIES.items()
+                company for company, aliases in corpus_aliases().items()
                 if any(re.search(r"(?<!\w)" + re.escape(alias) + r"(?!\w)", query, re.I)
                        for alias in [company, *aliases])
             }

@@ -19,7 +19,7 @@ import urllib.parse
 
 from bs4 import BeautifulSoup
 
-from finsight.agents.narrative.acquisition.download_corpus import SecClient, SEC_DATA, _archive_base, _safe_name
+from finsight.agents.narrative.corpus.acquisition.download_corpus import SecClient, SEC_DATA, _archive_base, _safe_name
 
 
 EVENT_FORMS = {"8-K", "8-K/A", "6-K", "6-K/A"}

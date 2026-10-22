@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from finsight.agents.narrative.processing.chunk import chunk_blocks
-from finsight.agents.narrative.processing.corpus import CorpusDocument, validate_document
-from finsight.agents.narrative.processing.index import build_index, load_index, search_index
-from finsight.agents.narrative.processing.ingest import ProcessedBlock, parse_document
+from finsight.agents.narrative.corpus.processing.chunk import chunk_blocks
+from finsight.agents.narrative.corpus.processing.corpus import CorpusDocument, validate_document
+from finsight.agents.narrative.corpus.processing.index import build_index, load_index, search_index
+from finsight.agents.narrative.corpus.processing.ingest import ProcessedBlock, parse_document
 from finsight.agents.narrative.retrieval.retriever import CorpusRetriever
 from finsight.agents.narrative.retrieval.retrieval_experiments import (
     DenseVectorCache,
