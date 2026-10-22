@@ -329,3 +329,57 @@ def test_the_month_may_is_not_hedging_but_the_word_may_is():
     assert audit(DEMAND_SHORT, [month]).verdict is Verdict.SUPPORTED
     hedged = _text_item("sc1", "AI infrastructure demand may drive revenue growth.")
     assert not audit(DEMAND_SHORT, [hedged]).passed
+
+
+# -- 2d. what the sub-claim states: bounds, signs, multiples, rounding, ratios -----------------------------
+
+PCF = SubClaimType.PROFITABILITY_CASH_LEVERAGE
+FILED = date(2026, 7, 30)
+
+
+def _verdict(text, metric, value, content, kind=SubClaimType.HISTORICAL_GROWTH):
+    return audit(*_fin("META", "Meta", text, metric, value, content, "quarter ended 2026-06-30", FILED, kind=kind))
+
+
+@pytest.mark.parametrize("text,metric,value,content,expected", [
+    # a bound is not a target: 13.1% is above 10%, 5% growth is below 10%
+    ("Amazon's operating margin is above 10%", "operating_margin", 0.131, "Operating margin 13.1% vs 11.0%", Verdict.SUPPORTED),
+    ("Amazon's operating margin is above 10%", "operating_margin", 0.08, "Operating margin 8.0% vs 7.0%", Verdict.CONTRADICTED),
+    ("Apple has less than 10% earnings growth", "net_income_growth_yoy", 0.05, "Net income $98.4B vs $93.7B (+5.0% YoY)", Verdict.SUPPORTED),
+    ("Apple has less than 10% earnings growth", "net_income_growth_yoy", 0.195, "Net income $112.0B vs $93.7B (+19.5% YoY)", Verdict.CONTRADICTED),
+    # sign: the computed figure's own sign decides
+    ("Amazon's free cash flow has recently turned negative", "free_cash_flow", -8.8e9, "Free cash flow was -$8.8B in Q2 2026", Verdict.SUPPORTED),
+    ("Amazon's free cash flow has recently turned negative", "free_cash_flow", 5.0e9, "Free cash flow was $5.0B in Q2 2026", Verdict.CONTRADICTED),
+    # "doubled" = 1.9 to 2.1 times
+    ("Nvidia's revenue doubled", "revenue_growth_yoy", 1.059, "Revenue $96.2B vs $46.7B (+105.9% YoY)", Verdict.SUPPORTED),
+    ("Nvidia's revenue doubled", "revenue_growth_yoy", 0.80, "Revenue $90B vs $50B (+80.0% YoY)", Verdict.CONTRADICTED),
+    # dollar amount: rounding to the stated precision, not a flat 1%
+    ("Alphabet's revenue was $110 billion", "revenue", 109.9e9, "Revenue was $109.9bn in Q1 2026", Verdict.SUPPORTED),
+    ("Alphabet's revenue was $110 billion", "revenue", 114.0e9, "Revenue was $114.0bn in Q1 2026", Verdict.CONTRADICTED),
+    ("Alphabet's revenue was $96.2 billion", "revenue", 96.8e9, "Revenue was $96.8bn in Q1 2026", Verdict.CONTRADICTED),
+])
+def test_what_the_subclaim_states_decides_the_verdict(text, metric, value, content, expected):
+    kind = PCF if metric in ("operating_margin", "free_cash_flow") else SubClaimType.HISTORICAL_GROWTH
+    assert _verdict(text, metric, value, content, kind).verdict is expected
+
+
+def test_ratio_that_is_not_a_percent_or_a_dollar_amount_can_show_direction():
+    r = _verdict("Meta's current ratio fell", "current_ratio", 2.60, "Current ratio 2.60 vs 2.98", PCF)
+    assert r.passed and r.verdict is Verdict.SUPPORTED
+    r = _verdict("Meta's current ratio rose", "current_ratio", 2.60, "Current ratio 2.60 vs 2.98", PCF)
+    assert r.verdict is Verdict.CONTRADICTED
+
+
+def test_gross_profit_is_its_own_metric_not_net_income():
+    r = _verdict("Tesla's gross profit has been in decline", "gross_profit_growth_yoy", -0.02,
+                 "Gross profit $4.0B vs $4.1B (-2.0% YoY)")
+    assert r.passed and r.verdict is Verdict.SUPPORTED
+    r = _verdict("Tesla's gross profit has been in decline", "net_income_growth_yoy", -0.02,
+                 "Net income $4.0B vs $4.1B (-2.0% YoY)")
+    assert not r.passed and any("does not measure" in x for x in r.failure_reasons)
+
+
+def test_ratio_direction_ignores_the_dates_in_the_financial_agents_wording():
+    content = "Current ratio was 2.60x as at 2026-06-30 vs 2.98x a year earlier (as at 2025-06-30)."
+    assert _verdict("Meta's current ratio fell", "current_ratio", 2.60, content, PCF).verdict is Verdict.SUPPORTED
+    assert _verdict("Meta's current ratio rose", "current_ratio", 2.60, content, PCF).verdict is Verdict.CONTRADICTED

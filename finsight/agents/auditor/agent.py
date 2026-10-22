@@ -27,6 +27,12 @@ The judged stances go back in `AuditResult.evidence_stances`; the orchestrator a
 (non-NEUTRAL) items are checked and counted. If items came back but none is usable, the audit FAILS so the
 collector gets its one retry with feedback.
 
+WHAT THE SUB-CLAIM STATES (read from its wording; the contract has no comparator field): a bound ("above 10%",
+"less than 10% growth") is compared as a bound, not as a target; "turned negative" is decided by the sign of the
+computed figure; "doubled" means 1 + growth in 1.9-2.1 (team rule); a stated dollar amount matches after rounding to
+the precision it is stated in ("$110 billion" -> +-$0.5bn); a direction needs the current and prior figure in the
+evidence text (percents, dollar amounts, or a plain pair such as "2.60 vs 2.98").
+
 Entailment ("does the cited passage support the sub-claim?") is rule-based in mock mode so the tests are
 deterministic. With a real LLM provider, `complete()` is asked as well; it can only downgrade a SUPPORTING
 judgment or add CHALLENGING, never create support on its own.
@@ -51,7 +57,6 @@ from finsight.contracts.schemas import (
 from finsight.llm.client import DATA_SAFETY_PREAMBLE, complete, data_block
 
 MATCH_BAND = 0.005          # 0.5 percentage points, as a fraction (knowledge layer section 10)
-MONEY_REL_TOL = 0.01        # a stated dollar amount may differ by 1% (rounding: $109.9bn vs "$110 billion")
 MIN_COVERAGE = 0.6          # share of the sub-claim's key words that the passage must contain
 
 # Sub-claim types whose SUPPORTED verdict needs a Tier 1 computed record (knowledge layer: HISTORICAL_GROWTH,
@@ -73,7 +78,7 @@ MARGINS = {"gross_margin", "operating_margin", "net_margin", "fcf_margin"}
 # -- wording -------------------------------------------------------------------------------------
 
 _UP = re.compile(r"\b(grew|grow\w*|increas\w*|ros[e]|rising|rise[sn]?|expand\w*|improv\w*|higher|accelerat\w*|"
-                 r"surg\w*|jump\w*|climb\w*|widen\w*|up)\b", re.I)
+                 r"surg\w*|jump\w*|climb\w*|widen\w*|doubl\w*|tripl\w*|up)\b", re.I)
 _DOWN = re.compile(r"\b(shrink\w*|shrank|shrunk|declin\w*|fell|fall\w*|decreas\w*|lower|contract\w*|compress\w*|"
                    r"narrow\w*|drop\w*|slow\w*|slid\w*|down|deteriorat\w*|weaken\w*|dipped)\b", re.I)
 _HEDGE = re.compile(r"\b((?-i:may)|might|could|possibly|potentially|uncertain|unclear|depending on|no assurance|"
@@ -135,6 +140,18 @@ def _money(text: str) -> list[float]:
     return out
 
 
+def _money_half_unit(text: str) -> float:
+    """Half a unit in the last stated digit of the (first) dollar amount: "$110 billion" -> $0.5bn, "$96.2bn" -> $0.05bn.
+    Team rule: a dollar amount matches after rounding to the stated precision."""
+    m = _MONEY_RE.search(text)
+    if not m:
+        return 0.0
+    raw = m.group(2).replace(",", "")
+    decimals = len(raw.split(".")[1]) if "." in raw else 0
+    unit = m.group(3).lower() if m.group(3) else None
+    return 0.5 * 10 ** (-decimals) * _UNIT[unit]
+
+
 def _direction(text: str) -> str | None:
     up, down = bool(_UP.search(text)), bool(_DOWN.search(text))
     return "up" if up and not down else "down" if down and not up else None
@@ -186,6 +203,70 @@ def _polarity_stems(sub_claim: SubClaim) -> set[str]:
     return _stems(sub_claim.text, _alias_words(sub_claim.company_ticker)) - direction_stems
 
 
+# -- comparators the sub-claim states (read from its wording; the contract has no comparator field) -------------
+
+_ABOVE = r"(?:above|over|more than|greater than|higher than|exceed\w*|at least|north of)"
+_BELOW = r"(?:below|under|less than|lower than|fewer than|at most|south of)"
+_THRESH_PCT = re.compile(rf"\b({_ABOVE}|{_BELOW})\s+(?:about |around |roughly )?({_NUM})\s?(?:%|percent\b|per cent\b)", re.I)
+_THRESH_USD = re.compile(rf"\b({_ABOVE}|{_BELOW})\s+(?:about |around |roughly )?(-)?\$\s?({_NUM})\s?(bn|billion|b|million|m|thousand|k)?(?![a-z])", re.I)
+_MULTIPLE = {"doubl": (1.9, 2.1), "tripl": (2.85, 3.15), "halv": (0.45, 0.55)}   # "doubled" band: team rule, 1.9 to 2.1
+_NEGATIVE = re.compile(r"\b(?:turned|gone|went|going|is|are|was|were|been|become|became|remains?)?\s*(?:negative|in the red|burn(?:ing|ed)? cash)\b", re.I)
+_POSITIVE = re.compile(r"\b(?:turned|went|became|become|is|are|was|were)\s+positive\b", re.I)
+_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+_PLAIN_PAIR = re.compile(rf"(-?{_NUM})\s*x?[^\d]{{0,30}}?\b(?:vs\.?|versus|compared with|against)\s*(-?{_NUM})", re.I)
+
+
+@dataclass
+class _Threshold:
+    op: str                 # "gt" or "lt"
+    bound: float            # a fraction for percents, full USD for amounts
+    kind: str               # "pct" or "usd"
+
+
+def _threshold(text: str) -> _Threshold | None:
+    """"above 10%", "less than 10% earnings growth", "over $10 billion": the stated number is a bound, not a target."""
+    m = _THRESH_PCT.search(_PERIOD_NOISE.sub(" ", text))
+    if m:
+        op = "gt" if re.fullmatch(_ABOVE, m.group(1), re.I) else "lt"
+        return _Threshold(op, float(m.group(2).replace(",", "")) / 100, "pct")
+    m = _THRESH_USD.search(text)
+    if m:
+        op = "gt" if re.fullmatch(_ABOVE, m.group(1), re.I) else "lt"
+        unit = m.group(4).lower() if m.group(4) else None
+        value = float(m.group(3).replace(",", "")) * _UNIT[unit]
+        return _Threshold(op, -value if m.group(2) else value, "usd")
+    return None
+
+
+def _multiple(text: str) -> tuple[float, float] | None:
+    for stem, band in _MULTIPLE.items():
+        if re.search(rf"\b{stem}\w*", text, re.I):
+            return band
+    return None
+
+
+def _sign_claim(text: str) -> int:
+    """-1 for "turned negative", +1 for "turned positive", 0 when the sub-claim says nothing about the sign."""
+    if _POSITIVE.search(text):
+        return 1
+    if re.search(r"(?<!\$)\bnegative\b(?!\s+\$)|in the red", text, re.I) and not _money(text):
+        return -1
+    return 0
+
+
+def _check_threshold(th: _Threshold, metric: str, value: float, item: EvidenceItem) -> bool | None:
+    """Does the computed figure sit on the right side of the bound? None when the figure is the wrong kind."""
+    if th.kind == "pct":
+        if not (_is_growth(metric) or _is_margin(metric) or metric.endswith("_ratio")):
+            return None
+        return value > th.bound if th.op == "gt" else value < th.bound
+    amounts = _money(item.content)
+    figure = value if abs(value) >= 1000 else (amounts[0] if amounts else None)
+    if figure is None or _is_growth(metric) or _is_margin(metric):
+        return None
+    return figure > th.bound if th.op == "gt" else figure < th.bound
+
+
 # -- concepts ------------------------------------------------------------------------------------
 
 def _expected_concepts(sub_claim: SubClaim) -> set[str] | None:
@@ -203,6 +284,12 @@ def _expected_concepts(sub_claim: SubClaim) -> set[str] | None:
         return {"free_cash_flow", "fcf_margin"}
     if re.search(r"\bcash flow|\bcash generation", text):
         return {"operating_cash_flow", "free_cash_flow", "fcf_margin"}
+    if re.search(r"\bgross (profit|income)", text):
+        return {"gross_profit"}
+    if re.search(r"\bcurrent ratio", text):
+        return {"current_ratio"}
+    if re.search(r"\bcash ratio", text):
+        return {"cash_ratio"}
     if sub_claim.sub_claim_type.value in ("HISTORICAL_GROWTH", "NET_INCOME_GROWTH"):
         if re.search(r"\beps\b|earnings per share", text):
             return {"diluted_eps"}
@@ -413,9 +500,20 @@ class AuditorAgent:
                        percents: list[_Pct], run: _Run) -> None:
         """Compare the number the sub-claim states with the computed record."""
         direction = _direction(sub_claim.text)
-        stated_pcts = _pcts(sub_claim.text)
+        threshold = _threshold(sub_claim.text)
+        stated_pcts = [] if threshold is not None else _pcts(sub_claim.text)
         matches: list[bool] = []
         stated_frac = None
+        if threshold is not None:
+            met = _check_threshold(threshold, metric, value, item)
+            if met is not None:
+                matches.append(met)
+        sign = _sign_claim(sub_claim.text)
+        if sign and not _is_growth(metric):
+            matches.append(value != 0 and (value < 0) == (sign < 0))
+        band = _multiple(sub_claim.text)
+        if band and _is_growth(metric):
+            matches.append(band[0] <= 1 + value <= band[1])
         if stated_pcts and (_is_growth(metric) or _is_margin(metric)):
             first = stated_pcts[0]
             stated_frac = first.value / 100
@@ -430,10 +528,11 @@ class AuditorAgent:
                     candidates += [abs(cur - prev)]
                     candidates += [abs((cur - prev) / prev)] if prev else []
                 matches.append(any(abs(stated_frac - c) <= MATCH_BAND + 1e-9 for c in candidates))
-        stated_money = _money(sub_claim.text)
+        stated_money = [] if threshold is not None else _money(sub_claim.text)
         content_money = _money(item.content)
         if len(stated_money) == 1 and content_money:
-            matches.append(abs(stated_money[0] - content_money[0]) <= MONEY_REL_TOL * abs(content_money[0]))
+            tol = max(_money_half_unit(sub_claim.text), 1e-9 * abs(content_money[0]))   # rounding to stated precision
+            matches.append(abs(stated_money[0] - content_money[0]) <= tol)
         if not matches:
             return
         ok = all(matches)
@@ -452,11 +551,25 @@ class AuditorAgent:
         amounts = _money(item.content)
         if len(amounts) >= 2 and not _is_margin(metric):
             return amounts[0] - amounts[1]
+        pair = _PLAIN_PAIR.search(_DATE.sub(" ", item.content))   # "as at 2026-06-30 vs 2.98x": the date is not a figure
+        if pair and not percents and not amounts:
+            return float(pair.group(1).replace(",", "")) - float(pair.group(2).replace(",", ""))
         return None
 
     def _numeric_stance(self, sub_claim: SubClaim, item: EvidenceItem) -> tuple[Stance, str]:
         """Does the computed figure back the direction the sub-claim states? (The collector's label is ignored.)"""
         metric, value = item.metric_name or "", float(item.computed_value)
+        threshold = _threshold(sub_claim.text)
+        if threshold is not None:                   # "above 10%" / "less than 10% growth": a bound, not a direction
+            met = _check_threshold(threshold, metric, value, item)
+            if met is not None:
+                return (Stance.SUPPORTING if met else Stance.CHALLENGING), ""
+        sign = _sign_claim(sub_claim.text)
+        if sign and not _is_growth(metric):         # "turned negative": the computed figure's own sign decides
+            return (Stance.SUPPORTING if (value < 0) == (sign < 0) and value != 0 else Stance.CHALLENGING), ""
+        band = _multiple(sub_claim.text)
+        if band and _is_growth(metric):             # "doubled": 1 + growth must sit in the band
+            return (Stance.SUPPORTING if band[0] <= 1 + value <= band[1] else Stance.CHALLENGING), ""
         direction = _direction(sub_claim.text)
         if direction is None and _is_growth(metric):
             direction = "up"                        # "revenue growth is strong": positive growth backs it
