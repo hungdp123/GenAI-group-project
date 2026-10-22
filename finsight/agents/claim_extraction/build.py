@@ -127,7 +127,7 @@ def claims_path(posts_dir: Path) -> Path:
 def claims_catalog_path(posts_dir: Path) -> Path:
     """The field catalog when it has been built, otherwise the original claim list."""
     claims_dir = posts_dir.parent / "claims"
-    versioned = claims_dir / "claim_update_v3.json"
+    versioned = claims_dir / "claim_update_v3.jsonl"
     if versioned.exists():
         return versioned
     updated = claims_dir / "claims_updated.jsonl"
