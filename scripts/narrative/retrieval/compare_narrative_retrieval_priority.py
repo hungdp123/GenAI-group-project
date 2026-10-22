@@ -18,8 +18,8 @@ import time
 from datetime import date
 from pathlib import Path
 
-from finsight.agents.narrative.processing.corpus import file_sha256
-from finsight.agents.narrative.processing.index import search_index
+from finsight.agents.narrative.corpus.processing.corpus import file_sha256
+from finsight.agents.narrative.corpus.processing.index import search_index
 from finsight.agents.narrative.retrieval.qdrant_index import build_qdrant_index, load_qdrant_index, search_qdrant, reciprocal_rank_fusion
 from finsight.agents.narrative.retrieval.retrieval_experiments import SentenceTransformersBackend, SentenceTransformersReranker, _diverse
 from finsight.agents.narrative.retrieval.source_priority import assign_priority, apply_bounded_priority, sufficiency_diagnostic, unchanged_trace
@@ -249,7 +249,7 @@ def main():
     else:
         write_json(config_path, immutable)
         for p in (Path(__file__).resolve(), root / 'finsight/agents/narrative/retrieval/source_priority.py', root / 'finsight/agents/narrative/retrieval/qdrant_index.py',
-                  root / 'finsight/agents/narrative/retrieval/retrieval_experiments.py', root / 'finsight/agents/narrative/processing/index.py', root / 'scripts/narrative/chunking/compare_narrative_chunking.py'):
+                  root / 'finsight/agents/narrative/retrieval/retrieval_experiments.py', root / 'finsight/agents/narrative/corpus/processing/index.py', root / 'scripts/narrative/chunking/compare_narrative_chunking.py'):
             dest = output / 'code' / p.relative_to(root)
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(p, dest)

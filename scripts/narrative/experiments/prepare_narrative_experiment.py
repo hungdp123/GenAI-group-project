@@ -20,9 +20,9 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-from finsight.agents.narrative.processing.corpus import CANONICAL_MANIFESTS, file_sha256, load_documents
-from finsight.agents.narrative.processing.ingest import ProcessedBlock, _base, parse_document
-from finsight.agents.narrative.processing.process_corpus import discover_tickers
+from finsight.agents.narrative.corpus.processing.corpus import CANONICAL_MANIFESTS, file_sha256, load_documents
+from finsight.agents.narrative.corpus.processing.ingest import ProcessedBlock, _base, parse_document
+from finsight.agents.narrative.corpus.processing.process_corpus import discover_tickers
 
 
 def write_json(path: Path, value: object) -> None:

@@ -9,8 +9,16 @@ from __future__ import annotations
 
 import textwrap
 
-from finsight.agents.orchestrator.explain import friendly_date, source_label, verdict_label
-from finsight.contracts.schemas import AssessmentStatus, EvidenceItem, FinalAssessment
+from finsight.agents.orchestrator.expansion import report_units
+from finsight.agents.orchestrator.explain import (
+    expansion_block,
+    friendly_date,
+    source_label,
+    unit_heading,
+    unit_partial_reason,
+    verdict_label,
+)
+from finsight.contracts.schemas import AssessmentStatus, EvidenceItem, FinalAssessment, SubClaimResult
 
 WIDTH = 96
 
@@ -44,16 +52,20 @@ def render_assessment(fa: FinalAssessment, *, show_evidence: bool = True, techni
     if fa.claim:
         lines += _wrap(f'Claim checked: "{fa.claim.strip()}"', indent="               ", first="")
     lines += [f"Information up to: {_as_of(fa)}", ""]
+    if fa.checked_post:
+        lines += _wrap(fa.checked_post, indent="  ", first="")
+        lines.append("")
 
     lines += ["SUMMARY"]
     if fa.status is AssessmentStatus.COMPLETED:
         lines += _wrap(fa.summary or f"Overall: {verdict_label(fa.overall_verdict)}.", indent="  ", first="  ")
-        if fa.sub_claim_results:
+        units = report_units(fa.sub_claim_results)
+        if units:
             lines.append("")
-            width = max(len(verdict_label(r.verdict)) for r in fa.sub_claim_results) + 2
-            for i, r in enumerate(fa.sub_claim_results, start=1):
-                tag = f"[{verdict_label(r.verdict)}]".ljust(width + 1)
-                lines += _wrap(f"{r.sub_claim.text}", indent=" " * (6 + width + 1), first=f"  {i}. {tag} ")
+            width = max(len(_tagged(unit)) for unit in units)
+            for i, unit in enumerate(units, start=1):
+                tag = f"[{_tagged(unit)}]".ljust(width + 1)
+                lines += _wrap(unit_heading(unit), indent=" " * (6 + width + 1), first=f"  {i}. {tag} ")
     else:
         lines += _wrap(fa.summary or (fa.clarification_question or fa.refusal_reason or ""), indent="  ", first="  ")
 
@@ -61,25 +73,58 @@ def render_assessment(fa: FinalAssessment, *, show_evidence: bool = True, techni
         lines += ["", "DETAILS"]
         if not show_evidence:
             lines.append("(evidence hidden; run without --no-evidence to see the sources)")
-        for i, r in enumerate(fa.sub_claim_results, start=1):
-            lines += [""] + _wrap(f"{i}. {r.sub_claim.text}  ->  {verdict_label(r.verdict)}", indent="   ")
+        for i, unit in enumerate(report_units(fa.sub_claim_results), start=1):
+            if unit.is_parent:
+                lines += ["", * _wrap(f"{i}. {expansion_block(unit)}", indent="   ")]
+                if show_evidence:
+                    lines += _unit_evidence(unit.results, show_evidence=True)
+                continue
+            r = unit.results[0]
+            lines += [""] + _wrap(f"{i}. {r.sub_claim.text}  ->  {_tagged(unit)}", indent="   ")
             if r.explanation:
                 lines += _wrap(f"Why: {r.explanation}", indent="        ", first="   ")
             if show_evidence:
-                if r.supporting:
-                    lines.append("   Evidence for:")
-                    for e in r.supporting:
-                        lines += _evidence(e)
-                if r.challenging:
-                    lines.append("   Evidence against:")
-                    for e in r.challenging:
-                        lines += _evidence(e)
-                if not r.supporting and not r.challenging:
-                    lines.append("   Evidence: none found")
+                lines += _unit_evidence((r,), show_evidence=True)
 
     lines += [""] + _wrap(f"Note: {fa.boundary_disclaimer}")
+    if fa.status is AssessmentStatus.COMPLETED:
+        lines += _wrap(REPORT_LIMITS, indent="  ", first="  ")
     lines += [f"Reference: {fa.request_id}"]
     return "\n".join(lines)
+
+
+def _tagged(unit) -> str:
+    label = verdict_label(unit.verdict)
+    reason = unit_partial_reason(unit)
+    return f"{label}: {reason}" if reason else label
+
+
+REPORT_LIMITS = (
+    "This label is a document check of the sentence against the filing. It can be wrong. "
+    "The project window is 1 Apr 2026 through 30 Sep 2026. "
+    "This check is in English."
+)
+
+
+def _unit_evidence(results: tuple[SubClaimResult, ...], *, show_evidence: bool) -> list[str]:
+    lines: list[str] = []
+    if not show_evidence:
+        return lines
+    any_evidence = False
+    for result in results:
+        if result.supporting:
+            any_evidence = True
+            lines.append("   Evidence for:")
+            for item in result.supporting:
+                lines += _evidence(item)
+        if result.challenging:
+            any_evidence = True
+            lines.append("   Evidence against:")
+            for item in result.challenging:
+                lines += _evidence(item)
+    if not any_evidence:
+        lines.append("   Evidence: none found")
+    return lines
 
 
 def _cite(e: EvidenceItem) -> str:

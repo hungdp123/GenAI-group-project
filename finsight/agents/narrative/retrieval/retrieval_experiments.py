@@ -14,7 +14,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Protocol, Sequence
 
-from finsight.agents.narrative.processing.index import search_index
+from finsight.agents.narrative.corpus.processing.index import search_index
 
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"

@@ -9,8 +9,8 @@ import hashlib, json, re, shutil, zipfile
 from pathlib import Path
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
-from finsight.agents.narrative.processing.corpus import CANONICAL_MANIFESTS
-from finsight.agents.narrative.acquisition.download_ir_event_reports import ISSUERS
+from finsight.agents.narrative.corpus.processing.corpus import CANONICAL_MANIFESTS
+from finsight.agents.narrative.corpus.acquisition.download_ir_event_reports import ISSUERS
 
 
 def main():

@@ -571,6 +571,7 @@ def main() -> int:
     generate(args.manifest, args.output, args.supplemental_manifest, args.ir_manifest)
     return 0
 
+from finsight.agents.narrative.corpus.maintenance.generate_catalog import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

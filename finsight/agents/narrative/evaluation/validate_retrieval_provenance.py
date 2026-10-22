@@ -13,8 +13,8 @@ from collections import Counter
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from finsight.agents.narrative.processing.index import load_index
-from finsight.agents.narrative.pdf.pdf_enrichment import write_json
+from finsight.agents.narrative.corpus.processing.index import load_index
+from finsight.agents.narrative.corpus.pdf.pdf_enrichment import write_json
 from finsight.agents.narrative.retrieval.retrieval_experiments import SentenceTransformersBackend
 from finsight.agents.narrative.retrieval.retriever import CorpusRetriever
 from finsight.agents.narrative.evaluation.run_retrieval_comparison import _load_queries

@@ -2,7 +2,7 @@
 from finsight.agents.auditor.stub import StubAuditor
 from finsight.agents.decomposition.stub import StubDecomposer
 from finsight.agents.financial.stub import StubFinancialAgent
-from finsight.agents.narrative.stub import StubNarrativeAgent
+from finsight.agents.narrative.demo.stub import StubNarrativeAgent
 from finsight.contracts.schemas import SubClaimType, SourceTier, Stance, Verdict
 
 from demo import DEMO_CUTOFF, DEMO_CLAIM

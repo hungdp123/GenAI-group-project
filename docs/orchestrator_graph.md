@@ -14,7 +14,8 @@ graph TD;
 	advice_gate_input(advice_gate_input)
 	scope_check(scope_check)
 	clarification(clarification)
-	decompose(decompose)
+	collect_posts(collect_posts)
+	extract_claims(extract_claims)
 	plan(plan)
 	gather_evidence(gather_evidence)
 	audit(audit)
@@ -32,9 +33,12 @@ graph TD;
 	assemble --> advice_gate_output;
 	audit --> retry_or_accept;
 	clarification --> finalize;
-	decompose -.-> clarification;
-	decompose -.-> finalize;
-	decompose -.-> plan;
+	collect_posts -.-> clarification;
+	collect_posts -.-> extract_claims;
+	collect_posts -.-> finalize;
+	extract_claims -.-> clarification;
+	extract_claims -.-> finalize;
+	extract_claims -.-> plan;
 	gather_evidence --> audit;
 	intake -.-> advice_gate_input;
 	intake -.-> clarification;
@@ -44,7 +48,7 @@ graph TD;
 	retry_or_accept -.-> apply_tier_policy;
 	retry_or_accept -.-> gather_evidence;
 	scope_check -.-> clarification;
-	scope_check -.-> decompose;
+	scope_check -.-> collect_posts;
 	scope_check -.-> finalize;
 	finalize --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2

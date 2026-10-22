@@ -15,7 +15,7 @@ from collections import Counter, defaultdict
 from datetime import date
 from pathlib import Path
 
-from finsight.agents.narrative.processing.corpus import file_sha256
+from finsight.agents.narrative.corpus.processing.corpus import file_sha256
 from scripts.narrative.experiments.prepare_narrative_experiment import identity, write_json
 
 

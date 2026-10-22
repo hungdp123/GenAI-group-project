@@ -145,6 +145,7 @@ def main() -> None:
     results = query_pilot(workspace, args.query, args.cutoff, args.top_k, all_documents=args.all_documents)
     print(json.dumps({"report": report, "query_results": results}, indent=2, ensure_ascii=False))
 
+from finsight.agents.narrative.corpus.maintenance.pilot import main
 
 if __name__ == "__main__":
     main()

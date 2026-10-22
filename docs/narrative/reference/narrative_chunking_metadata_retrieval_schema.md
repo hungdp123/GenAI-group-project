@@ -86,8 +86,8 @@ The current index is lexical BM25, not vector/embedding search (`processing/inde
 
 ## 6. Relevant implementation
 
-- `finsight/agents/narrative/processing/corpus.py` — manifest loading, normalization, validation, and corpus fingerprint.
-- `finsight/agents/narrative/processing/ingest.py` — HTML/PDF extraction and citation spans.
-- `finsight/agents/narrative/processing/chunk.py` — chunk fields, IDs, and word-window chunking.
-- `finsight/agents/narrative/processing/index.py` — index format, exact-text deduplication, BM25 scoring, and filtering.
+- `finsight/agents/narrative/corpus/processing/corpus.py` — manifest loading, normalization, validation, and corpus fingerprint.
+- `finsight/agents/narrative/corpus/processing/ingest.py` — HTML/PDF extraction and citation spans.
+- `finsight/agents/narrative/corpus/processing/chunk.py` — chunk fields, IDs, and word-window chunking.
+- `finsight/agents/narrative/corpus/processing/index.py` — index format, exact-text deduplication, BM25 scoring, and filtering.
 - `finsight/agents/narrative/retrieval/retriever.py` — conversion to the shared evidence contract.

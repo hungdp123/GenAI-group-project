@@ -308,13 +308,15 @@ The code follows the team architecture diagram ([docs/architecture.svg](docs/arc
 
 ![FinSight architecture](docs/architecture.svg)
 
-How the diagram's boxes map to the code (`finsight/agents/orchestrator/`):
+How the diagram's boxes map to the code:
 
 | Diagram | Graph node(s) | Notes |
 |---|---|---|
 | Advice Boundary Agent: initial screening (advice + scope) | `advice_gate_input`, `scope_check` | Advice: Irine's agent. Scope: deterministic rules (price predictions, macro claims, companies outside the corpus are refused) |
 | Clarification: ask for company / claim | `clarification` | Status `NEEDS_CLARIFICATION` with a question; triggered by an empty claim, no company named, or no checkable sub-claim |
-| Orchestrator Agent: decompose the claim into sub-claims, plan evidence needs | `decompose`, `plan` | Decomposer is Amelia's agent; the plan comes from the knowledge layer |
+| Collect posts | `collect_posts` | Reads the store. The cut-off is the post date. Does not fetch. |
+| Claim extraction | `extract_claims` | Amelia's decomposer. Keeps the quote, assigns one type, writes no label. |
+| Orchestrator Agent | `plan` | Routes each claim and plans the evidence. The summary stays a separate record. |
 | Financial / Narrative agents | `gather_evidence` | Sub-claims in parallel; only the planned collectors; post-cut-off evidence dropped and logged |
 | Auditor: number + citation checks, source tier enough? | `audit`, `retry_or_accept` | Audit is Amelia's agent; the tier-sufficiency check is in `routing.tier_shortfall` |
 | "No": re-plan / retrieve more (max 1 retry) | `retry_or_accept` → `gather_evidence` | Adds the rule's `retry_collectors` and passes feedback; limit `FINSIGHT_MAX_RETRIES` |

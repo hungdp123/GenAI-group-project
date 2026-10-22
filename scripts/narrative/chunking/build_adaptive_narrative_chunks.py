@@ -11,10 +11,10 @@ from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 
-from finsight.agents.narrative.processing.adaptive_chunking import AdaptiveConfig, choose_plan, context_spans
-from finsight.agents.narrative.processing.chunk import NarrativeChunk
-from finsight.agents.narrative.processing.corpus import file_sha256
-from finsight.agents.narrative.processing.ingest import ProcessedBlock
+from finsight.agents.narrative.corpus.processing.adaptive_chunking import AdaptiveConfig, choose_plan, context_spans
+from finsight.agents.narrative.corpus.processing.chunk import NarrativeChunk
+from finsight.agents.narrative.corpus.processing.corpus import file_sha256
+from finsight.agents.narrative.corpus.processing.ingest import ProcessedBlock
 from scripts.narrative.datasets.narrative_reference_mapping import covers, map_references
 from scripts.narrative.experiments.prepare_narrative_experiment import identity, write_json
 from scripts.narrative.datasets.prepare_narrative_labels import jsonl, verify as verify_labels, write_jsonl
@@ -62,7 +62,7 @@ def main() -> None:
     shutil.copytree(fixed / "tokenizer", output / "tokenizer")
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(output / "tokenizer", local_files_only=True, use_fast=True)
-    code_paths = [Path(__file__).resolve(), root / "finsight/agents/narrative/processing/adaptive_chunking.py", root / "scripts/narrative/datasets/narrative_reference_mapping.py"]
+    code_paths = [Path(__file__).resolve(), root / "finsight/agents/narrative/corpus/processing/adaptive_chunking.py", root / "scripts/narrative/datasets/narrative_reference_mapping.py"]
     configuration = {"adaptive": asdict(config), "foundation_build_identity": foundation["build_identity"],
         "labels_manifest_sha256": file_sha256(dataset / "dataset_manifest.json"),
         "fixed_configuration_sha256": file_sha256(fixed / "configuration.json"),
@@ -226,7 +226,7 @@ summary: {json.dumps(totals['evidence_mapping'])}.
 
 ## Configurable selection mechanism
 
-Module: `finsight/agents/narrative/processing/adaptive_chunking.py`; runner:
+Module: `finsight/agents/narrative/corpus/processing/adaptive_chunking.py`; runner:
 `scripts/narrative/chunking/build_adaptive_narrative_chunks.py`. Configuration:
 `docs/narrative/config/narrative_c4_config_v1.json`, copied into this run's configuration record.
 

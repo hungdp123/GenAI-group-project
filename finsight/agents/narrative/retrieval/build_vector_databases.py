@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from finsight.agents.narrative.processing.corpus import corpus_fingerprint, load_documents
-from finsight.agents.narrative.pdf.pdf_enrichment import effective_corpus_fingerprint, load_promoted_enrichment
-from finsight.agents.narrative.processing.index import load_index
-from finsight.agents.narrative.processing.process_corpus import discover_tickers
+from finsight.agents.narrative.corpus.processing.corpus import corpus_fingerprint, load_documents
+from finsight.agents.narrative.corpus.pdf.pdf_enrichment import effective_corpus_fingerprint, load_promoted_enrichment
+from finsight.agents.narrative.corpus.processing.index import load_index
+from finsight.agents.narrative.corpus.processing.process_corpus import discover_tickers
 from finsight.agents.narrative.retrieval.qdrant_index import build_qdrant_index, load_qdrant_index
 from finsight.agents.narrative.retrieval.retrieval_experiments import (
     DEFAULT_EMBEDDING_MODEL,

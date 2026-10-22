@@ -17,10 +17,10 @@ import os
 from pathlib import Path
 import re
 
-from finsight.agents.narrative.processing.chunk import chunk_blocks
-from finsight.agents.narrative.processing.corpus import file_sha256
-from finsight.agents.narrative.processing.index import build_index
-from finsight.agents.narrative.processing.ingest import ProcessedBlock
+from finsight.agents.narrative.corpus.processing.chunk import chunk_blocks
+from finsight.agents.narrative.corpus.processing.corpus import file_sha256
+from finsight.agents.narrative.corpus.processing.index import build_index
+from finsight.agents.narrative.corpus.processing.ingest import ProcessedBlock
 from finsight.agents.narrative.retrieval.qdrant_index import build_qdrant_index, load_qdrant_index
 from finsight.agents.narrative.retrieval.retrieval_experiments import (
     SentenceTransformersBackend,
@@ -206,7 +206,7 @@ def prepare_company(run, company, ticker, questions, evidence, source_build):
             "source_build": source_build,
             "ticker": ticker,
             "cutoff": cutoff,
-            "chunker": file_sha256(Path("finsight/agents/narrative/processing/chunk.py")),
+            "chunker": file_sha256(Path("finsight/agents/narrative/corpus/processing/chunk.py")),
         }
     )
     payload = build_index(
@@ -287,8 +287,8 @@ def main():
                 "scripts/narrative/retrieval/compare_canonical_development.py",
                 "scripts/narrative/retrieval/compare_narrative_retrieval_priority.py",
                 "scripts/narrative/chunking/compare_narrative_chunking.py",
-                "finsight/agents/narrative/processing/chunk.py",
-                "finsight/agents/narrative/processing/index.py",
+                "finsight/agents/narrative/corpus/processing/chunk.py",
+                "finsight/agents/narrative/corpus/processing/index.py",
                 "finsight/agents/narrative/retrieval/qdrant_index.py",
                 "finsight/agents/narrative/retrieval/retrieval_experiments.py",
             )

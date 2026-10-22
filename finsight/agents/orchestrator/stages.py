@@ -15,10 +15,11 @@ from finsight.logging.decision_log import DecisionLogRecorder
 # Diagram role of each node, shown next to its name.
 ROLES = {
     "intake": "coordination", "advice_gate_input": "guardrail", "scope_check": "guardrail",
-    "clarification": "clarification", "decompose": "coordination", "plan": "coordination",
+    "clarification": "clarification", "collect_posts": "claim source", "extract_claims": "claim extraction",
+    "plan": "coordination",
     "gather_evidence": "specialists", "audit": "verification", "retry_or_accept": "retry check",
     "apply_tier_policy": "verification", "assemble": "coordination", "advice_gate_output": "guardrail",
-    "finalize": "coordination",
+    "finalize": "coordination", "record": "record",
 }
 
 
@@ -38,7 +39,7 @@ class StageReporter:
 
     def __call__(self, node: str, update: dict[str, Any], recorder: DecisionLogRecorder) -> None:
         self.step += 1
-        log = recorder.log
+        log = recorder.log if recorder is not None else None
         calls = log.agent_calls[self._calls_seen:] if log else []
         self._calls_seen += len(calls)
         lines = getattr(self, f"_{node}", self._default)(update)
@@ -74,13 +75,27 @@ class StageReporter:
         return self._stopped(u) or ["not personalized advice -> continue" if not flagged else "flagged"]
 
     def _scope_check(self, u: dict) -> list[str]:
+        stopped = self._stopped(u)
+        if stopped:
+            return stopped
         ticker = u["request"].company_ticker
-        return self._stopped(u) or [f"company {ticker} is in the corpus -> continue"]
+        return [f"company {ticker} is in the corpus -> continue"]
 
     def _clarification(self, u: dict) -> list[str]:
         return ["run stops here and returns the question to the user"]
 
-    def _decompose(self, u: dict) -> list[str]:
+    def _record(self, u: dict) -> list[str]:
+        return [f"checking post {u.get('index')} of {u.get('count')}: {u.get('post_id')}"]
+
+    def _collect_posts(self, u: dict) -> list[str]:
+        if u.get("status") is not None or u.get("clarification_question"):
+            return self._stopped(u)
+        request = u.get("request")
+        if request is None:
+            return []
+        return [f"stored post loaded, cut-off {request.cutoff_date}"]
+
+    def _extract_claims(self, u: dict) -> list[str]:
         lines = [f"{c.sub_claim_id:<4} {c.sub_claim_type.value:<28} {c.text}" for c in u.get("sub_claims", [])]
         return lines + self._stopped(u)
 

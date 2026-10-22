@@ -199,11 +199,11 @@ replaced. Chunking, embedding, and indexes remain outside this pipeline.
 
 ### Implementation modules
 
-- `finsight/agents/narrative/pdf/chart_models.py`: strict schemas for source regions, chart data, extraction
+- `finsight/agents/narrative/corpus/pdf/chart_models.py`: strict schemas for source regions, chart data, extraction
   status, usage, and validation.
-- `finsight/agents/narrative/pdf/chart_vision.py`: provider protocol and configurable OpenAI Responses API
+- `finsight/agents/narrative/corpus/pdf/chart_vision.py`: provider protocol and configurable OpenAI Responses API
   adapter using image input and Structured Outputs.
-- `finsight/agents/narrative/pdf/docling_charts.py`: detection, crop rendering, extraction, caching,
+- `finsight/agents/narrative/corpus/pdf/docling_charts.py`: detection, crop rendering, extraction, caching,
   validation, Markdown/JSON merging, reports, and command-line interface.
 
 | Function | Purpose |
@@ -259,7 +259,7 @@ charge but consumes local RAM/GPU resources and can be slow on CPU. Use one work
 ### Run with the existing Intel exports
 
 ```powershell
-python -m finsight.agents.narrative.pdf.docling_charts `
+python -m finsight.agents.narrative.corpus.pdf.docling_charts `
   "data/narrative/raw/INTC/official_ir/2025-04-24_earnings_presentation_Q1_2025_Earnings_Deck_INTC.com.pdf" `
   "data/narrative/processed/INTC/intel_q1_2025_enhanced" `
   --docling-json "tmp/pdfs/docling_trial/output_full/2025-04-24_earnings_presentation_Q1_2025_Earnings_Deck_INTC.com.json" `

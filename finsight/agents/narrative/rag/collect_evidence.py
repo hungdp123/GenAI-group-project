@@ -11,11 +11,12 @@ import json
 import logging
 import os
 import re
-from datetime import date
+import threading
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
 
-from finsight.agents.narrative.processing.index import load_index
+from finsight.agents.narrative.corpus.processing.index import load_index
 from finsight.agents.narrative.retrieval.retriever import BACKENDS, CorpusRetriever
 from finsight.contracts.interfaces import Retriever
 from finsight.contracts.schemas import EvidenceItem, Stance, SubClaim, SubClaimType
@@ -122,6 +123,45 @@ class LLMStanceClassifier:
             return Stance.NEUTRAL
 
 
+# Bump this when retrieval or stance labeling changes, so older lines stay comparable.
+SEARCH_RECORD_VERSION = "1-friend"
+_SEARCH_LOCK = threading.Lock()
+
+
+def search_log_path() -> Path | None:
+    """Where both searches are appended. `off` skips the file."""
+    choice = os.getenv("FINSIGHT_NARRATIVE_SEARCH_LOG", "").strip()
+    if choice.lower() in {"off", "0", "false"}:
+        return None
+    if choice:
+        return Path(choice)
+    return Path(os.getenv("FINSIGHT_LOGS_DIR", "logs")) / "narrative_searches.jsonl"
+
+
+def _search_hit(rank: int, item: EvidenceItem, stance: Stance) -> dict:
+    return {
+        "rank": rank,
+        "chunk_id": item.evidence_id,
+        "stance": stance.value,
+        "doc_type": item.doc_type,
+        "publication_date": item.publication_date.isoformat(),
+        "citation_span": item.citation_span,
+        "url": item.url,
+        "text": item.content,
+    }
+
+
+def _append_search(record: dict) -> None:
+    path = search_log_path()
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(record, ensure_ascii=False)
+    with _SEARCH_LOCK:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+
+
 def build_queries(sub_claim: SubClaim, feedback: str | None = None) -> tuple[str, str]:
     """Deterministic search strings; all inputs are search data, never commands."""
     # Tokenization bounds feedback and strips markup without interpreting instructions.
@@ -175,6 +215,41 @@ class NarrativeEvidenceAgent:
         self.classifier = None
         self.retriever_factory = retriever_factory
         self.index_path_factory = index_path_factory
+        self.last_search: dict | None = None
+
+    def _stance_method(self) -> str:
+        return "llm" if isinstance(self.classifier, LLMStanceClassifier) else "exact"
+
+    def _record_search(
+        self, sub_claim: SubClaim, cutoff_date: date, feedback: str | None, reason: str,
+        support_query: str = "", counter_query: str = "",
+        support: list[EvidenceItem] | None = None, counter: list[EvidenceItem] | None = None,
+        stances: dict[str, Stance] | None = None,
+    ) -> None:
+        labeled = stances or {}
+        record = {
+            "at": datetime.now(timezone.utc).isoformat(),
+            "version": SEARCH_RECORD_VERSION,
+            "label": os.getenv("FINSIGHT_NARRATIVE_SEARCH_LABEL", ""),
+            "reason": reason,
+            "ticker": (sub_claim.company_ticker or "").strip().upper(),
+            "sub_claim_id": sub_claim.sub_claim_id,
+            "claim": sub_claim.text,
+            "claim_type": sub_claim.sub_claim_type.value,
+            "cutoff": cutoff_date.isoformat(),
+            "feedback": feedback,
+            "backend": self.backend,
+            "stance_method": self._stance_method(),
+            "top_k": self.top_k,
+            "support_query": support_query,
+            "counter_query": counter_query,
+            "support": [_search_hit(rank, item, labeled.get(item.evidence_id, Stance.NEUTRAL))
+                        for rank, item in enumerate(support or [], start=1)],
+            "counter": [_search_hit(rank, item, labeled.get(item.evidence_id, Stance.NEUTRAL))
+                        for rank, item in enumerate(counter or [], start=1)],
+        }
+        self.last_search = record
+        _append_search(record)
 
     def gather(self, sub_claim: SubClaim, cutoff_date: date, feedback: str | None = None) -> list[EvidenceItem]:
         if type(cutoff_date) is not date:
@@ -187,6 +262,7 @@ class NarrativeEvidenceAgent:
         if len(sub_claim.text) > 5000:
             raise ValueError("Claim text exceeds 5000 characters")
         if sub_claim.sub_claim_type == SubClaimType.PERSONALIZED_ADVICE:
+            self._record_search(sub_claim, cutoff_date, feedback, "advice")
             return []
         path = (
             self.index_path_factory(ticker)
@@ -194,6 +270,7 @@ class NarrativeEvidenceAgent:
             else self.corpus_root / ticker / "indexes/index.json"
         )
         if not path.is_file():
+            self._record_search(sub_claim, cutoff_date, feedback, "no_index", support_query, counter_query)
             return []
         payload = load_index(path)
         canonical = {
@@ -202,6 +279,8 @@ class NarrativeEvidenceAgent:
             if c["company_ticker"].upper() == ticker and date.fromisoformat(c["publication_date"]) <= cutoff_date
         }
         if not canonical:
+            self._record_search(
+                sub_claim, cutoff_date, feedback, "no_eligible_passages", support_query, counter_query)
             return []
         retriever = (
             self.retriever_factory(ticker)
@@ -248,6 +327,9 @@ class NarrativeEvidenceAgent:
             # relevance/stance judgment was performed by this collector.
             items.append(original)
             seen.add(item.evidence_id)
+        self._record_search(
+            sub_claim, cutoff_date, feedback, "ok", support_query, counter_query, support, counter,
+            {item.evidence_id: item.stance for item in items})
         return items
 
 

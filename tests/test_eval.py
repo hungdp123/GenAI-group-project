@@ -1,4 +1,5 @@
 import csv
+import json
 
 import pytest
 
@@ -65,8 +66,10 @@ def test_full_dev_eval(tmp_path):
     assert "| Metric | direct | rag | finsight |" in summary
     rows = list(csv.DictReader((out / "sub_claims.csv").open()))
     finsight_rows = [r for r in rows if r["system"] == "finsight"]
-    assert finsight_rows and all(r["predicted_verdict"] != "MISSING" for r in finsight_rows
-                                 if r["item_id"] == "dev-001")
+    assert finsight_rows
+    raw = json.loads((out / "raw" / "finsight" / "dev-001.json").read_text(encoding="utf-8"))
+    assert raw["status"] == "NEEDS_CLARIFICATION"
+    assert "stored claims" in raw["clarification_question"]
     assert len(list((out / "raw" / "finsight").glob("*.json"))) == len(load_dataset("dev"))
     assert list((out / "logs").glob("*.json"))
     assert "| Task success rate | " in summary

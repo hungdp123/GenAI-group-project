@@ -9,13 +9,13 @@ are later work; extracted fields are not marked as visually verified.
 Audit every eligible PDF without model calls:
 
 ```powershell
-python -m finsight.agents.narrative.pdf.pdf_chart_processing --all --audit-only
+python -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --all --audit-only
 ```
 
 Extract PDF text, tables, and chart information:
 
 ```powershell
-python -m finsight.agents.narrative.pdf.pdf_chart_processing --all --ollama-model qwen3-vl:2b-instruct-q4_K_M --chart-timeout 180
+python -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --all --ollama-model qwen3-vl:2b-instruct-q4_K_M --chart-timeout 180
 ```
 
 The local 2B instruct model avoids the thinking-only responses observed with the installed
@@ -44,7 +44,7 @@ llm_provider: mock
 application's `llm_provider` remains `mock`. Resume the remaining work and promote:
 
 ```powershell
-python -u -m finsight.agents.narrative.pdf.pdf_chart_processing --all --openai-model gpt-5.4 --chart-workers 1 --chart-timeout 300 --promote --rebuild-vectors
+python -u -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --all --openai-model gpt-5.4 --chart-workers 1 --chart-timeout 300 --promote --rebuild-vectors
 ```
 
 Successful source-matched results from Ollama remain cached with their original model
@@ -86,13 +86,13 @@ Show cumulative recorded usage across all selected documents and runs without
 starting extraction or making API calls:
 
 ```powershell
-python -m finsight.agents.narrative.pdf.pdf_chart_processing --all --usage
+python -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --all --usage
 ```
 
 For one company:
 
 ```powershell
-python -m finsight.agents.narrative.pdf.pdf_chart_processing --ticker GOOGL --usage
+python -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --ticker GOOGL --usage
 ```
 
 The totals start with the tracking update; prior extractions and
@@ -172,7 +172,7 @@ text remains available when a chart is unreadable.
 Promote the recorded page blocks and rebuild BM25 without rerunning extraction:
 
 ```powershell
-python -m finsight.agents.narrative.pdf.pdf_chart_processing --all --promote-only --rebuild-vectors
+python -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --all --promote-only --rebuild-vectors
 ```
 
 Or append `--promote --rebuild-vectors` to an extraction command. Use `--document-id` to promote
@@ -198,7 +198,7 @@ them through `coverage_limitations(cutoff_date)`, filtered by company and public
 Read progress without starting another extraction job:
 
 ```powershell
-python -m finsight.agents.narrative.pdf.pdf_chart_processing --all --status
+python -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --all --status
 ```
 
 Use Ctrl+C in the terminal running the processor, then rerun the same command to resume from

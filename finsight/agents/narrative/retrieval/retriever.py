@@ -16,7 +16,7 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from finsight.agents.narrative.processing.index import load_index, search_index
+from finsight.agents.narrative.corpus.processing.index import load_index, search_index
 from finsight.contracts.schemas import EvidenceItem, SourceTier, Stance
 from finsight.llm.usage import record_tool_call
 

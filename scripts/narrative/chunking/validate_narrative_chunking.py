@@ -16,9 +16,9 @@ from collections import Counter, defaultdict
 from dataclasses import replace
 from pathlib import Path
 
-from finsight.agents.narrative.processing.chunk import chunk_blocks
-from finsight.agents.narrative.processing.corpus import file_sha256
-from finsight.agents.narrative.processing.ingest import ProcessedBlock
+from finsight.agents.narrative.corpus.processing.chunk import chunk_blocks
+from finsight.agents.narrative.corpus.processing.corpus import file_sha256
+from finsight.agents.narrative.corpus.processing.ingest import ProcessedBlock
 from scripts.narrative.experiments.prepare_narrative_experiment import identity, write_json
 from scripts.narrative.datasets.prepare_narrative_labels import jsonl, verify as verify_labels, write_jsonl
 from scripts.narrative.datasets.narrative_reference_mapping import map_references
@@ -95,7 +95,7 @@ def main() -> None:
         "effective_token_limit": limit, "special_tokens": tokenizer.num_special_tokens_to_add(pair=False),
         "tokenizer_model_limit": tokenizer.model_max_length, "sentence_transformer_limit": sentence_config["max_seq_length"],
         "tokenizer_files": {p.name: file_sha256(p) for p in pinned.iterdir()},
-        "chunker_sha256": file_sha256(root / "finsight/agents/narrative/processing/chunk.py"), "validator_sha256": file_sha256(Path(__file__)),
+        "chunker_sha256": file_sha256(root / "finsight/agents/narrative/corpus/processing/chunk.py"), "validator_sha256": file_sha256(Path(__file__)),
         "evaluation_cutoff": label_manifest["cutoff_date"], "source_scope": "all 1201 eligible frozen documents, including later publications; labels filtered by benchmark cutoff",
         "canonical_protected_type_policy": "historical baseline keeps charts atomic and protects typed tables; strict C1-C3 here deliberately do not, and are not byte-identical to that baseline"}
     write_json(output / "configuration.json", configuration)

@@ -18,7 +18,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from finsight.agents.narrative.processing.index import load_index
+from finsight.agents.narrative.corpus.processing.index import load_index
 from finsight.agents.narrative.retrieval.retrieval_experiments import (
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_RERANKER_MODEL,

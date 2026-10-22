@@ -16,9 +16,9 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
-from finsight.agents.narrative.processing.chunk import NarrativeChunk
-from finsight.agents.narrative.processing.corpus import file_sha256
-from finsight.agents.narrative.processing.index import build_index, search_index
+from finsight.agents.narrative.corpus.processing.chunk import NarrativeChunk
+from finsight.agents.narrative.corpus.processing.corpus import file_sha256
+from finsight.agents.narrative.corpus.processing.index import build_index, search_index
 from scripts.narrative.datasets.narrative_reference_mapping import covers, source_intervals
 from scripts.narrative.experiments.prepare_narrative_experiment import identity, write_json
 from scripts.narrative.datasets.prepare_narrative_labels import jsonl, write_jsonl
@@ -175,7 +175,7 @@ def main() -> None:
         "unjudged_policy": "unknown, not irrelevant; Precision/nDCG and semantic context/citation accuracy not asserted",
         "heldout_evaluated": False, "labels_reviewed": labels["evaluation_ready"], "winner_selection": "deferred",
         "timing": "one measured search per claim/arm; index building/loading excluded from query latency; no hardware significance claims",
-        "runner_sha256": file_sha256(Path(__file__)), "BM25_module_sha256": file_sha256(root / "finsight/agents/narrative/processing/index.py")}
+        "runner_sha256": file_sha256(Path(__file__)), "BM25_module_sha256": file_sha256(root / "finsight/agents/narrative/corpus/processing/index.py")}
     write_json(output / "configuration.json", configuration)
     all_results, index_reports, citation_errors, input_identities = [], [], [], []
     pool = {}
@@ -295,7 +295,7 @@ def main() -> None:
         "unmeasured": ["Independently reviewed relevance/contradiction labels", "Original-source semantic context/citation correctness", "Final verdict/answer quality"]}
     write_json(output / "comparison.json", report)
     write_jsonl(output / "source_metadata_errors.jsonl", citation_errors)
-    for path in (Path(__file__).resolve(), root / "finsight/agents/narrative/processing/index.py", root / "scripts/narrative/datasets/narrative_reference_mapping.py"):
+    for path in (Path(__file__).resolve(), root / "finsight/agents/narrative/corpus/processing/index.py", root / "scripts/narrative/datasets/narrative_reference_mapping.py"):
         destination = output / "code" / path.relative_to(root)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, destination)

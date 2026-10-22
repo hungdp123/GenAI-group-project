@@ -148,7 +148,7 @@ def main() -> None:
         parser.error("Output must be separate from experiment inputs and company indexes")
     if out.exists() and any(out.iterdir()):
         parser.error("Output directory is not empty; use a new --output-dir")
-    from finsight.agents.narrative.processing.index import load_index
+    from finsight.agents.narrative.corpus.processing.index import load_index
     from finsight.agents.narrative.rag.collect_evidence import NarrativeEvidenceAgent, build_queries
     from finsight.agents.narrative.retrieval.retriever import CorpusRetriever
     from finsight.agents.narrative.retrieval.retrieval_experiments import SentenceTransformersBackend

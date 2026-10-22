@@ -142,7 +142,7 @@ If the processed snapshot is current and you only want to answer claims, go dire
 Start with one company:
 
 ```powershell
-python -u -m finsight.agents.narrative.processing.process_corpus --ticker META
+python -u -m finsight.agents.narrative.corpus.processing.process_corpus --ticker META
 ```
 
 Use `--all` instead of `--ticker META` for every eligible company. Existing output folders are skipped; use `--rebuild` only when intentionally refreshing them. The build uses promoted PDF enrichment when available. Outputs are under `data/narrative/processed/META/`:
@@ -158,7 +158,7 @@ indexes/index_metadata.json build metadata
 ### Step 2. Enrich PDFs/charts, then promote into company passages
 
 ```powershell
-python -u -m finsight.agents.narrative.pdf.pdf_chart_processing --ticker META --ollama-model qwen3-vl:4b-instruct --chart-workers 1 --chart-timeout 900 --promote
+python -u -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --ticker META --ollama-model qwen3-vl:4b-instruct --chart-workers 1 --chart-timeout 900 --promote
 ```
 
 For OpenAI extraction, replace `--ollama-model qwen3-vl:4b-instruct` with `--openai-model gpt-5.4`; requests may incur API charges. Use `--all` instead of the ticker for an all-company batch. The pipeline reuses valid source-matched artifacts; failures or changed inputs may require work. `--promote` merges applicable extracted content into canonical company blocks/chunks and BM25.
@@ -166,13 +166,13 @@ For OpenAI extraction, replace `--ollama-model qwen3-vl:4b-instruct` with `--ope
 If extraction is already complete and only promotion is needed:
 
 ```powershell
-python -u -m finsight.agents.narrative.pdf.pdf_chart_processing --ticker META --promote-only
+python -u -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --ticker META --promote-only
 ```
 
 Inspect saved status:
 
 ```powershell
-python -m finsight.agents.narrative.pdf.pdf_chart_processing --all --status
+python -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --all --status
 ```
 
 Per-document artifacts are under `data/narrative/processed/<TICKER>/experiments/pdf_chart_processing/<DOCUMENT_ID>/`. Available files depend on page routing; not every PDF produces charts or enhanced Markdown. A final report establishes recorded extraction status, not independently verified financial accuracy.
@@ -595,7 +595,7 @@ The values are candidate maximum token sizes, not fixed sizes assigned to partic
 
 Repeated context is copied from the same source block, with a budget of at most **64 tokens or half the candidate target, whichever is smaller**. It counts toward the final token limit. Context and coherence scores are engineering proxies, not semantic correctness judgments. Targets and equal weights are initial configurable choices, not measured optimal values; local soft-score selection does not establish that C4 is the best strategy.
 
-Configuration: [narrative_c4_config_v1.json](../config/narrative_c4_config_v1.json). Implementation: `finsight/agents/narrative/processing/adaptive_chunking.py`. Runner: `scripts/narrative/chunking/build_adaptive_narrative_chunks.py` in [Section 7.1](#71-prepare-the-common-foundation-and-validate-chunking).
+Configuration: [narrative_c4_config_v1.json](../config/narrative_c4_config_v1.json). Implementation: `finsight/agents/narrative/corpus/processing/adaptive_chunking.py`. Runner: `scripts/narrative/chunking/build_adaptive_narrative_chunks.py` in [Section 7.1](#71-prepare-the-common-foundation-and-validate-chunking).
 
 ### 8.2 Retrieval methods on C4, with P0 baseline
 

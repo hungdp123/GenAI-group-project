@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Sequence
 
-from finsight.agents.narrative.processing.index import search_index
+from finsight.agents.narrative.corpus.processing.index import search_index
 from finsight.agents.narrative.retrieval.retrieval_experiments import EmbeddingBackend
 
 
