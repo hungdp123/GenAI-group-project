@@ -10,12 +10,15 @@ from __future__ import annotations
 import re
 from collections import Counter
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
+from typing import Any
 
 from finsight.agents.orchestrator import posts
 from finsight.agents.orchestrator.explain import verdict_label
 from finsight.config import BOUNDARY_DISCLAIMER
-from finsight.contracts.schemas import AssessmentStatus, FinalAssessment, Verdict
+from finsight.contracts.schemas import AssessmentStatus, DecisionLog, FinalAssessment, Verdict
 from finsight.logging.decision_log import DecisionLogRecorder
 
 _MEASURES = (
@@ -27,6 +30,32 @@ _UP = re.compile(r"\b(grew|grown|growth|rising|rose|higher|expanding|expanded|st
 _DOWN = re.compile(
     r"\b(fell|falling|fallen|declined|decline|shrinking|shrank|lower|weak|down)\b", flags=re.IGNORECASE,
 )
+
+
+@dataclass
+class RecordPost:
+    """One stored post inside a record: its own check and the cut-off that check used."""
+
+    video_id: str
+    upload_date: date | None
+    cutoff_date: date | None  # as_of_date of this post's check; should equal upload_date
+    status: AssessmentStatus
+    verdict: Verdict | None
+    title: str
+    assessment: FinalAssessment
+    decision_log: DecisionLog | None = None
+
+
+@dataclass
+class RecordResult:
+    """The record as data, so the eval can score it without parsing the summary text."""
+
+    assessment: FinalAssessment
+    kinds: frozenset[str]
+    posts: list[RecordPost] = field(default_factory=list)
+    consistency: str = ""
+    accuracy: str = ""
+    unfinished: list[str] = field(default_factory=list)
 
 
 def directions(text: str) -> dict[str, set[str]]:
@@ -96,10 +125,12 @@ def assess_record(
     company_ticker: str | None,
     influencer: str | None,
     posts_root: Path,
-    run_one: Callable[..., FinalAssessment],
+    run_one: Callable[..., Any],
     on_stage: Callable[[str, dict, DecisionLogRecorder], None] | None = None,
-) -> FinalAssessment:
-    """Check each stored post, then write the record. `run_one` is one normal check.
+) -> RecordResult:
+    """Check each stored post, then write the record. `run_one` is one normal check (a RunOutput).
+
+    The record always states consistency and the accuracy count, whichever the prompt asked about.
 
     Each post uses the one retry already allowed. That retry repeats the same check.
     It does not start a second agent. A post that cannot be finished leaves the record incomplete.
@@ -112,11 +143,12 @@ def assess_record(
                 on_stage("record", {"post_id": video_id, "index": index, "count": len(video_ids)}, None)  # type: ignore[arg-type]
             except Exception:  # noqa: BLE001 - showing progress must not stop the record
                 pass
-        assessment = run_one(
+        run = run_one(
             claim, cutoff, company_ticker=company_ticker, influencer=influencer,
             post_id=video_id, on_stage=on_stage,
         )
-        checked.append(assessment)
+        assessment = run.assessment
+        checked.append((assessment, run.decision_log))
         if assessment.status is not AssessmentStatus.COMPLETED:
             unfinished.append(video_id)
     rows = {str(row.get("video_id")): row for row in posts.load_posts(posts_root)}
@@ -133,7 +165,8 @@ def assess_record(
     per_post = []
     verdicts = []
     post_lines = []
-    for video_id, assessment in zip(video_ids, checked):
+    record_posts = []
+    for video_id, (assessment, log) in zip(video_ids, checked):
         row = rows.get(video_id, {})
         transcript = str(row.get("transcript") or "")
         found = directions(transcript)
@@ -143,16 +176,22 @@ def assess_record(
         when = row.get("upload_date") or "undated"
         title = row.get("title") or "untitled"
         post_lines.append(f"{when}  {video_id}  {label}  {title}")
-    if "consistency" in kinds:
-        lines.append(consistency_sentence(per_post))
-    if "accuracy" in kinds:
-        lines.append(accuracy_sentence(verdicts))
+        record_posts.append(RecordPost(
+            video_id=video_id, upload_date=posts.post_date(row), cutoff_date=assessment.as_of_date,
+            status=assessment.status, verdict=assessment.overall_verdict, title=title,
+            assessment=assessment, decision_log=log,
+        ))
+    consistency = consistency_sentence(per_post)
+    accuracy = accuracy_sentence(verdicts)
+    lines.append(consistency)
+    lines.append(accuracy)
     lines.append("Posts:")
     lines.extend(post_lines)
-    return FinalAssessment(
-        request_id=checked[-1].request_id if checked else "record",
+    final = FinalAssessment(
+        request_id=checked[-1][0].request_id if checked else "record",
         status=AssessmentStatus.COMPLETED,
         claim=claim,
         summary="\n".join(lines),
         boundary_disclaimer=BOUNDARY_DISCLAIMER,
     )
+    return RecordResult(final, kinds, record_posts, consistency, accuracy, unfinished)

@@ -23,8 +23,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # 0.5: SubClaim.source_span, parent_span, expansion_rule, measure, quote_time.
 #      Set when section 6 expands a vague phrase. The report shows that expansion.
+# 0.6: AuditResult.evidence_stances (the Auditor's own stance per evidence item; optional).
+# 0.7: EvidenceItem.comparison_value + comparison_period (the financial agent's second number; optional).
 
-SCHEMA_VERSION = "0.5"
+SCHEMA_VERSION = "0.7"
 
 
 class _Strict(BaseModel):
@@ -164,6 +166,12 @@ class EvidenceItem(_Strict):
     produced_by: str = Field(description="Name of the agent that produced this item")
     computed_value: float | None = None
     metric_name: str | None = None
+    comparison_value: float | None = Field(
+        default=None,
+        description="Second number from the financial agent. Level metric: the same figure a year earlier, "
+                    "the basis for a direction. Growth metric: the amount for the period behind the rate.")
+    comparison_period: str | None = Field(
+        default=None, description="The period comparison_value is for, e.g. quarter ended 2025-06-30.")
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +199,8 @@ class AuditResult(_Strict):
     numeric_check: NumericCheck | None = None
     citation_check: CitationCheck | None = None
     feedback_for_retry: str | None = None
+    # The Auditor's own judgment of every evidence item (evidence_id -> stance towards the sub-claim).
+    evidence_stances: dict[str, Stance] = Field(default_factory=dict)
 
 
 class AdviceDecision(_Strict):
