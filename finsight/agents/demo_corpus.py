@@ -7,11 +7,11 @@ Person 1's XBRL tools. Nothing outside the stubs may import this module.
 from __future__ import annotations
 
 import json
-import re
 from datetime import date
 from importlib import resources
 from typing import Any
 
+from finsight.agents.claim_extraction.thesaurus import display_name, resolve_ticker
 from finsight.config import CORPUS_COMPANIES
 from finsight.contracts.schemas import SourceTier, Stance
 
@@ -77,14 +77,13 @@ def load_xbrl_facts(ticker: str, cutoff_date: date) -> list[dict[str, Any]]:
 
 
 def company_name(ticker: str | None) -> str:
+    named = display_name(ticker)
+    if named:
+        return named
     aliases = CORPUS_COMPANIES.get(ticker or "", [])
     return aliases[0] if aliases else (ticker or "UNKNOWN")
 
 
 def detect_ticker(text: str) -> str | None:
-    """First corpus company whose alias appears as a whole word in `text`."""
-    for ticker, aliases in CORPUS_COMPANIES.items():
-        for alias in aliases:
-            if re.search(rf"\b{re.escape(alias)}\b", text, flags=re.IGNORECASE):
-                return ticker
-    return None
+    """The company the text is about. Tesla, TSLA, and Tesla, Inc. are the same ticker."""
+    return resolve_ticker(text)

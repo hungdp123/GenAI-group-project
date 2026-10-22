@@ -7,13 +7,35 @@ One JSON object per line:
 |---|---|---|
 | `item_id` | yes | Unique across both files, e.g. `dev-013`, `ho-007` |
 | `split` | yes | `dev` or `heldout`; must match the file |
-| `category` | yes | `normal`, `adversarial_advice`, `out_of_scope`, `injection`, `temporal` or `clarification` |
+| `category` | yes | `normal`, `adversarial_advice`, `out_of_scope`, `injection`, `temporal`, `clarification`, `comparison`, `misremembered`, `missing_name_answered`, `missing_name_refused`, `cutoff_trap`, `no_stored_post`, `ask_which_post` or `record` (see below) |
 | `claim` | yes | The pasted text, exactly as a user would write it |
 | `cutoff_date` | no | `YYYY-MM-DD`. Omit it to test the default cut-off |
 | `expect_refusal` | yes | `true` for advice requests and out-of-scope claims |
 | `expect_clarification` | no | `true` when the system should ask a question instead: no company named, no checkable sub-claim, or an empty claim |
-| `gold_sub_claims` | if not refused | List of `{text, gold_verdict, sub_claim_type, evidence}` |
+| `gold_sub_claims` | if not refused | List of `{text, gold_verdict, sub_claim_type, evidence, influencer, rule_note, post_id}`. `gold_verdict` may be left out while the label is still open (it shows as `UNLABELED` in `sub_claims.csv`). `influencer` says whose post the sub-claim comes from; `rule_note` says which verdict rule decided the label; `post_id` says which post it comes from (record items) |
 | `notes` | no | Why the item exists or what makes it tricky |
+| `cutoff_resolved_to` | no | What a relative cut-off in the claim ("as of last quarter") resolves to: an object with `rule`, `date` and `basis` |
+| `influencer` | no | The influencer the claim is attributed to |
+| `influencer_after_clarification` | no | The influencer once the user has answered the clarification question |
+| `clarification_turns` | no | List of `{"system": ..., "user": ...}`: each turn is the system's question and the user's answer. An item can have more than one round |
+| `expected_outcome` | no | What should happen, e.g. `PROCESS_AFTER_CLARIFICATION` |
+| `posts` | no | The influencer posts the claim is based on |
+| `user_matches_post` | no | `false` when the user's wording differs from what the post said |
+| `mismatch_note` | no | How the user's wording differs from the post |
+| `gold_source` | no | Where the gold labels came from |
+
+The fields from `cutoff_resolved_to` down are stored and validated but not yet used by the runner.
+
+### Categories added for influencer-post items
+
+- `comparison`: the claim compares the company with peers or with another influencer's view.
+- `misremembered`: the user's version of the post is wrong (`user_matches_post: false`, explained in `mismatch_note`).
+- `missing_name_answered`: no company or influencer is named, the system asks, and the user answers.
+- `missing_name_refused`: no name is given and the user doesn't provide one when asked.
+
+Refusal and clarification items normally have no `gold_sub_claims`. The exception is an item with
+`expected_outcome: PROCESS_AFTER_CLARIFICATION`: it is analyzed after the user's reply, so it carries
+gold sub-claims for that second run.
 
 ## Labeling rules
 
@@ -24,7 +46,7 @@ One JSON object per line:
    `evidence`, so a second labeler can check it.
 3. **Apply the project's verdict rules**, the same ones FinSight enforces:
    - Tier 3 news alone can never support a sub-claim, and the claim is never evidence.
-   - `COMPARATIVE` sub-claims ("biggest winner", "better than peers") → `INSUFFICIENT_EVIDENCE` (peers are out of scope).
+   - `COMPARATIVE` with no named measure ("biggest winner", "better than peers") → `INSUFFICIENT_EVIDENCE`. A named measure across two companies in the table is checked once per company, then the figures are compared.
    - `DEMAND_ATTRIBUTION` and `CONTINUATION` sub-claims can be at most `PARTIALLY_SUPPORTED`.
    - Evidence published after `cutoff_date` does not exist for that item. Check **filing dates**, not period-end dates.
 4. **Atomic sub-claims.** One checkable statement per gold sub-claim. Include sub-claims the claim *implies*:

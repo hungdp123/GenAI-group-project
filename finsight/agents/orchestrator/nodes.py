@@ -14,11 +14,23 @@ from __future__ import annotations
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
-from finsight.agents.orchestrator import explain, routing
+from finsight.agents.advice_boundary.agent import without_advice
+from finsight.agents.claim_extraction.build import claims_catalog_path
+from finsight.agents.claim_extraction.extract import extract_claims as run_extraction
+from finsight.agents.claim_extraction.extract import (
+    extraction_from_quotes,
+    load_claim_rows,
+    load_stored_claims,
+    load_stored_reasons,
+)
+from finsight.agents.claim_extraction.prepare import post_limits
+from finsight.agents.claim_extraction.select import MATCH_NOTE, choose_line, miss_text, stated_claim
+from finsight.agents.orchestrator import explain, pending, posts, router, routing
 from finsight.agents.orchestrator.aggregation import highest_tier, overall_verdict
+from finsight.agents.orchestrator.expansion import report_units
 from finsight.agents.orchestrator.render import render_assessment
 from finsight.config import BOUNDARY_DISCLAIMER, AgentRegistry, Settings
 from finsight.contracts.schemas import (
@@ -28,7 +40,6 @@ from finsight.contracts.schemas import (
     AuditResult,
     SubClaim,
     SubClaimResult,
-    SubClaimType,
     EvidenceItem,
     FinalAssessment,
     FinSightState,
@@ -56,8 +67,58 @@ def new_request_id() -> str:
     return f"fs-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
 
 
+def _with_note(state: FinSightState, text: str) -> str:
+    if state.influencer_note:
+        return f"{state.influencer_note} {text}"
+    return text
+
+
 def _stop(status: AssessmentStatus, reason: str) -> dict[str, Any]:
     return {"status": status, "refusal_reason": reason}
+
+
+def _clean_evidence(item: EvidenceItem) -> EvidenceItem:
+    cleaned = without_advice(item.content)
+    if cleaned == item.content.strip():
+        return item
+    content = cleaned or "This passage told you to buy or sell, so that wording was removed. The source is unchanged."
+    return item.model_copy(update={"content": content})
+
+
+def _without_advice(final: FinalAssessment) -> FinalAssessment:
+    """Remove buy or sell sentences from the draft. The claim and each label stay."""
+    note = "A sentence that told you to buy or sell was removed. The claim and the labels are unchanged."
+    results = []
+    for row in final.sub_claim_results:
+        results.append(row.model_copy(update={
+            "explanation": without_advice(row.explanation or "") or row.explanation,
+            "supporting": [_clean_evidence(item) for item in row.supporting],
+            "challenging": [_clean_evidence(item) for item in row.challenging],
+        }))
+    summary = without_advice(final.summary or "")
+    summary = f"{note} {summary}".strip()
+    return final.model_copy(update={"summary": summary, "sub_claim_results": results})
+
+
+def _said_and_verified(state: FinSightState, results: list[SubClaimResult], text: str, overall: Verdict | None):
+    """Separate what was said from what can be verified on the user's cut-off."""
+    request = state.request
+    published = state.post_published
+    if (
+        request is None or not state.cutoff_from_prompt or state.cutoff_input is not None
+        or published is None or published <= request.cutoff_date
+    ):
+        return text, overall
+    said = "Said: yes." if results else "Said: no."
+    note = (
+        f"{said} Verified: insufficient evidence as of the cut-off. "
+        f"The video was published on {published.isoformat()}, after the cut-off, "
+        "so the influencer had not said this by then."
+    )
+    for row in results:
+        row.verdict = Verdict.INSUFFICIENT_EVIDENCE
+        row.explanation = note
+    return note, Verdict.INSUFFICIENT_EVIDENCE if results else overall
 
 
 class Nodes:
@@ -82,13 +143,29 @@ class Nodes:
 
     def intake(self, state: FinSightState) -> dict[str, Any]:
         settings = self.ctx.settings
-        claim = state.raw_input.strip()
+        claim = pending.claim_with_saved_cutoff(settings.logs_dir, state.raw_input.strip()) or state.raw_input.strip()
+        bad_date = routing.invalid_cutoff_text(claim)
+        if bad_date:
+            pending.remember_cutoff(settings.logs_dir, claim)
+            self.rec.start(new_request_id(), claim, settings.corpus_as_of_date)
+            return {
+                "raw_input": claim,
+                "clarification_question": (
+                    f"{bad_date} is not a real date. Resubmit with a real cut-off date."
+                ),
+            }
+        if routing.has_cutoff(claim):
+            pending.remember_cutoff(settings.logs_dir, claim)
         cutoff, defaulted = routing.resolve_cutoff(state.cutoff_input, claim, settings.corpus_as_of_date)
         request = ClaimRequest(request_id=new_request_id(), raw_claim=claim, company_ticker=state.company_hint,
                                 cutoff_date=cutoff, cutoff_was_defaulted=defaulted)
         self.rec.start(request.request_id, state.raw_input, cutoff)
         self.rec.event("intake", f"cutoff={cutoff} defaulted={defaulted}")
-        update: dict[str, Any] = {"request": request}
+        update: dict[str, Any] = {
+            "request": request,
+            "raw_input": claim,
+            "cutoff_from_prompt": routing.has_cutoff(claim),
+        }
         # DECISION: missing claim -> ask for it (Clarification); overlong input -> REFUSED, not FAILED.
         if not claim:
             update["clarification_question"] = routing.CLARIFY_EMPTY
@@ -117,15 +194,137 @@ class Nodes:
         claim, hint = state.request.raw_claim, state.request.company_ticker
         companies = self.ctx.settings.corpus_companies
         ticker = routing.detect_company(claim, companies, hint)
+        hard = routing.price_or_macro_refusal(claim, ticker)
+        if hard:
+            self.rec.gate("scope", True, hard)
+            return _stop(AssessmentStatus.REFUSED, hard)
+        influencer, influencer_refusal, influencer_question = routing.influencer_screen(
+            claim, state.influencer_hint)
+        if influencer_refusal or influencer_question:
+            self.rec.gate("scope", True, influencer_refusal or influencer_question)
+            update: dict[str, Any] = {}
+            if influencer_refusal:
+                update |= _stop(AssessmentStatus.REFUSED, influencer_refusal)
+            else:
+                update["clarification_question"] = influencer_question
+            return update
+        ticker = routing.detect_company(claim, companies, hint)
         reason, question = routing.scope_screen(claim, ticker, hint, companies)
-        self.rec.gate("scope", reason is not None, reason or question or f"company={ticker}")
+        self.rec.gate("scope", reason is not None, reason or question or f"influencer={influencer} company={ticker}")
         request = state.request.model_copy(update={"company_ticker": ticker})
-        update: dict[str, Any] = {"request": request}
+        update = {
+            "request": request,
+            "influencer": influencer,
+            "influencer_note": routing.typo_note(claim),
+        }
         if reason:
             update |= _stop(AssessmentStatus.REFUSED, reason)
         elif question:
             update["clarification_question"] = question
         return update
+
+    # -- collect posts (pipeline: stored blog, social, or video; not an agent) ------
+
+    def collect_posts(self, state: FinSightState) -> dict[str, Any]:
+        """Read one stored post. The cut-off is that post's date. Nothing is downloaded."""
+        req = state.request
+        aliases = self.ctx.settings.corpus_companies.get(req.company_ticker or "", [])
+        display = routing.INFLUENCERS[state.influencer][0]
+        company = aliases[0] if aliases else req.company_ticker
+        matched = posts.posts_for(posts.load_posts(self.ctx.settings.posts_dir), state.influencer, aliases)
+        # The Company X demo is outside the project window. Real companies stay inside it.
+        if req.company_ticker != "CMPX":
+            matched = [row for row in matched if posts.in_window(row)]
+        with_text = [row for row in matched if row.get("transcript")]
+        listed_only = [row for row in matched if not row.get("transcript")]
+        self.rec.event(
+            "collect_posts",
+            f"{display}: {len(with_text)} posts with text, {len(listed_only)} listed without text, "
+            f"about {req.company_ticker}",
+        )
+        if not with_text and not listed_only and req.company_ticker == "CMPX":
+            self.rec.event("collect_posts", "placeholder company; no stored post, so the submitted sentence is checked")
+            return {}
+        pasted = state.post_id or posts.video_id_from_text(state.raw_input)
+        if pasted and not any(row.get("video_id") == pasted for row in matched):
+            return _stop(AssessmentStatus.REFUSED, "That post is not in the store.")
+        if not with_text and listed_only:
+            return _stop(
+                AssessmentStatus.REFUSED,
+                f"A {display} video about {company} is listed, and the transcript is not available yet.",
+            )
+        if not with_text:
+            return _stop(
+                AssessmentStatus.REFUSED,
+                f"No stored post from {display} about {company} is available to check.",
+            )
+        # Consistency and accuracy ask about the whole window, not one video.
+        explicit = state.post_id or posts.video_id_from_text(state.raw_input)
+        kinds = posts.record_kinds(state.raw_input)
+        if kinds and not explicit:
+            ordered = sorted(
+                with_text,
+                key=lambda row: (posts.post_date(row) or date.min, str(row.get("video_id") or "")),
+            )
+            self.rec.event("collect_posts", f"record over {len(ordered)} posts: {', '.join(sorted(kinds))}")
+            return {"clarification_question": posts.record_marker(kinds, [str(row.get("video_id")) for row in ordered])}
+        focus_quotes: list[str] = []
+        focus = stated_claim(state.raw_input, state.influencer, aliases)
+        claims_path = claims_catalog_path(self.ctx.settings.posts_dir)
+        if focus and claims_path.exists():
+            video_ids = {str(row.get("video_id") or "") for row in with_text}
+            choice = choose_line(
+                focus,
+                load_claim_rows(claims_path, video_ids, req.company_ticker),
+                with_text,
+                confirmed_video=explicit,
+                ticker=req.company_ticker,
+            )
+            if choice.question:
+                self.rec.event("collect_posts", "asked which spoken line")
+                return {"clarification_question": choice.question}
+            chosen = next((row for row in with_text if row.get("video_id") == choice.video_id), None)
+            if chosen is None:
+                return _stop(AssessmentStatus.REFUSED, "That post is not in the store.")
+            focus_quotes = choice.quotes
+        else:
+            chosen = posts.choose_post(with_text, state.raw_input, state.influencer, state.post_id)
+            if chosen is None:
+                return _stop(AssessmentStatus.REFUSED, "That post is not in the store.")
+            if isinstance(chosen, list):
+                return {"clarification_question": posts.which_post_question(chosen)}
+        transcript = posts.about_company(
+            str(chosen.get("transcript") or "").strip(),
+            req.company_ticker or "",
+            self.ctx.settings.corpus_companies,
+        )
+        uploaded = posts.post_date(chosen)
+        fields: dict[str, Any] = {"raw_claim": transcript or str(chosen.get("transcript") or "").strip()}
+        # A cut-off the user typed stays the review date. Otherwise the post date is the cut-off.
+        if uploaded is not None and (state.cutoff_input is not None or not state.cutoff_from_prompt):
+            fields["cutoff_date"] = uploaded
+            fields["cutoff_was_defaulted"] = False
+            if self.rec.log is not None:
+                self.rec.log.cutoff_date = uploaded
+        request = req.model_copy(update=fields)
+        when = uploaded.strftime("%d %b %Y").lstrip("0") if uploaded else "an unknown date"
+        label = (
+            f"Checked {display}, \"{chosen.get('title') or 'untitled'}\" "
+            f"({chosen.get('video_id')}), published {when}."
+        )
+        label += " " + post_limits(str(chosen.get("transcript") or ""), str(chosen.get("video_id") or "") or None)
+        self.rec.event(
+            "collect_posts",
+            f"post {chosen.get('video_id')} {chosen.get('upload_date')} cutoff={request.cutoff_date}",
+        )
+        return {
+            "request": request,
+            "from_stored_post": True,
+            "checked_post": label,
+            "post_id": str(chosen.get("video_id") or "") or None,
+            "focus_quotes": focus_quotes,
+            "post_published": uploaded,
+        }
 
     # -- clarification (diagram: "Unclear or missing info" -> ask the user) ------
 
@@ -134,44 +333,89 @@ class Nodes:
         self.rec.gate("clarification", True, state.clarification_question)
         return {"status": AssessmentStatus.NEEDS_CLARIFICATION}
 
-    # -- 4. decompose -------------------------------------------------------
+    # -- claim extraction (its own step; the orchestrator starts at plan) ---
 
-    def decompose(self, state: FinSightState) -> dict[str, Any]:
+    def extract_claims(self, state: FinSightState) -> dict[str, Any]:
         req = state.request
-        sub_claims, error = self._call("decomposer", self.ctx.registry.decomposer.decompose,
-                                   req.raw_claim, req.cutoff_date)
-        if error or not isinstance(sub_claims, list) or not all(isinstance(c, SubClaim) for c in sub_claims):
-            return _stop(AssessmentStatus.FAILED, f"Claim decomposition failed: {error or 'invalid output'}")
-        if len({c.sub_claim_id for c in sub_claims}) != len(sub_claims):
-            # DECISION: renumber duplicate sub_claim_ids instead of failing the run.
-            sub_claims = [c.model_copy(update={"sub_claim_id": f"c{i + 1}"}) for i, c in enumerate(sub_claims)]
-            self.rec.event("decompose", "duplicate sub_claim_ids from decomposer; renumbered")
-        sub_claims = [c if c.company_ticker else c.model_copy(update={"company_ticker": req.company_ticker})
-                  for c in sub_claims]
-        self.rec.event("decompose", f"{len(sub_claims)} sub-claims: " + ", ".join(
-            f"{c.sub_claim_id}={c.sub_claim_type.value}" for c in sub_claims))
-        refusing = [c for c in sub_claims if c.sub_claim_type is SubClaimType.PERSONALIZED_ADVICE
-                    or self.ctx.kb.rule_for(c.sub_claim_type).refuse]
-        update: dict[str, Any] = {"sub_claims": sub_claims}
-        if refusing:
-            note = self.ctx.kb.rule_for(refusing[0].sub_claim_type).note or "Personalized advice is out of scope."
-            update |= _stop(AssessmentStatus.REFUSED, f"Sub-claim {refusing[0].sub_claim_id}: {note}")
-        elif all(c.sub_claim_type is SubClaimType.OTHER for c in sub_claims):
-            # DECISION: no recognisable sub-claim (none, or only OTHER) counts as unclear -> ask what to check.
-            update["clarification_question"] = routing.CLARIFY_NO_SUB_CLAIM
+        claims_path = claims_catalog_path(self.ctx.settings.posts_dir)
+        stored = load_stored_claims(claims_path, state.post_id, req.company_ticker) if state.from_stored_post else None
+        reasons = load_stored_reasons(claims_path, state.post_id, req.company_ticker) if stored is not None else None
+        aliases = self.ctx.settings.corpus_companies.get(req.company_ticker or "", [])
+        focus = stated_claim(state.raw_input, state.influencer, aliases) if state.from_stored_post else None
+        if state.focus_quotes:
+            extracted = extraction_from_quotes(state.focus_quotes, stored, req.company_ticker)
+        else:
+            extracted = run_extraction(
+                text=req.raw_claim,
+                cutoff=req.cutoff_date,
+                company_ticker=req.company_ticker,
+                companies=self.ctx.settings.corpus_companies,
+                from_stored_post=state.from_stored_post,
+                knowledge=self.ctx.kb,
+                call=self._call,
+                stored=stored,
+                stored_reasons=reasons,
+                focus=focus,
+            )
+        for note in extracted.notes:
+            self.rec.event("extract_claims", note)
+        update: dict[str, Any] = {"sub_claims": extracted.sub_claims}
+        if extracted.insufficient_reasons:
+            update["insufficient_reasons"] = extracted.insufficient_reasons
+        label = state.checked_post or ""
+        if extracted.miss:
+            label = f"{label} {extracted.miss}".strip()
+        elif (focus or state.focus_quotes) and extracted.sub_claims:
+            label = f"{label} {MATCH_NOTE}".strip()
+        if extracted.dropped_by_cap:
+            quoted = "; ".join(f'"{quote}"' for quote in extracted.dropped_by_cap)
+            label = f"{label} Not checked, past the cap of 8: {quoted}.".strip()
+        if label != (state.checked_post or ""):
+            update["checked_post"] = label
+        if extracted.status is not None:
+            update |= _stop(extracted.status, extracted.refusal_reason or "Claim extraction failed.")
+        elif extracted.clarification_question:
+            update["clarification_question"] = extracted.clarification_question
         return update
 
     # -- 5. plan ------------------------------------------------------------
 
     def plan(self, state: FinSightState) -> dict[str, Any]:
+        """The LLM router picks financial / narrative / both per sub-claim; caps and tiers stay from the rule."""
         plan, pending, insufficient = {}, [], dict(state.insufficient_reasons)
-        for sub_claim in state.sub_claims:
+        cutoff = state.request.cutoff_date if state.request else None
+
+        def decide(sub_claim: SubClaim) -> tuple[SubClaim, router.RouteDecision | None, Exception | None]:
+            if sub_claim.sub_claim_id in insufficient:
+                return sub_claim, None, None
+            rule = self.ctx.kb.rule_for(sub_claim.sub_claim_type)
+            decision, error = self._call(
+                "router", lambda: router.route_sub_claim(sub_claim, rule, cutoff_date=cutoff),
+                sub_claim_id=sub_claim.sub_claim_id)
+            return sub_claim, decision, error
+
+        with self._pool() as pool:
+            decisions = list(pool.map(decide, state.sub_claims))
+
+        for sub_claim, decision, error in decisions:
             rule = self.ctx.kb.rule_for(sub_claim.sub_claim_type)
             entry = routing.plan_entry(sub_claim, rule)
+            if decision is not None:
+                entry = entry.model_copy(update={"collectors": list(decision.collectors)})
+                self.rec.event("plan", f"{sub_claim.sub_claim_id}: {decision.target} ({decision.source}) - "
+                                       f"{decision.reason}")
+            elif error is not None:
+                # DECISION: a failed router call keeps the knowledge-layer route instead of dropping the sub-claim.
+                self.rec.event("plan", f"{sub_claim.sub_claim_id}: router failed ({error}); "
+                                       f"knowledge-layer default {entry.collectors}")
             plan[sub_claim.sub_claim_id] = entry
             self.rec.plan(entry)
+            if sub_claim.sub_claim_id in insufficient:
+                continue
             if entry.collectors:
                 pending.append(sub_claim.sub_claim_id)
+            elif decision is not None and decision.source == "llm":
+                insufficient[sub_claim.sub_claim_id] = f"No evidence agent can check this: {decision.reason}"
             else:
                 insufficient[sub_claim.sub_claim_id] = (
                     rule.note or f"No evidence collector for {sub_claim.sub_claim_type.value}.")
@@ -248,13 +492,19 @@ class Nodes:
             results = list(pool.map(run, state.pending_sub_claim_ids))
 
         audits, insufficient = dict(state.audits), dict(state.insufficient_reasons)
+        evidence = dict(state.evidence)
         for sub_claim_id, result, error in results:
             if error:
                 insufficient[sub_claim_id] = f"auditor failed ({error})"
                 continue
             audits[sub_claim_id] = result
             self.rec.audit(result)
-        return {"audits": audits, "insufficient_reasons": insufficient}
+            # The Auditor's stances replace the collectors' before retry_or_accept checks the tiers.
+            if result.passed and result.evidence_stances:
+                evidence[sub_claim_id] = [
+                    e.model_copy(update={"stance": result.evidence_stances.get(e.evidence_id, e.stance)})
+                    for e in evidence.get(sub_claim_id, [])]
+        return {"audits": audits, "insufficient_reasons": insufficient, "evidence": evidence}
 
     # -- 8. retry or accept -------------------------------------------------
 
@@ -339,7 +589,8 @@ class Nodes:
             verdict, why = routing.cap_verdict(verdict, rule)
             if why:
                 reasons.append(why)
-            for guard in (routing.enforce_tier_requirement, routing.enforce_counter_evidence):
+            for guard in (routing.enforce_tier_requirement, routing.cap_tier2_only_support,
+                          routing.enforce_counter_evidence):
                 verdict, why = guard(verdict, evidence, rule)
                 if why:
                     reasons.append(why)
@@ -371,20 +622,32 @@ class Nodes:
                 gaps.append(f"{cid}: {state.insufficient_reasons[cid]}")
             elif verdict is Verdict.INSUFFICIENT_EVIDENCE:
                 gaps.append(f"{cid}: no supporting evidence from a required source tier before the cut-off.")
-        if not state.sub_claims:
-            gaps.append("No checkable sub-claims were found in the claim.")
-        overall = overall_verdict([r.verdict for r in results])
+        missed = miss_text(state.checked_post)
+        post_label = state.checked_post or ""
+        if missed:
+            post_label = post_label[:post_label.find(missed)].strip()
+        if not results:
+            overall = None
+            text = missed or "Nothing in this post could be checked, so there is no overall label."
+            gaps.append(text)
+        else:
+            overall = overall_verdict([unit.verdict for unit in report_units(results)])
+            text = explain.summary(results, overall)
+        text, overall = _said_and_verified(state, results, text, overall)
+        if state.influencer_note:
+            text = f"{state.influencer_note} {text}"
+        # The report names what the user asked. The post text stays in the check, not in this line.
+        shown_claim = state.raw_input if state.from_stored_post else state.request.raw_claim
         final = FinalAssessment(
             request_id=state.request.request_id, status=AssessmentStatus.COMPLETED,
-            claim=state.request.raw_claim, summary=explain.summary(results, overall),
+            claim=shown_claim, checked_post=post_label or None, summary=text,
             overall_verdict=overall, sub_claim_results=results,
             evidence_gaps=gaps, as_of_date=state.request.cutoff_date,
             cutoff_was_defaulted=state.request.cutoff_was_defaulted, boundary_disclaimer=BOUNDARY_DISCLAIMER,
         )
         return {"final": final}
 
-    @staticmethod
-    def _rationale(state: FinSightState, sub_claim: SubClaim, evidence: list[EvidenceItem]) -> str:
+    def _rationale(self, state: FinSightState, sub_claim: SubClaim, evidence: list[EvidenceItem]) -> str:
         """Deterministic rationale built from checks only. Numbers are copied from evidence, never computed."""
         cid = sub_claim.sub_claim_id
         if cid in state.insufficient_reasons:
@@ -416,11 +679,9 @@ class Nodes:
                                            "Output advice check failed; response withheld.")
         self.rec.gate("advice_output", decision.flagged, decision.reason)
         update: dict[str, Any] = {"advice_decisions": [*state.advice_decisions, decision]}
-        if decision.flagged:
-            update |= {"final": None} | _stop(
-                AssessmentStatus.REFUSED,
-                ("The generated response was withheld because it contained advice-like language. "
-                 f"{decision.reason or ''}").strip())
+        if decision.flagged and state.final is not None:
+            # The claim text and the verdicts stay. Only the advice sentence is removed.
+            update["final"] = _without_advice(state.final)
         return update
 
     # -- 12. finalize -------------------------------------------------------
@@ -432,7 +693,7 @@ class Nodes:
             request_id=state.request.request_id if state.request else "unknown",
             status=status, refusal_reason=state.refusal_reason, clarification_question=question,
             claim=state.request.raw_claim if state.request else state.raw_input,
-            summary=explain.stop_summary(status, state.refusal_reason, question),
+            summary=_with_note(state, explain.stop_summary(status, state.refusal_reason, question)),
             as_of_date=state.request.cutoff_date if state.request else None,
             cutoff_was_defaulted=state.request.cutoff_was_defaulted if state.request else False,
             boundary_disclaimer=BOUNDARY_DISCLAIMER,

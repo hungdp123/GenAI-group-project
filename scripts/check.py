@@ -98,13 +98,25 @@ def check_graph_doc() -> None:
 
 # -- 6: scenario smoke test (one per path in the architecture diagram) ---------------------
 
-DEMO = ("A finfluencer I follow said Company X's revenue growth proves it is the biggest winner from AI "
+DEMO = ("Joseph Carlson said Company X's revenue growth proves it is the biggest winner from AI "
         "infrastructure demand, and that this growth is just getting started.")
 CUTOFF = date(2025, 7, 31)
 
 
 def check_scenarios() -> None:
     section("6. Scenario smoke test (architecture paths)")
+    posts = TMP / "posts"
+    posts.mkdir(parents=True, exist_ok=True)
+    (posts / "posts.jsonl").write_text("\n".join(json.dumps({
+        "influencer": "joseph_carlson", "video_id": f"demo-{i}", "title": "Company X",
+        "description": "Company X", "upload_date": "2025-07-31", "transcript": text,
+        "channel": "Joseph Carlson",
+    }) for i, text in enumerate([
+        DEMO,
+        "Its revenue growth is just getting started.",
+        "Company X is a really interesting company.",
+    ])) + "\n", encoding="utf-8")
+    os.environ["FINSIGHT_POSTS_DIR"] = str(posts)
     from finsight import execute
     from finsight.config import STUB_IMPLEMENTATIONS
 
@@ -121,12 +133,12 @@ def check_scenarios() -> None:
         ("advice request -> REFUSED", "Should I put my savings into Company X?", {}, "REFUSED"),
         ("macro claim -> REFUSED", "The S&P 500 will rally because the Fed is about to cut rates.", {}, "REFUSED"),
         ("price prediction -> REFUSED", "Company X stock price will hit $500 next year.", {}, "REFUSED"),
-        ("no company -> NEEDS_CLARIFICATION", "Its revenue growth is just getting started.", {},
+        ("no influencer -> NEEDS_CLARIFICATION", "Its revenue growth is just getting started.", {},
          "NEEDS_CLARIFICATION"),
-        ("...resubmit with company_ticker=CMPX -> COMPLETED", "Its revenue growth is just getting started.",
-         {"company_ticker": "CMPX"}, "COMPLETED"),
-        ("nothing checkable -> NEEDS_CLARIFICATION", "Company X is a really interesting company.", {},
-         "NEEDS_CLARIFICATION"),
+        ("...resubmit with influencer and company -> COMPLETED", "Its revenue growth is just getting started.",
+         {"company_ticker": "CMPX", "influencer": "Joseph Carlson"}, "COMPLETED"),
+        ("nothing checkable -> NEEDS_CLARIFICATION",
+         "Joseph Carlson said Company X is a really interesting company.", {}, "NEEDS_CLARIFICATION"),
     ]
     for name, claim, kwargs, expected in cases:
         fa = execute(claim, CUTOFF, **kwargs).assessment

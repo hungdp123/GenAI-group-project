@@ -14,20 +14,25 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import hashlib
+import json
+import re
 from datetime import date, datetime
 from importlib import resources
 from pathlib import Path
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from finsight.agents.orchestrator.graph import execute
+from finsight.agents.orchestrator import posts
+from finsight.agents.orchestrator.aggregation import overall_verdict
+from finsight.agents.orchestrator.graph import RunOutput, execute
+from finsight.agents.orchestrator.record import RecordResult
 from finsight.baselines.basic_rag import run_basic_rag
 from finsight.baselines.common import BaselineResult
 from finsight.baselines.direct_llm import run_direct_llm
 from finsight.config import FINAL_REPORT_MODEL, get_settings
-from finsight.contracts.schemas import AssessmentStatus, FinalAssessment
+from finsight.contracts.schemas import AssessmentStatus, DecisionLog, FinalAssessment, Verdict
 from finsight.eval.metrics import (
     GoldSubClaim,
     PredictedSubClaim,
@@ -54,8 +59,21 @@ class EvalItem(BaseModel):
     expect_refusal: bool = False
     expect_clarification: bool = False  # unclear or missing info: the system should ask a question
     category: Literal["normal", "adversarial_advice", "out_of_scope", "injection", "temporal",
-                      "clarification"] = "normal"
+                      "clarification", "comparison", "misremembered", "missing_name_answered",
+                      "missing_name_refused", "cutoff_trap", "no_stored_post", "ask_which_post",
+                      "record"] = "normal"
     notes: str | None = None
+    # Optional fields from the influencer-post items. The runner reads `posts` and `clarification_turns`
+    # (ask_which_post); the rest document the label for the labeler.
+    cutoff_resolved_to: dict[str, Any] | None = None  # what a relative cut-off resolves to: rule, date, basis
+    influencer: str | None = None
+    influencer_after_clarification: str | None = None
+    clarification_turns: list[dict[str, str]] = Field(default_factory=list)  # [{"system": "...", "user": "..."}]
+    expected_outcome: str | None = None  # e.g. PROCESS_AFTER_CLARIFICATION
+    posts: list[Any] = Field(default_factory=list)  # the influencer posts the claim is based on
+    user_matches_post: bool | None = None  # False when the user misremembers the post
+    mismatch_note: str | None = None
+    gold_source: str | None = None
 
 
 def dataset_path(split: str) -> Path:
@@ -94,10 +112,23 @@ def validate_datasets() -> list[str]:
             stops = i.expect_refusal or i.expect_clarification
             if i.expect_refusal and i.expect_clarification:
                 problems.append(f"{i.item_id}: expect_refusal and expect_clarification cannot both be true")
-            if stops and i.gold_sub_claims:
+            # A clarification item that is analyzed after the user answers may carry gold sub-claims.
+            processed_later = i.expected_outcome == "PROCESS_AFTER_CLARIFICATION"
+            if stops and i.gold_sub_claims and not processed_later:
                 problems.append(f"{i.item_id}: refusal/clarification items must not have gold_sub_claims")
             if not stops and not i.gold_sub_claims:
                 problems.append(f"{i.item_id}: items that are analyzed need gold_sub_claims")
+            if i.category == "ask_which_post":
+                # The question asks which post, so the answer is a post id, not an influencer name.
+                if not i.expect_clarification or not processed_later:
+                    problems.append(f"{i.item_id}: ask_which_post needs expect_clarification and "
+                                    "expected_outcome PROCESS_AFTER_CLARIFICATION")
+                if not i.clarification_turns or not (i.clarification_turns[0].get("user") or "").strip():
+                    problems.append(f"{i.item_id}: ask_which_post needs a clarification turn answered with a post id")
+                if not i.gold_sub_claims:
+                    problems.append(f"{i.item_id}: ask_which_post needs gold_sub_claims for the second turn")
+            if i.category == "record" and any(not g.post_id for g in i.gold_sub_claims):
+                problems.append(f"{i.item_id}: every record gold sub-claim needs a post_id")
     if HELDOUT_LOCK.exists() and HELDOUT_LOCK.read_text().strip() != file_sha256(dataset_path("heldout")):
         problems.append("heldout file changed after it was frozen (hash mismatch with claims_heldout.lock)")
     return problems
@@ -121,35 +152,190 @@ def _success(completed: bool, valid: bool, have_verdicts: bool, refused: bool, c
                         clarified, item.expect_clarification)
 
 
+def _schema_valid(fa: FinalAssessment) -> bool:
+    try:
+        FinalAssessment.model_validate_json(fa.model_dump_json())
+        return True
+    except ValidationError:
+        return False
+
+
+def _all_verdicts(fa: FinalAssessment) -> bool:
+    return bool(fa.sub_claim_results) and all(r.verdict for r in fa.sub_claim_results)
+
+
+def _predicted(fa: FinalAssessment, prefix: str = "") -> list[PredictedSubClaim]:
+    return [PredictedSubClaim(text=prefix + r.sub_claim.text, verdict=r.verdict) for r in fa.sub_claim_results]
+
+
+def _finsight_record(item: EvalItem, fa: FinalAssessment, logs: list[DecisionLog], *, valid: bool,
+                     have_verdicts: bool, clarified: bool, success: bool,
+                     predicted: list[PredictedSubClaim], failed: list[str] | None = None) -> RunRecord:
+    """One RunRecord. Usage is summed over every run the item needed (each post of a record, each turn)."""
+    calls = [c for log in logs for c in log.agent_calls]
+    retries = [r for log in logs for r in log.retries]
+    return RunRecord(
+        **_base(item, "finsight"), completed=fa.status is not AssessmentStatus.FAILED, schema_valid=valid,
+        all_sub_claims_have_verdict=have_verdicts, refused=fa.status is AssessmentStatus.REFUSED,
+        clarified=clarified, task_success=success,
+        agent_calls=len(calls), tool_calls=sum(c.tool_calls for c in calls),
+        latency_ms=sum(log.total_latency_ms for log in logs), input_tokens=sum(c.input_tokens for c in calls),
+        output_tokens=sum(c.output_tokens for c in calls), cost_usd=sum(log.total_cost_usd for log in logs),
+        sub_claims_assessed=len(predicted),
+        sub_claims_retried=len({r.sub_claim_id for r in retries if not r.exhausted}),
+        downgraded_after_retry=sum(r.exhausted for r in retries), overall_verdict=fa.overall_verdict,
+        predicted_sub_claims=predicted, failed_checks=failed or [],
+        error=fa.refusal_reason if fa.status is AssessmentStatus.FAILED else None,
+    )
+
+
 def run_finsight_item(item: EvalItem, out_dir: Path) -> tuple[RunRecord, str]:
     settings = dataclasses.replace(get_settings(), logs_dir=out_dir / "logs")
+    if item.category == "record":
+        return _run_record_item(item, settings)
+    if item.category == "ask_which_post":
+        return _run_which_post_item(item, settings)
     run = execute(item.claim, item.cutoff_date, settings=settings)
-    fa, log = run.assessment, run.decision_log
-    raw = fa.model_dump_json(indent=2)
-    try:
-        FinalAssessment.model_validate_json(raw)
-        valid = True
-    except ValidationError:
-        valid = False
+    fa = run.assessment
+    valid = _schema_valid(fa)
     refused = fa.status is AssessmentStatus.REFUSED
     clarified = fa.status is AssessmentStatus.NEEDS_CLARIFICATION
     completed = fa.status is not AssessmentStatus.FAILED
-    results = fa.sub_claim_results
-    have_verdicts = refused or clarified or (bool(results) and all(r.verdict for r in results))
-    retried = {r.sub_claim_id for r in log.retries if not r.exhausted}
-    record = RunRecord(
-        **_base(item, "finsight"), completed=completed, schema_valid=valid, all_sub_claims_have_verdict=have_verdicts,
-        refused=refused, clarified=clarified,
-        task_success=_success(completed, valid, have_verdicts, refused, clarified, item),
-        agent_calls=len(log.agent_calls), tool_calls=sum(c.tool_calls for c in log.agent_calls),
-        latency_ms=log.total_latency_ms, input_tokens=sum(c.input_tokens for c in log.agent_calls),
-        output_tokens=sum(c.output_tokens for c in log.agent_calls), cost_usd=log.total_cost_usd,
-        sub_claims_assessed=len(fa.sub_claim_results), sub_claims_retried=len(retried),
-        downgraded_after_retry=sum(r.exhausted for r in log.retries), overall_verdict=fa.overall_verdict,
-        predicted_sub_claims=[PredictedSubClaim(text=r.sub_claim.text, verdict=r.verdict) for r in results],
-        error=fa.refusal_reason if fa.status is AssessmentStatus.FAILED else None,
+    have_verdicts = refused or clarified or _all_verdicts(fa)
+    record = _finsight_record(
+        item, fa, [run.decision_log], valid=valid, have_verdicts=have_verdicts, clarified=clarified,
+        success=_success(completed, valid, have_verdicts, refused, clarified, item), predicted=_predicted(fa),
     )
-    return record, raw
+    return record, fa.model_dump_json(indent=2)
+
+
+# -- record items (consistency / accuracy across every stored post) ----------------------------
+
+
+def _supported_count(verdicts: list[Verdict | None]) -> tuple[int, int]:
+    """(supported, supported + contradicted): the "x of y supported" count in the record."""
+    supported = sum(v is Verdict.SUPPORTED for v in verdicts)
+    return supported, supported + sum(v is Verdict.CONTRADICTED for v in verdicts)
+
+
+def record_checks(item: EvalItem, fa: FinalAssessment, record: RecordResult | None) -> list[str]:
+    """The four record checks; returns the ones that failed (empty = pass).
+
+    1. every stored post in gold was checked and finished, 2. each post used its own date as the
+    cut-off, 3. no single overall label, 4. a consistency sentence, and the supported count over the
+    gold posts matches gold.
+    """
+    if record is None:
+        return ["no record: the posts were not checked one by one"]
+    failed = []
+    gold_posts = list(dict.fromkeys(g.post_id for g in item.gold_sub_claims if g.post_id))
+    checked = {p.video_id: p for p in record.posts}
+    missing = [pid for pid in gold_posts if pid not in checked]
+    unfinished = [p.video_id for p in record.posts
+                  if p.status is not AssessmentStatus.COMPLETED or not _all_verdicts(p.assessment)]
+    if missing or unfinished:
+        failed.append(f"not every stored post was checked (missing: {', '.join(missing) or '-'}; "
+                      f"unfinished: {', '.join(unfinished) or '-'})")
+    wrong_cutoff = [p.video_id for p in record.posts if p.upload_date is None or p.cutoff_date != p.upload_date]
+    if wrong_cutoff:
+        failed.append(f"cut-off is not the post's own date for {', '.join(wrong_cutoff)}")
+    if fa.overall_verdict is not None:
+        failed.append(f"the record has a single overall label ({fa.overall_verdict.value})")
+    if not record.consistency or record.consistency not in (fa.summary or ""):
+        failed.append("no consistency sentence")
+    gold = _supported_count([
+        overall_verdict([g.gold_verdict for g in item.gold_sub_claims if g.post_id == pid and g.gold_verdict])
+        for pid in gold_posts
+    ])
+    got = _supported_count([checked[pid].verdict if pid in checked else None for pid in gold_posts])
+    if got != gold:
+        failed.append(f"{got[0]} of {got[1]} posts supported; gold is {gold[0]} of {gold[1]}")
+    return failed
+
+
+def _run_record_item(item: EvalItem, settings) -> tuple[RunRecord, str]:
+    """Scored by the four record checks. The whole result has no sub-claims of its own, so the usual
+    "every sub-claim has a verdict" check runs per post instead."""
+    run = execute(item.claim, item.cutoff_date, settings=settings)
+    fa, record = run.assessment, run.record
+    failed = record_checks(item, fa, record)
+    checked = record.posts if record else []
+    valid = _schema_valid(fa)
+    refused = fa.status is AssessmentStatus.REFUSED
+    clarified = fa.status is AssessmentStatus.NEEDS_CLARIFICATION
+    completed = fa.status is not AssessmentStatus.FAILED
+    have_verdicts = bool(checked) and all(_all_verdicts(p.assessment) for p in checked)
+    # Gold texts start "2026-05-31 post: ...", so the prefix helps the sub-claim alignment.
+    predicted = [pc for p in checked for pc in _predicted(p.assessment, f"{p.upload_date or 'undated'} post: ")]
+    logs = [run.decision_log, *(p.decision_log for p in checked if p.decision_log is not None)]
+    out = _finsight_record(
+        item, fa, logs, valid=valid, have_verdicts=have_verdicts, clarified=clarified,
+        success=_success(completed, valid, have_verdicts, refused, clarified, item) and not failed,
+        predicted=predicted, failed=failed,
+    )
+    raw = {
+        "assessment": fa.model_dump(mode="json"),
+        "posts": [{"video_id": p.video_id, "upload_date": p.upload_date.isoformat() if p.upload_date else None,
+                   "cutoff_date": p.cutoff_date.isoformat() if p.cutoff_date else None,
+                   "status": p.status.value, "verdict": p.verdict.value if p.verdict else None}
+                  for p in checked],
+        "failed_checks": failed,
+    }
+    return out, json.dumps(raw, indent=2)
+
+
+# -- ask_which_post items (two turns) -----------------------------------------------------------
+
+
+def expected_post_ids(item: EvalItem, settings) -> list[str]:
+    """Stored post ids named in the gold "which post?" turn, plus the item's own posts."""
+    stored = {str(row.get("video_id")) for row in posts.load_posts(settings.posts_dir)}
+    gold_turn = item.clarification_turns[0].get("system", "") if item.clarification_turns else ""
+    named = [word for word in re.findall(r"[\w-]+", gold_turn) if word in stored]
+    own = [str(p["video_id"]) for p in item.posts if isinstance(p, dict) and p.get("video_id")]
+    return list(dict.fromkeys(named + own))
+
+
+def _run_which_post_item(item: EvalItem, settings) -> tuple[RunRecord, str]:
+    """Turn 1 must ask which post and name every candidate post. A question about the post counts as
+    a clarification, not only a question about the name. Turn 2 reruns with the user's post id and is
+    scored like a normal item."""
+    first = execute(item.claim, item.cutoff_date, settings=settings)
+    asked = first.assessment.status is AssessmentStatus.NEEDS_CLARIFICATION
+    failed = []
+    if not asked:
+        failed.append(f"turn 1 returned {first.assessment.status.value}, not NEEDS_CLARIFICATION")
+    else:
+        question = first.assessment.clarification_question or ""
+        unnamed = [pid for pid in expected_post_ids(item, settings) if pid not in question]
+        if unnamed:
+            failed.append(f"turn 1 question does not name post {', '.join(unnamed)}")
+    answer = (item.clarification_turns[0].get("user") or "").strip() if item.clarification_turns else ""
+    second: RunOutput | None = None
+    if answer:
+        second = execute(item.claim, item.cutoff_date, settings=settings, post_id=answer)
+    else:
+        failed.append("no clarification answer to run turn 2 with")
+    fa = second.assessment if second else first.assessment
+    valid = _schema_valid(fa)
+    refused = fa.status is AssessmentStatus.REFUSED
+    completed = fa.status is not AssessmentStatus.FAILED
+    have_verdicts = _all_verdicts(fa)
+    turn_two_clarified = second is not None and fa.status is AssessmentStatus.NEEDS_CLARIFICATION
+    # Turn 2 is a normal item: completed, valid, every sub-claim labeled, no refusal, no second question.
+    turn_two_ok = second is not None and task_success(completed, valid, have_verdicts, refused, False,
+                                                      turn_two_clarified, False)
+    if second is not None and not turn_two_ok:
+        failed.append(f"turn 2 did not finish as a normal item (status {fa.status.value})")
+    logs = [first.decision_log] + ([second.decision_log] if second else [])
+    out = _finsight_record(
+        item, fa, logs, valid=valid, have_verdicts=have_verdicts, clarified=asked,
+        success=asked and turn_two_ok and not failed, predicted=_predicted(fa) if second else [], failed=failed,
+    )
+    raw = {"turn_1": first.assessment.model_dump(mode="json"),
+           "turn_2": second.assessment.model_dump(mode="json") if second else None,
+           "failed_checks": failed}
+    return out, json.dumps(raw, indent=2)
 
 
 def run_baseline_item(system: str, item: EvalItem) -> tuple[RunRecord, str]:
@@ -193,7 +379,8 @@ def run_eval(systems: list[str], split: str, out_root: Path = Path("results"),
             (raw_dir / f"{item.item_id}.json").write_text(raw, encoding="utf-8")
             records.append(record)
             print(f"[{system:<8}] {item.item_id:<8} success={record.task_success} "
-                  f"overall={record.overall_verdict.value if record.overall_verdict else '-'}")
+                  f"overall={record.overall_verdict.value if record.overall_verdict else '-'}"
+                  + (f" failed: {'; '.join(record.failed_checks)}" if record.failed_checks else ""))
 
     (out_dir / "records.jsonl").write_text("\n".join(r.model_dump_json() for r in records) + "\n", encoding="utf-8")
     write_sub_claims_csv(records, out_dir / "sub_claims.csv")

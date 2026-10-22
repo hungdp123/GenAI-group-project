@@ -1,0 +1,308 @@
+[
+  {
+    "item": {
+      "id": "02",
+      "category": "comparison",
+      "prompt": "Mark Roussin said Alphabet's revenue grew 20% last quarter, but Joseph Carlson said 22%. Which one is right? Cut-off: 30 Apr 2026",
+      "influencer_said": "Mark Roussin, 2026-04-30: \u201cThe revenue growth of 20% for the company was the highest rate we have seen since 2022\u201d\nJoseph Carlson (After Hours), 2026-04-30: \u201cGoogle grew by 21%. In fact, 22% this most recent quarter.\u201d",
+      "expected_result": "Actual growth 21.8%. Carlson's 22% Supported. Roussin's 20% Contradicted (1.8 pp off, outside the 0.5 pp band). Both shown side by side.",
+      "checked_by": "Financial agent, one run per influencer",
+      "notes": "Two influencers: team says split into two claims."
+    },
+    "runs": [
+      {
+        "label": "influencer='joseph_carlson'",
+        "status": "REACHED_EXTRACTION",
+        "stopped_at": null,
+        "message": null,
+        "influencer": "joseph_carlson",
+        "ticker": "GOOGL",
+        "cutoff": "2026-04-30",
+        "post": "_V2Sf3putcE",
+        "checked_post": "Checked Joseph Carlson, \"Analysts Can\u2019t Believe These Numbers Are Real\" (_V2Sf3putcE), published 30 Apr 2026. A figure that appears only on a chart, a slide, or an image is not in the stored text, so it was not checked. The transcript does not mark who is speaking, so the speaker was not separated. Video: https://www.youtube.com/watch?v=_V2Sf3putcE This transcript has no timestamps, so the report cannot point to a moment in the video. Checked the lines in this post that match the claim in the prompt.",
+        "focus_quotes": [
+          "Google grew last quarter by 20%, and over the trailing 12 months, Google's growing at a rate of around 17%.",
+          "We also have subscription revenues slowing down to 22%."
+        ],
+        "sub_claims": [
+          {
+            "id": "_V2Sf3putcE-GOOGL-t223",
+            "type": "OTHER",
+            "measure": null,
+            "collectors": [
+              "narrative"
+            ],
+            "text": "Google grew last quarter by 20%, and over the trailing 12 months, Google's growing at a rate of around 17%.",
+            "parent_span": null,
+            "expansion_rule": null,
+            "full": {
+              "sub_claim_id": "_V2Sf3putcE-GOOGL-t223",
+              "text": "Google grew last quarter by 20%, and over the trailing 12 months, Google's growing at a rate of around 17%.",
+              "sub_claim_type": "OTHER",
+              "company_ticker": "GOOGL",
+              "is_quantitative": true,
+              "source_span": "Google grew last quarter by 20%, and over the trailing 12 months, Google's growing at a rate of around 17%.",
+              "parent_span": null,
+              "expansion_rule": null,
+              "measure": null,
+              "quote_time": null
+            }
+          },
+          {
+            "id": "q2",
+            "type": "HISTORICAL_GROWTH",
+            "measure": null,
+            "collectors": [
+              "financial"
+            ],
+            "text": "We also have subscription revenues slowing down to 22%.",
+            "parent_span": null,
+            "expansion_rule": null,
+            "full": {
+              "sub_claim_id": "q2",
+              "text": "We also have subscription revenues slowing down to 22%.",
+              "sub_claim_type": "HISTORICAL_GROWTH",
+              "company_ticker": "GOOGL",
+              "is_quantitative": true,
+              "source_span": "We also have subscription revenues slowing down to 22%.",
+              "parent_span": null,
+              "expansion_rule": null,
+              "measure": null,
+              "quote_time": null
+            }
+          }
+        ],
+        "insufficient": {},
+        "events": [
+          "intake: cutoff=2026-04-30 defaulted=False",
+          "collect_posts: Joseph Carlson: 43 posts with text, 0 listed without text, about GOOGL",
+          "collect_posts: post _V2Sf3putcE 2026-04-30 cutoff=2026-04-30",
+          "extract_claims: 2 sub-claims: _V2Sf3putcE-GOOGL-t223=OTHER, q2=HISTORICAL_GROWTH"
+        ]
+      },
+      {
+        "label": "influencer='mark_roussin'",
+        "status": "REACHED_EXTRACTION",
+        "stopped_at": null,
+        "message": null,
+        "influencer": "mark_roussin",
+        "ticker": "GOOGL",
+        "cutoff": "2026-04-30",
+        "post": "1-jC6oE5Ffo",
+        "checked_post": "Checked Mark Roussin, \"Mag 7 Earnings Breakdown: Buy, Sell, or Hold?\" (1-jC6oE5Ffo), published 30 Apr 2026. A figure that appears only on a chart, a slide, or an image is not in the stored text, so it was not checked. The transcript does not mark who is speaking, so the speaker was not separated. Video: https://www.youtube.com/watch?v=1-jC6oE5Ffo This transcript has no timestamps, so the report cannot point to a moment in the video. Checked the lines in this post that match the claim in the prompt.",
+        "focus_quotes": [
+          "The revenue growth of 20% for the company was the highest rate we have seen since 2022, and the company's Gemini AI saw paid monthly active users grow by 40%.",
+          "And for the Alphabet figures, which is the largest of the three, that only includes Google search ad revenue, not even including YouTube, which would make the figures even bigger."
+        ],
+        "sub_claims": [
+          {
+            "id": "1-jC6oE5Ffo-GOOGL-t65",
+            "type": "HISTORICAL_GROWTH",
+            "measure": null,
+            "collectors": [
+              "financial"
+            ],
+            "text": "The revenue growth of 20% for the company was the highest rate we have seen since 2022, and the company's Gemini AI saw paid monthly active users grow by 40%.",
+            "parent_span": null,
+            "expansion_rule": null,
+            "full": {
+              "sub_claim_id": "1-jC6oE5Ffo-GOOGL-t65",
+              "text": "The revenue growth of 20% for the company was the highest rate we have seen since 2022, and the company's Gemini AI saw paid monthly active users grow by 40%.",
+              "sub_claim_type": "HISTORICAL_GROWTH",
+              "company_ticker": "GOOGL",
+              "is_quantitative": true,
+              "source_span": "The revenue growth of 20% for the company was the highest rate we have seen since 2022, and the company's Gemini AI saw paid monthly active users grow by 40%.",
+              "parent_span": null,
+              "expansion_rule": null,
+              "measure": null,
+              "quote_time": null
+            }
+          },
+          {
+            "id": "q2",
+            "type": "OTHER",
+            "measure": "segment",
+            "collectors": [
+              "narrative"
+            ],
+            "text": "And for the Alphabet figures, which is the largest of the three, that only includes Google search ad revenue, not even including YouTube, which would make the figures even bigger.",
+            "parent_span": null,
+            "expansion_rule": null,
+            "full": {
+              "sub_claim_id": "q2",
+              "text": "And for the Alphabet figures, which is the largest of the three, that only includes Google search ad revenue, not even including YouTube, which would make the figures even bigger.",
+              "sub_claim_type": "OTHER",
+              "company_ticker": "GOOGL",
+              "is_quantitative": false,
+              "source_span": "And for the Alphabet figures, which is the largest of the three, that only includes Google search ad revenue, not even including YouTube, which would make the figures even bigger.",
+              "parent_span": null,
+              "expansion_rule": null,
+              "measure": "segment",
+              "quote_time": null
+            }
+          }
+        ],
+        "insufficient": {},
+        "events": [
+          "intake: cutoff=2026-04-30 defaulted=False",
+          "collect_posts: Mark Roussin: 27 posts with text, 0 listed without text, about GOOGL",
+          "collect_posts: post 1-jC6oE5Ffo 2026-04-30 cutoff=2026-04-30",
+          "extract_claims: 2 sub-claims: 1-jC6oE5Ffo-GOOGL-t65=HISTORICAL_GROWTH, q2=OTHER"
+        ]
+      }
+    ]
+  },
+  {
+    "item": {
+      "id": "48",
+      "category": "comparison",
+      "prompt": "Joseph Carlson said Nvidia's revenue grew 106% to $96.2 billion last quarter, but Alex Reffett said it was up 85% to $81.6 billion. Who is right?",
+      "influencer_said": "Joseph Carlson (After Hours), 2026-08-31: \u201cNvidia announced revenue growth of 106% year-over-year to reach 96.2 billion.\u201d\nAlex Reffett, 2026-05-31: \u201c\u2026$81.6 billion in revenue, which is up 85% year-over-year.\u201d",
+      "expected_result": "Two claims. Carlson Supported (105.9%). Alex Contradicted: his figures were the April quarter and the latest quarter is July.",
+      "checked_by": "Financial agent, one run per influencer",
+      "notes": "Two influencers: split into two claims."
+    },
+    "runs": [
+      {
+        "label": "influencer='joseph_carlson'",
+        "status": "REACHED_EXTRACTION",
+        "stopped_at": null,
+        "message": null,
+        "influencer": "joseph_carlson",
+        "ticker": "NVDA",
+        "cutoff": "2026-08-31",
+        "post": "GPz4sj2C4-c",
+        "checked_post": "Checked Joseph Carlson, \"Investor Warning: They\u2019re All Lying To You About AI\" (GPz4sj2C4-c), published 31 Aug 2026. A figure that appears only on a chart, a slide, or an image is not in the stored text, so it was not checked. The transcript does not mark who is speaking, so the speaker was not separated. Video: https://www.youtube.com/watch?v=GPz4sj2C4-c This transcript has no timestamps, so the report cannot point to a moment in the video. Checked the lines in this post that match the claim in the prompt.",
+        "focus_quotes": [
+          "Nvidia announced revenue growth of 106% year-over-year to reach 96.2 billion.",
+          "They had a record quarter with total revenue at $82 billion, up 85% year-over-year and a 20% quarterover growth."
+        ],
+        "sub_claims": [
+          {
+            "id": "GPz4sj2C4-c-NVDA-2",
+            "type": "HISTORICAL_GROWTH",
+            "measure": null,
+            "collectors": [
+              "financial"
+            ],
+            "text": "Nvidia announced revenue growth of 106% year-over-year to reach 96.2 billion.",
+            "parent_span": null,
+            "expansion_rule": null,
+            "full": {
+              "sub_claim_id": "GPz4sj2C4-c-NVDA-2",
+              "text": "Nvidia announced revenue growth of 106% year-over-year to reach 96.2 billion.",
+              "sub_claim_type": "HISTORICAL_GROWTH",
+              "company_ticker": "NVDA",
+              "is_quantitative": true,
+              "source_span": "Nvidia announced revenue growth of 106% year-over-year to reach 96.2 billion.",
+              "parent_span": null,
+              "expansion_rule": null,
+              "measure": null,
+              "quote_time": null
+            }
+          },
+          {
+            "id": "q2",
+            "type": "HISTORICAL_GROWTH",
+            "measure": null,
+            "collectors": [
+              "financial"
+            ],
+            "text": "They had a record quarter with total revenue at $82 billion, up 85% year-over-year and a 20% quarterover growth.",
+            "parent_span": null,
+            "expansion_rule": null,
+            "full": {
+              "sub_claim_id": "q2",
+              "text": "They had a record quarter with total revenue at $82 billion, up 85% year-over-year and a 20% quarterover growth.",
+              "sub_claim_type": "HISTORICAL_GROWTH",
+              "company_ticker": "NVDA",
+              "is_quantitative": true,
+              "source_span": "They had a record quarter with total revenue at $82 billion, up 85% year-over-year and a 20% quarterover growth.",
+              "parent_span": null,
+              "expansion_rule": null,
+              "measure": null,
+              "quote_time": null
+            }
+          }
+        ],
+        "insufficient": {},
+        "events": [
+          "intake: cutoff=2025-07-31 defaulted=True",
+          "collect_posts: Joseph Carlson: 21 posts with text, 0 listed without text, about NVDA",
+          "collect_posts: post GPz4sj2C4-c 2026-08-31 cutoff=2026-08-31",
+          "extract_claims: 2 sub-claims: GPz4sj2C4-c-NVDA-2=HISTORICAL_GROWTH, q2=HISTORICAL_GROWTH"
+        ]
+      },
+      {
+        "label": "influencer='alex_reffett'",
+        "status": "REACHED_EXTRACTION",
+        "stopped_at": null,
+        "message": null,
+        "influencer": "alex_reffett",
+        "ticker": "NVDA",
+        "cutoff": "2026-09-05",
+        "post": "csv55UtVMZM",
+        "checked_post": "Checked Alex Reffett, \"98% of Investors Miss The REAL AI Winners (My Full Map)\" (csv55UtVMZM), published 5 Sep 2026. A figure that appears only on a chart, a slide, or an image is not in the stored text, so it was not checked. The transcript does not mark who is speaking, so the speaker was not separated. Video: https://www.youtube.com/watch?v=csv55UtVMZM This transcript has no timestamps, so the report cannot point to a moment in the video. Checked the lines in this post that match the claim in the prompt.",
+        "focus_quotes": [
+          "Nvidia reported record revenues of $96.2 billion for the quarter, which was up 106% year-over-year.",
+          "On their latest earnings call, they reported record revenues of $81.6 billion, which was up 85% year-over-year."
+        ],
+        "sub_claims": [
+          {
+            "id": "csv55UtVMZM-NVDA-t7",
+            "type": "HISTORICAL_GROWTH",
+            "measure": null,
+            "collectors": [
+              "financial"
+            ],
+            "text": "Nvidia reported record revenues of $96.2 billion for the quarter, which was up 106% year-over-year.",
+            "parent_span": null,
+            "expansion_rule": null,
+            "full": {
+              "sub_claim_id": "csv55UtVMZM-NVDA-t7",
+              "text": "Nvidia reported record revenues of $96.2 billion for the quarter, which was up 106% year-over-year.",
+              "sub_claim_type": "HISTORICAL_GROWTH",
+              "company_ticker": "NVDA",
+              "is_quantitative": true,
+              "source_span": "Nvidia reported record revenues of $96.2 billion for the quarter, which was up 106% year-over-year.",
+              "parent_span": null,
+              "expansion_rule": null,
+              "measure": null,
+              "quote_time": null
+            }
+          },
+          {
+            "id": "q2",
+            "type": "HISTORICAL_GROWTH",
+            "measure": null,
+            "collectors": [
+              "financial"
+            ],
+            "text": "On their latest earnings call, they reported record revenues of $81.6 billion, which was up 85% year-over-year.",
+            "parent_span": null,
+            "expansion_rule": null,
+            "full": {
+              "sub_claim_id": "q2",
+              "text": "On their latest earnings call, they reported record revenues of $81.6 billion, which was up 85% year-over-year.",
+              "sub_claim_type": "HISTORICAL_GROWTH",
+              "company_ticker": "NVDA",
+              "is_quantitative": true,
+              "source_span": "On their latest earnings call, they reported record revenues of $81.6 billion, which was up 85% year-over-year.",
+              "parent_span": null,
+              "expansion_rule": null,
+              "measure": null,
+              "quote_time": null
+            }
+          }
+        ],
+        "insufficient": {},
+        "events": [
+          "intake: cutoff=2025-07-31 defaulted=True",
+          "collect_posts: Alex Reffett: 29 posts with text, 0 listed without text, about NVDA",
+          "collect_posts: post csv55UtVMZM 2026-09-05 cutoff=2026-09-05",
+          "extract_claims: 2 sub-claims: csv55UtVMZM-NVDA-t7=HISTORICAL_GROWTH, q2=HISTORICAL_GROWTH"
+        ]
+      }
+    ]
+  }
+]
