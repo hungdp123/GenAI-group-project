@@ -1,5 +1,5 @@
-"""
-Read-only fact store. The cut-off filter (filed <= cutoff) is used here.
+""" 
+Read-only fact store where tools.py gets the figures
 """
 
 import csv
@@ -10,12 +10,12 @@ from pathlib import Path
 from .concepts import CONCEPTS
 
 SPAN_ORDER = ["Q", "H1", "9M", "FY"]
-DEFAULT_DATA_DIR = Path("data") / "sec"
+DEFAULT_DATA_DIR = Path("data") / "sec"   
 
 
 def _iso(d):
     """A cut-off as 'YYYY-MM-DD' or None. Accepts a date, a datetime, or an ISO date string.
-    Anything else is an error: comparing against a badly formatted date would silently leak or hide filings."""
+    Anything else is an error so that comparing against a badly formatted date will not silently leak or hide filings."""
     if d is None:
         return None
     if isinstance(d, datetime):
@@ -50,7 +50,7 @@ class FactStore:
         return cls(_read_csv(path / "facts.csv"), _read_csv(path / "filings.csv"))
 
     def visible(self, ticker, concept, cutoff=None):
-        """Facts filed on or before the cut-off date (inclusive: a filing dated on the cut-off counts)."""
+        """Facts filed on or before the cut-off date (inclusive meaning a filing dated on the cut-off counts)."""
         c = _iso(cutoff)
         return [r for r in self._by_key.get((ticker, concept), ()) if c is None or r["filed"] <= c]
 

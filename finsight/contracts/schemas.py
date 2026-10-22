@@ -164,6 +164,8 @@ class EvidenceItem(_Strict):
     produced_by: str = Field(description="Name of the agent that produced this item")
     computed_value: float | None = None
     metric_name: str | None = None
+    comparison_value: float | None = None
+    comparison_period: str | None = None
 
 
 # ---------------------------------------------------------------------------

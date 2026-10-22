@@ -1,5 +1,5 @@
-"""
-Reports which concepts and metrics are available per company + where the concept mapping needs additions.
+""" 
+Reports which concepts and metrics are available per company + where the concept mapping needs additions.  
 Prints two grids (latest quarter, latest annual) and writes <data>/processed/coverage.csv.
 Codes:  R reported   D derived from year-to-date figures   F fallback formula   - missing
 """
@@ -37,6 +37,7 @@ HINTS = {
     "Inventory": ["Inventory"],
 }
 
+# only used for printing the grid in the result
 ABBR = {
     "CostOfRevenue": "CostOfRev", "GrossProfit": "GrossProf", "OperatingIncome": "OpIncome",
     "OperatingCashFlow": "OpCashFlw", "CapitalExpenditure": "Capex", "DilutedShares": "DilShares",
@@ -48,8 +49,9 @@ ABBR = {
 }
 
 
+# finds possible tags for a missing concept
 def candidates(raw_dir, ticker, concept, latest_end):
-    """Unmapped us-gaap tags in the raw file that look related and have recent data in the right unit."""
+    """Unmapped us-gaap tags in the raw file that look related and have recent data in the right unit"""
     p = Path(raw_dir) / "companyfacts" / f"{ticker}.json"
     if not p.exists():
         return []
