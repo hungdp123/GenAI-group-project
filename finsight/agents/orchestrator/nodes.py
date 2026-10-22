@@ -28,7 +28,7 @@ from finsight.agents.claim_extraction.extract import (
 )
 from finsight.agents.claim_extraction.prepare import post_limits
 from finsight.agents.claim_extraction.select import MATCH_NOTE, choose_line, miss_text, stated_claim
-from finsight.agents.orchestrator import explain, pending, posts, routing
+from finsight.agents.orchestrator import explain, pending, posts, router, routing
 from finsight.agents.orchestrator.aggregation import highest_tier, overall_verdict
 from finsight.agents.orchestrator.expansion import report_units
 from finsight.agents.orchestrator.render import render_assessment
@@ -381,16 +381,41 @@ class Nodes:
     # -- 5. plan ------------------------------------------------------------
 
     def plan(self, state: FinSightState) -> dict[str, Any]:
+        """The LLM router picks financial / narrative / both per sub-claim; caps and tiers stay from the rule."""
         plan, pending, insufficient = {}, [], dict(state.insufficient_reasons)
-        for sub_claim in state.sub_claims:
+        cutoff = state.request.cutoff_date if state.request else None
+
+        def decide(sub_claim: SubClaim) -> tuple[SubClaim, router.RouteDecision | None, Exception | None]:
+            if sub_claim.sub_claim_id in insufficient:
+                return sub_claim, None, None
+            rule = self.ctx.kb.rule_for(sub_claim.sub_claim_type)
+            decision, error = self._call(
+                "router", lambda: router.route_sub_claim(sub_claim, rule, cutoff_date=cutoff),
+                sub_claim_id=sub_claim.sub_claim_id)
+            return sub_claim, decision, error
+
+        with self._pool() as pool:
+            decisions = list(pool.map(decide, state.sub_claims))
+
+        for sub_claim, decision, error in decisions:
             rule = self.ctx.kb.rule_for(sub_claim.sub_claim_type)
             entry = routing.plan_entry(sub_claim, rule)
+            if decision is not None:
+                entry = entry.model_copy(update={"collectors": list(decision.collectors)})
+                self.rec.event("plan", f"{sub_claim.sub_claim_id}: {decision.target} ({decision.source}) - "
+                                       f"{decision.reason}")
+            elif error is not None:
+                # DECISION: a failed router call keeps the knowledge-layer route instead of dropping the sub-claim.
+                self.rec.event("plan", f"{sub_claim.sub_claim_id}: router failed ({error}); "
+                                       f"knowledge-layer default {entry.collectors}")
             plan[sub_claim.sub_claim_id] = entry
             self.rec.plan(entry)
             if sub_claim.sub_claim_id in insufficient:
                 continue
             if entry.collectors:
                 pending.append(sub_claim.sub_claim_id)
+            elif decision is not None and decision.source == "llm":
+                insufficient[sub_claim.sub_claim_id] = f"No evidence agent can check this: {decision.reason}"
             else:
                 insufficient[sub_claim.sub_claim_id] = (
                     rule.note or f"No evidence collector for {sub_claim.sub_claim_type.value}.")
