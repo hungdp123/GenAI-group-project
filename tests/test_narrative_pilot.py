@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from finsight.agents.narrative.chunk import chunk_blocks
-from finsight.agents.narrative.corpus import CorpusDocument, validate_document
-from finsight.agents.narrative.index import build_index, load_index, search_index
-from finsight.agents.narrative.ingest import ProcessedBlock, parse_document
-from finsight.agents.narrative.retriever import CorpusRetriever
-from finsight.agents.narrative.retrieval_experiments import (
+from finsight.agents.narrative.processing.chunk import chunk_blocks
+from finsight.agents.narrative.processing.corpus import CorpusDocument, validate_document
+from finsight.agents.narrative.processing.index import build_index, load_index, search_index
+from finsight.agents.narrative.processing.ingest import ProcessedBlock, parse_document
+from finsight.agents.narrative.retrieval.retriever import CorpusRetriever
+from finsight.agents.narrative.retrieval.retrieval_experiments import (
     DenseVectorCache,
     FiveWayRetriever,
 )
@@ -107,7 +107,10 @@ def test_html_ingestion_removes_page_furniture_and_formats_tables(tmp_path):
     assert "Gross margin — 2025: 63.1%; 2024: 62.6%" in text
     assert "Net income — 2025: $20; 2024: $15" in text
     assert text.index("Before the table") < text.index("Revenue — 2025") < text.index("After the table")
-    assert [block.section for block in blocks if block.section.startswith("Item")] == ["Item 7. Results"]
+    # Paragraph-aware parsing can emit several blocks from the same section.
+    assert list(dict.fromkeys(block.section for block in blocks if block.section.startswith("Item"))) == [
+        "Item 7. Results"
+    ]
 
 
 def test_chunk_ids_are_stable_and_do_not_cross_documents():
@@ -217,9 +220,7 @@ def test_five_retrieval_setups_share_filters_and_keep_provenance(tmp_path):
         candidate_k=10,
     )
 
-    assert set(results) == {
-        "bm25", "dense", "hybrid_rrf", "bm25_cross_encoder", "hybrid_cross_encoder"
-    }
+    assert set(results) == {"bm25", "dense", "hybrid_rrf", "bm25_cross_encoder", "hybrid_cross_encoder"}
     assert all(results.values())
     for method, ranking in results.items():
         assert all(item["company_ticker"] == "NVDA" for item in ranking), method

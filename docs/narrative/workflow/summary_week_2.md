@@ -15,8 +15,11 @@ Use `FINSIGHT_NARRATIVE_ANALYSIS=evidence` for the orchestrator, or run the
 basic_rag command normally; explicit retrieval-only mode is still available.
 Current output/configuration details are in Section 10 and the
 [handoff guide](orchestrator_narrative_handoff.md#llm-evidence-preparation-without-stance-or-verdict).
-No tests or model/API calls were run for this change; only syntax parsing was
-performed. Historical results below retain their original scope.
+The subsequent CI repair passed local Ruff checks and the full test suite
+(133 passed, 14 expected failures), with mocked LLM responses and no paid requests.
+Dataset validation, the mock demo, graph freshness and tracked-file secret checks
+also passed locally. GitHub must rerun CI after the repair is committed/pushed.
+Historical results below retain their original scope.
 
 There are two operational stages: prepare searchable company evidence, then answer a claim using that evidence. Retrieval evaluation, provenance validation and integration checks accompany those stages. Chunking/retrieval research uses separate experiment artifacts.
 
@@ -942,5 +945,9 @@ and the existing verdict batch; those are not invoked by this Narrative flow.
 No source/index files, gold labels or saved experimental results are changed.
 Use new versioned output folders after code/schema changes. Implementation
 references: rag/evidence_summary.py, rag/basic_rag.py and the NarrativeAgent
-adapter in stub.py. No tests or model/API calls were run for this change; only
-syntax parsing was performed.
+adapter in stub.py. Following the CI repair, local Ruff and all tests passed (133 passed, 14
+expected failures). New Narrative checks use mocked LLM responses for evidence
+selection, exact citations, no stance/verdict, invalid-output fallback and
+orchestrator integration. No paid model requests were made. Dataset validation,
+the mock demo, graph freshness and tracked-file secret checks passed locally;
+remote CI still needs to rerun after committing/pushing the repair.

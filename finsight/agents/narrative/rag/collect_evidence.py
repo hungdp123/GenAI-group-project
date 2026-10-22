@@ -77,10 +77,19 @@ class LLMStanceClassifier:
         )
         response = (self.completion or complete)(
             system=system,
-            prompt=data_block("claim", claim) + "\n" + data_block(
-                "passage", json.dumps({"publication_date": evidence.publication_date.isoformat(),
-                                       "company": evidence.company, "text": evidence.content},
-                                      ensure_ascii=False)),
+            prompt=data_block("claim", claim)
+            + "\n"
+            + data_block(
+                "passage",
+                json.dumps(
+                    {
+                        "publication_date": evidence.publication_date.isoformat(),
+                        "company": evidence.company,
+                        "text": evidence.content,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
             max_tokens=self.max_tokens,
         )
         if response.finish_reason in {"length", "max_tokens"}:
@@ -97,10 +106,11 @@ class LLMStanceClassifier:
                 self.last_validation["errors"] = ["Classification quote must be a string; abstained"]
                 return Stance.NEUTRAL
             if stance != Stance.NEUTRAL and (
-                not isinstance(quote, str) or len(quote.strip()) < 20
-                or quote not in evidence.content
+                not isinstance(quote, str) or len(quote.strip()) < 20 or quote not in evidence.content
             ):
-                self.last_validation["errors"] = ["Non-neutral stance requires an exact source quote of at least 20 characters; abstained"]
+                self.last_validation["errors"] = [
+                    "Non-neutral stance requires an exact source quote of at least 20 characters; abstained"
+                ]
                 return Stance.NEUTRAL
             if quote and quote not in evidence.content:
                 self.last_validation["errors"] = ["Classification quote is not an exact source substring; abstained"]
@@ -119,8 +129,10 @@ def build_queries(sub_claim: SubClaim, feedback: str | None = None) -> tuple[str
     base = f"{sub_claim.company_ticker} " + " ".join(terms)
     refinement = " ".join(re.findall(r"[\w.%+-]+", feedback or "")[:40])
     suffix = f" {refinement}" if refinement else ""
-    return (base + " reported results drivers evidence" + suffix,
-            base + " contrary evidence decline constraints risks uncertainty limitations" + suffix)
+    return (
+        base + " reported results drivers evidence" + suffix,
+        base + " contrary evidence decline constraints risks uncertainty limitations" + suffix,
+    )
 
 
 class NarrativeEvidenceAgent:
@@ -134,14 +146,18 @@ class NarrativeEvidenceAgent:
     name = "narrative_retrieval_unassessed"
 
     def __init__(
-        self, *, corpus_root: Path | str | None = None, backend: str | None = None,
-        top_k: int = 5, candidate_k: int = 50,
-        classifier: StanceClassifier | None = None, stance_method: str | None = None,
+        self,
+        *,
+        corpus_root: Path | str | None = None,
+        backend: str | None = None,
+        top_k: int = 5,
+        candidate_k: int = 50,
+        classifier: StanceClassifier | None = None,
+        stance_method: str | None = None,
         retriever_factory: Callable[[str], Retriever] | None = None,
         index_path_factory: Callable[[str], Path] | None = None,
     ) -> None:
-        self.corpus_root = Path(corpus_root or os.getenv(
-            "FINSIGHT_NARRATIVE_CORPUS_ROOT", "data/narrative/processed"))
+        self.corpus_root = Path(corpus_root or os.getenv("FINSIGHT_NARRATIVE_CORPUS_ROOT", "data/narrative/processed"))
         self.backend = backend or os.getenv("FINSIGHT_NARRATIVE_BACKEND", "bm25")
         if self.backend not in BACKENDS:
             raise ValueError(f"Unknown backend: {self.backend}")
@@ -160,8 +176,7 @@ class NarrativeEvidenceAgent:
         self.retriever_factory = retriever_factory
         self.index_path_factory = index_path_factory
 
-    def gather(self, sub_claim: SubClaim, cutoff_date: date,
-               feedback: str | None = None) -> list[EvidenceItem]:
+    def gather(self, sub_claim: SubClaim, cutoff_date: date, feedback: str | None = None) -> list[EvidenceItem]:
         if type(cutoff_date) is not date:
             raise ValueError("cutoff_date must be a datetime.date")
         ticker = (sub_claim.company_ticker or "").strip().upper()
@@ -173,19 +188,32 @@ class NarrativeEvidenceAgent:
             raise ValueError("Claim text exceeds 5000 characters")
         if sub_claim.sub_claim_type == SubClaimType.PERSONALIZED_ADVICE:
             return []
-        path = (self.index_path_factory(ticker) if self.index_path_factory
-                else self.corpus_root / ticker / "indexes/index.json")
+        path = (
+            self.index_path_factory(ticker)
+            if self.index_path_factory
+            else self.corpus_root / ticker / "indexes/index.json"
+        )
         if not path.is_file():
             return []
         payload = load_index(path)
-        canonical = {c["chunk_id"]: c for c in payload["chunks"]
-                     if c["company_ticker"].upper() == ticker
-                     and date.fromisoformat(c["publication_date"]) <= cutoff_date}
+        canonical = {
+            c["chunk_id"]: c
+            for c in payload["chunks"]
+            if c["company_ticker"].upper() == ticker and date.fromisoformat(c["publication_date"]) <= cutoff_date
+        }
         if not canonical:
             return []
-        retriever = self.retriever_factory(ticker) if self.retriever_factory else CorpusRetriever(
-            company_ticker=ticker, index_path=path, qdrant_dir=path.parent / "qdrant",
-            backend=self.backend, candidate_k=self.candidate_k)
+        retriever = (
+            self.retriever_factory(ticker)
+            if self.retriever_factory
+            else CorpusRetriever(
+                company_ticker=ticker,
+                index_path=path,
+                qdrant_dir=path.parent / "qdrant",
+                backend=self.backend,
+                candidate_k=self.candidate_k,
+            )
+        )
         scoped = sub_claim.model_copy(update={"company_ticker": ticker})
         support_query, counter_query = build_queries(scoped, feedback)
         support = retriever.retrieve(support_query, self.top_k, cutoff_date)
@@ -200,14 +228,22 @@ class NarrativeEvidenceAgent:
                 raise ValueError(f"Retrieved evidence does not match eligible canonical source: {item.evidence_id}")
             # Rebuild from canonical fields: an injected retriever cannot replace provenance.
             original = EvidenceItem(
-                evidence_id=c["chunk_id"], sub_claim_id=sub_claim.sub_claim_id,
-                stance=Stance.NEUTRAL, content=c["text"], source_tier=c["source_tier"],
-                doc_type=c["document_type"], company=c["company_name"], period=c.get("period"),
+                evidence_id=c["chunk_id"],
+                sub_claim_id=sub_claim.sub_claim_id,
+                stance=Stance.NEUTRAL,
+                content=c["text"],
+                source_tier=c["source_tier"],
+                doc_type=c["document_type"],
+                company=c["company_name"],
+                period=c.get("period"),
                 publication_date=c["publication_date"],
                 publication_date_is_estimated=c.get("publication_date_is_estimated", False),
                 publication_date_precision=c.get("publication_date_precision", "day"),
-                publication_date_basis=c.get("publication_date_basis"), url=c.get("source_url"),
-                citation_span=c.get("citation_span"), produced_by=self.name)
+                publication_date_basis=c.get("publication_date_basis"),
+                url=c.get("source_url"),
+                citation_span=c.get("citation_span"),
+                produced_by=self.name,
+            )
             # NEUTRAL is only the required shared-contract placeholder. No
             # relevance/stance judgment was performed by this collector.
             items.append(original)
@@ -223,8 +259,12 @@ def main() -> None:
     parser.add_argument("--claim-type", choices=[x.value for x in SubClaimType], default="OTHER")
     parser.add_argument("--cutoff", required=True, type=date.fromisoformat)
     parser.add_argument("--backend", choices=BACKENDS, default=None)
-    parser.add_argument("--stance-method", choices=["none", "exact", "llm"], default=None,
-                        help="Deprecated; classification is removed and evidence is unassessed")
+    parser.add_argument(
+        "--stance-method",
+        choices=["none", "exact", "llm"],
+        default=None,
+        help="Deprecated; classification is removed and evidence is unassessed",
+    )
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--candidate-k", type=int, default=50)
     parser.add_argument("--feedback")
@@ -236,27 +276,43 @@ def main() -> None:
     parser.add_argument("--ollama-host", default="http://localhost:11434")
     parser.add_argument("--ollama-context", type=int, default=8192)
     args = parser.parse_args()
-    claim = SubClaim(sub_claim_id=args.sub_claim_id, text=args.claim,
-                     company_ticker=args.ticker, sub_claim_type=args.claim_type)
-    agent = NarrativeEvidenceAgent(corpus_root=args.corpus_root, backend=args.backend,
-                                   top_k=args.top_k, candidate_k=args.candidate_k,
-                                   stance_method=args.stance_method)
+    claim = SubClaim(
+        sub_claim_id=args.sub_claim_id, text=args.claim, company_ticker=args.ticker, sub_claim_type=args.claim_type
+    )
+    agent = NarrativeEvidenceAgent(
+        corpus_root=args.corpus_root,
+        backend=args.backend,
+        top_k=args.top_k,
+        candidate_k=args.candidate_k,
+        stance_method=args.stance_method,
+    )
     evidence = agent.gather(claim, args.cutoff, args.feedback)
     preparation = {}
     if not args.retrieval_only:
         from finsight.agents.narrative.rag.evidence_summary import prepare_narrative_evidence
 
         evidence, preparation = prepare_narrative_evidence(
-            claim, args.cutoff, evidence, max_tokens=args.max_tokens,
-            ollama_model=args.ollama_model, ollama_host=args.ollama_host,
+            claim,
+            args.cutoff,
+            evidence,
+            max_tokens=args.max_tokens,
+            ollama_model=args.ollama_model,
+            ollama_host=args.ollama_host,
             ollama_context=args.ollama_context,
         )
-    result = {"status": "OK" if evidence else "NO_EVIDENCE", **preparation,
-              "pipeline": "narrative_evidence_retrieval" if args.retrieval_only else "narrative_evidence_rag",
-              "assessment_status": "NOT_ASSESSED",
-              "queries": dict(zip(("support", "counter"), build_queries(
-                  claim.model_copy(update={"company_ticker": args.ticker.strip().upper()}), args.feedback))),
-              "evidence": [item.model_dump(mode="json", exclude={"stance"}) for item in evidence]}
+    result = {
+        "status": "OK" if evidence else "NO_EVIDENCE",
+        **preparation,
+        "pipeline": "narrative_evidence_retrieval" if args.retrieval_only else "narrative_evidence_rag",
+        "assessment_status": "NOT_ASSESSED",
+        "queries": dict(
+            zip(
+                ("support", "counter"),
+                build_queries(claim.model_copy(update={"company_ticker": args.ticker.strip().upper()}), args.feedback),
+            )
+        ),
+        "evidence": [item.model_dump(mode="json", exclude={"stance"}) for item in evidence],
+    }
     rendered = json.dumps(result, ensure_ascii=False, indent=2)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

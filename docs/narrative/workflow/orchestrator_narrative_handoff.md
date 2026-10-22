@@ -153,6 +153,8 @@ interfaces, the auditor, tier policy, or orchestrator renderer.
 
 Reports remain in data/narrative/experiments/orchestrator_narrative/. New
 standalone reports use ticker-model-evidence-time filenames. Historical verdict,
-stance and retrieval-only outputs are preserved. Current tests/model runs have
-not been performed; only syntax parsing was run. No API calls were made while
-implementing this restoration.
+stance and retrieval-only outputs are preserved. The subsequent CI repair passed Ruff and the full local suite: 133 tests
+passed with 14 expected failures. Narrative evidence preparation and its source
+validation/fallback are tested with mocked responses; no paid API calls were
+made. Dataset validation, the mock demo, graph freshness and tracked-file secret
+checks passed locally. Commit/push the repair for a fresh remote CI result.

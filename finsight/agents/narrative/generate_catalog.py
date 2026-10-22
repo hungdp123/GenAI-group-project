@@ -24,9 +24,7 @@ def _unmanifested_count(manifest_path: Path | None, documents: list[dict[str, An
     for ticker in {document["company_ticker"] for document in documents}:
         corpus_root = data_root / ticker / corpus_name
         if corpus_root.exists():
-            total += sum(
-                1 for path in corpus_root.rglob("*") if path.is_file() and path.resolve() not in represented
-            )
+            total += sum(1 for path in corpus_root.rglob("*") if path.is_file() and path.resolve() not in represented)
     return total
 
 
@@ -75,9 +73,7 @@ def generate(
     total_unmanifested = core_unmanifested + supplemental_unmanifested + ir_unmanifested
 
     core_root = _display_path(str(manifest_path.parent))
-    supplemental_root = (
-        _display_path(str(supplemental_manifest_path.parent)) if supplemental_manifest_path else "-"
-    )
+    supplemental_root = _display_path(str(supplemental_manifest_path.parent)) if supplemental_manifest_path else "-"
     ir_root = _display_path(str(ir_manifest_path.parent)) if ir_manifest_path else "-"
     total_downloads = len(documents) + len(supplemental_documents) + len(ir_documents)
 
@@ -105,12 +101,16 @@ def generate(
         "",
         "| Dataset | Raw files | Manifest | Status |",
         "|---|---|---|---|",
-        f"| Core SEC | `data/narrative/raw/<TICKER>/{Path(core_root).name}/` | `{core_root}/manifest.json` | Complete for the defined SEC rules |",
+        f"| Core SEC | `data/narrative/raw/<TICKER>/{Path(core_root).name}/` | "
+        f"`{core_root}/manifest.json` | Complete for the defined SEC rules |",
         (
-            f"| Supplemental SEC | `data/narrative/raw/<TICKER>/{Path(supplemental_root).name}/` | `{supplemental_root}/manifest.json` | "
+            f"| Supplemental SEC | "
+            f"`data/narrative/raw/<TICKER>/{Path(supplemental_root).name}/` | "
+            f"`{supplemental_root}/manifest.json` | "
             "Downloaded and deduplicated against core |"
         ),
-        f"| Official IR | `data/narrative/raw/<TICKER>/{Path(ir_root).name}/` | `{ir_root}/manifest.json` | Partial; official-site access gaps remain |",
+        f"| Official IR | `data/narrative/raw/<TICKER>/{Path(ir_root).name}/` | "
+        f"`{ir_root}/manifest.json` | Partial; official-site access gaps remain |",
         "",
         "Document summary by dataset and type:",
         "",
@@ -236,7 +236,7 @@ def generate(
         "Run all collectors from the repository root:",
         "",
         "```powershell",
-        "$env:SEC_USER_AGENT=\"FinSight academic project your-contact@example.com\"",
+        '$env:SEC_USER_AGENT="FinSight academic project your-contact@example.com"',
         "python -m finsight.agents.narrative.download_corpus `",
         "  --from-date 2021-01-01 `",
         "  --cutoff 2026-10-04 `",
@@ -261,7 +261,7 @@ def generate(
         "$tickers = 'BIRD','DNUT','GPRO','MCD','MSFT','NFLX','NKE','NVDA','OPEN'",
         "foreach ($ticker in $tickers) {",
         "  python -m finsight.agents.narrative.import_manual_ir `",
-        "    \"data/narrative/manual_inbox/$ticker/import_metadata.json\" `",
+        '    "data/narrative/manual_inbox/$ticker/import_metadata.json" `',
         "    --manifest data/narrative/raw/ir_from_2021_official_final/manifest.json `",
         "    --exclude-manifest data/narrative/raw/from_2021_final/manifest.json `",
         "      data/narrative/raw/supplemental_from_2021_official_final/manifest.json `",
@@ -342,32 +342,48 @@ def generate(
         "",
         "| Company | Captured beyond core SEC | Status | Missing or uncertain coverage |",
         "|---|---:|---|---|",
-        f"| Apple (AAPL) | {supplemental_by_ticker['AAPL'] + ir_by_ticker['AAPL']} | Not complete / availability unverified | "
-        "No official downloadable earnings transcript, earnings deck, or investor-day deck was located; Apple provides earnings-call webcasts |",
+        f"| Apple (AAPL) | {supplemental_by_ticker['AAPL'] + ir_by_ticker['AAPL']} | "
+        f"Not complete / availability unverified | "
+        "No official downloadable earnings transcript, earnings deck, or "
+        "investor-day deck was located; Apple provides earnings-call webcasts |",
         f"| Alphabet (GOOGL) | {supplemental_by_ticker['GOOGL'] + ir_by_ticker['GOOGL']} | Partial | "
-        "20 official call transcripts cover 2021-2025; 2026 Q1-Q2 transcripts and official earnings/investor-day presentations remain missing or unverified |",
-        f"| Microsoft (MSFT) | {supplemental_by_ticker['MSFT'] + ir_by_ticker['MSFT']} | Complete for published quarterly materials | "
-        "22 official transcripts cover FY2021 Q3 through FY2026 Q4; four official legacy earnings slide decks were also imported |",
+        "20 official call transcripts cover 2021-2025; 2026 Q1-Q2 transcripts and "
+        "official earnings/investor-day presentations remain missing or unverified |",
+        f"| Microsoft (MSFT) | "
+        f"{supplemental_by_ticker['MSFT'] + ir_by_ticker['MSFT']} | Complete for "
+        f"published quarterly materials | "
+        "22 official transcripts cover FY2021 Q3 through FY2026 Q4; four official "
+        "legacy earnings slide decks were also imported |",
         f"| Nike (NKE) | {supplemental_by_ticker['NKE'] + ir_by_ticker['NKE']} | Partial | "
-        "18 official transcripts captured; FY2022 Q1 and FY2023 Q3-Q4/FY2024 Q1 remain missing, and no strategy-presentation series is captured |",
+        "18 official transcripts captured; FY2022 Q1 and FY2023 Q3-Q4/FY2024 Q1 "
+        "remain missing, and no strategy-presentation series is captured |",
         f"| NVIDIA (NVDA) | {supplemental_by_ticker['NVDA'] + ir_by_ticker['NVDA']} | Partial | "
-        "Older investor presentations, commentary/trends, FY2024 Q3 materials, and 2021/2022 Investor Day decks are now imported; FY2022 Q1 commentary/trend, FY2023 Q2 commentary, FY2023 Q4 trend, and most transcripts remain missing |",
+        "Older investor presentations, commentary/trends, FY2024 Q3 materials, and "
+        "2021/2022 Investor Day decks are now imported; FY2022 Q1 commentary/trend, "
+        "FY2023 Q2 commentary, FY2023 Q4 trend, and most transcripts remain missing "
+        "|",
         (
             f"| McDonald's (MCD) | {supplemental_by_ticker['MCD'] + ir_by_ticker['MCD']} | Partial | "
-            "Five official/SEC presentations are captured, including the 2026 Investor Day deck; quarterly earnings decks, remarks, and transcripts remain missing |"
+            "Five official/SEC presentations are captured, including the 2026 Investor "
+            "Day deck; quarterly earnings decks, remarks, and transcripts remain "
+            "missing |"
         ),
         (
-            f"| Tesla (TSLA) | {supplemental_by_ticker['TSLA'] + ir_by_ticker['TSLA']} | Complete for published downloadable materials | "
+            f"| Tesla (TSLA) | {supplemental_by_ticker['TSLA'] + ir_by_ticker['TSLA']} | "
+            f"Complete for published downloadable materials | "
             "All 22 quarterly shareholder decks from 2021 Q1 through 2026 Q2 and the 2023 Investor Day "
             "deck are captured; earnings Q&A is webcast-only with no official text transcript |"
         ),
         (
-            f"| Netflix (NFLX) | {supplemental_by_ticker['NFLX'] + ir_by_ticker['NFLX']} | Complete for published quarterly materials | "
-            "Official shareholder letters and transcripts are captured through 2026 Q2; one May 2025 special deck still lacks an exact day |"
+            f"| Netflix (NFLX) | {supplemental_by_ticker['NFLX'] + ir_by_ticker['NFLX']} "
+            f"| Complete for published quarterly materials | "
+            "Official shareholder letters and transcripts are captured through 2026 Q2; "
+            "one May 2025 special deck still lacks an exact day |"
         ),
         (
             f"| Opendoor (OPEN) | {supplemental_by_ticker['OPEN'] + ir_by_ticker['OPEN']} | Partial | "
-            "18 official shareholder letters cover 2021 Q1 through 2025 Q2; later 2025-2026 narrative materials and special presentations remain unverified |"
+            "18 official shareholder letters cover 2021 Q1 through 2025 Q2; later "
+            "2025-2026 narrative materials and special presentations remain unverified |"
         ),
         (
             f"| Kohl's (KSS) | {supplemental_by_ticker['KSS'] + ir_by_ticker['KSS']} | Partial | "
@@ -375,15 +391,21 @@ def generate(
         ),
         (
             f"| Krispy Kreme (DNUT) | {supplemental_by_ticker['DNUT'] + ir_by_ticker['DNUT']} | Partial | "
-            "Twelve earnings decks, two 2026 transcripts, and one SEC investor-day deck are captured; 2022-2023 decks and most transcripts remain missing |"
+            "Twelve earnings decks, two 2026 transcripts, and one SEC investor-day deck "
+            "are captured; 2022-2023 decks and most transcripts remain missing |"
         ),
         (
-            f"| GoPro (GPRO) | {supplemental_by_ticker['GPRO'] + ir_by_ticker['GPRO']} | Complete for published quarterly materials | "
-            "23 management commentaries cover Q4 2020 through Q2 2026 and 16 supplemental slide decks cover Q1 2021 through Q4 2024; no separate special deck was located |"
+            f"| GoPro (GPRO) | {supplemental_by_ticker['GPRO'] + ir_by_ticker['GPRO']} | "
+            f"Complete for published quarterly materials | "
+            "23 management commentaries cover Q4 2020 through Q2 2026 and 16 "
+            "supplemental slide decks cover Q1 2021 through Q4 2024; no separate "
+            "special deck was located |"
         ),
         (
             f"| Smartbird/Allbirds (BIRD) | {supplemental_by_ticker['BIRD'] + ir_by_ticker['BIRD']} | Partial | "
-            "Ten transcripts, seven prepared-remarks files, one infographic, and one strategic deck are captured; older investor decks and post-Q3 2025 quarterly coverage remain incomplete |"
+            "Ten transcripts, seven prepared-remarks files, one infographic, and one "
+            "strategic deck are captured; older investor decks and post-Q3 2025 "
+            "quarterly coverage remain incomplete |"
         ),
         (
             f"| GameStop (GME) | {supplemental_by_ticker['GME'] + ir_by_ticker['GME']} | Not complete | "
@@ -394,7 +416,8 @@ def generate(
         "",
         "Cross-company unresolved items:",
         "",
-        "- webcast-only events are not transcribed locally because generated text would not be an official-source transcript;",
+        "- webcast-only events are not transcribed locally because generated text "
+        "would not be an official-source transcript;",
         "- JavaScript-only archives, HTTP 403 responses, DNS failures, and timeouts can hide official files; and",
         "- a zero supplemental/IR count means **not captured**, not proof that the company never published a document.",
         "",
@@ -419,14 +442,16 @@ def generate(
             f"{counts['earnings_release']} | {supplemental_count} | {ir_count} | {all_count} |"
         )
 
-    lines.extend([
-        "",
-        "## Complete file catalog",
-        "",
-        "Each filename links to its original SEC document. `Local path` is relative to the",
-        "repository root.",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Complete file catalog",
+            "",
+            "Each filename links to its original SEC document. `Local path` is relative to the",
+            "repository root.",
+            "",
+        ]
+    )
 
     for ticker in sorted(grouped):
         company_documents = sorted(
@@ -434,12 +459,14 @@ def generate(
             key=lambda d: (d["publication_date"], d["document_type"], d["accession_number"]),
             reverse=True,
         )
-        lines.extend([
-            f"### {ticker} - {company_documents[0]['company_name']}",
-            "",
-            "| Filed | Type | Period | Local file | Original SEC document |",
-            "|---|---|---|---|---|",
-        ])
+        lines.extend(
+            [
+                f"### {ticker} - {company_documents[0]['company_name']}",
+                "",
+                "| Filed | Type | Period | Local file | Original SEC document |",
+                "|---|---|---|---|---|",
+            ]
+        )
         for document in company_documents:
             local_path = _display_path(document["local_path"])
             filename = Path(local_path).name
@@ -452,17 +479,19 @@ def generate(
         lines.append("")
 
     if supplemental_documents:
-        lines.extend([
-            "## Supplemental SEC exhibits",
-            "",
-            "These documents were selected from official Item 2.02 and Item 7.01 SEC filing exhibits.",
-            "They exclude documents already present in the core corpus.",
-            "",
-            f"Documents: **{len(supplemental_documents)}**",
-            "",
-            "| Ticker | Filed | Type | Local file | Original SEC document |",
-            "|---|---|---|---|---|",
-        ])
+        lines.extend(
+            [
+                "## Supplemental SEC exhibits",
+                "",
+                "These documents were selected from official Item 2.02 and Item 7.01 SEC filing exhibits.",
+                "They exclude documents already present in the core corpus.",
+                "",
+                f"Documents: **{len(supplemental_documents)}**",
+                "",
+                "| Ticker | Filed | Type | Local file | Original SEC document |",
+                "|---|---|---|---|---|",
+            ]
+        )
         for document in sorted(
             supplemental_documents,
             key=lambda d: (d["company_ticker"], d["publication_date"], d["document_type"]),
@@ -476,20 +505,22 @@ def generate(
         lines.append("")
 
     if ir_documents:
-        lines.extend([
-            "## Official investor-relations materials",
-            "",
-            "These files were linked directly by company-controlled investor-relations pages. A CDN asset is",
-            "accepted only when discovered through its official IR page. No search-engine or transcript-vendor",
-            "copy is used as the source.",
-            "",
-            f"- Documents: **{len(ir_documents)}**",
-            f"- Temporally verified and retrieval-eligible: **{ir_eligible}**",
-            f"- Awaiting exact-date review: **{len(ir_documents) - ir_eligible}**",
-            "",
-            "| Ticker | Published | Type | Retrieval eligible | Local file | Official source |",
-            "|---|---|---|---|---|---|",
-        ])
+        lines.extend(
+            [
+                "## Official investor-relations materials",
+                "",
+                "These files were linked directly by company-controlled investor-relations pages. A CDN asset is",
+                "accepted only when discovered through its official IR page. No search-engine or transcript-vendor",
+                "copy is used as the source.",
+                "",
+                f"- Documents: **{len(ir_documents)}**",
+                f"- Temporally verified and retrieval-eligible: **{ir_eligible}**",
+                f"- Awaiting exact-date review: **{len(ir_documents) - ir_eligible}**",
+                "",
+                "| Ticker | Published | Type | Retrieval eligible | Local file | Official source |",
+                "|---|---|---|---|---|---|",
+            ]
+        )
         for document in sorted(
             ir_documents,
             key=lambda d: (d["company_ticker"], d.get("publication_date") or "", d["document_type"]),
@@ -502,26 +533,30 @@ def generate(
                 f"| {document['company_ticker']} | {published} | {document['document_type']} | "
                 f"{eligible_label} | `{local_path}` | [{filename}]({document['source_url']}) |"
             )
-        lines.extend([
-            "",
-            "Documents awaiting exact-date review must not enter the retrieval index. Official webcasts without",
-            "a downloadable transcript are recorded as coverage gaps rather than converted from third-party text.",
-            "",
-        ])
+        lines.extend(
+            [
+                "",
+                "Documents awaiting exact-date review must not enter the retrieval index. Official webcasts without",
+                "a downloadable transcript are recorded as coverage gaps rather than converted from third-party text.",
+                "",
+            ]
+        )
 
-    lines.extend([
-        "## Important handling notes",
-        "",
-        "- Do not commit `data/`; it is intentionally excluded by `.gitignore`.",
-        "- Share the raw corpus through the team's approved shared storage if another machine needs it.",
-        "- Use `publication_date`, not period end, for FinSight cut-off-date filtering.",
-        "- Treat retrieved filing text as untrusted data, never as model instructions.",
-        "- Do not use the pasted user claim as evidence.",
-        "- Rebuild the index whenever the manifest or chunking implementation changes.",
-        "- The manifest is the authoritative machine-readable inventory; this Markdown file is the",
-        "  human-readable catalog.",
-        "",
-    ])
+    lines.extend(
+        [
+            "## Important handling notes",
+            "",
+            "- Do not commit `data/`; it is intentionally excluded by `.gitignore`.",
+            "- Share the raw corpus through the team's approved shared storage if another machine needs it.",
+            "- Use `publication_date`, not period end, for FinSight cut-off-date filtering.",
+            "- Treat retrieved filing text as untrusted data, never as model instructions.",
+            "- Do not use the pasted user claim as evidence.",
+            "- Rebuild the index whenever the manifest or chunking implementation changes.",
+            "- The manifest is the authoritative machine-readable inventory; this Markdown file is the",
+            "  human-readable catalog.",
+            "",
+        ]
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")
 

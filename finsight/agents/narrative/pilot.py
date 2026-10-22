@@ -12,23 +12,21 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Iterable
 
-from finsight.agents.narrative.chunk import chunk_blocks
-from finsight.agents.narrative.corpus import (
+from finsight.agents.narrative.processing.chunk import chunk_blocks
+from finsight.agents.narrative.processing.corpus import (
     corpus_fingerprint,
     load_documents,
     validate_document,
 )
-from finsight.agents.narrative.index import build_index, load_index, search_index
-from finsight.agents.narrative.ingest import ProcessedBlock, parse_document
+from finsight.agents.narrative.processing.index import build_index, load_index, search_index
+from finsight.agents.narrative.processing.ingest import ProcessedBlock, parse_document
 
 
 PILOT_DOCUMENT_IDS = {
     "NVDA-0001045810-25-000023-10-K",
     "NVDA-IR-0387401647e4fe23",
 }
-DEFAULT_QUERY = (
-    "NVIDIA data center growth accelerated computing Blackwell inference customer demand"
-)
+DEFAULT_QUERY = "NVIDIA data center growth accelerated computing Blackwell inference customer demand"
 DEFAULT_CUTOFF = date(2025, 7, 31)
 TARGET_WORDS = 800
 OVERLAP_WORDS = 120
@@ -44,9 +42,7 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
 def build_pilot(workspace: Path, *, all_documents: bool = False) -> dict[str, Any]:
     all_nvda = load_documents("NVDA", root=workspace)
     selected = (
-        all_nvda
-        if all_documents
-        else [document for document in all_nvda if document.document_id in PILOT_DOCUMENT_IDS]
+        all_nvda if all_documents else [document for document in all_nvda if document.document_id in PILOT_DOCUMENT_IDS]
     )
     selected_ids = {document.document_id for document in selected}
     missing_ids = set() if all_documents else PILOT_DOCUMENT_IDS - selected_ids
@@ -95,9 +91,7 @@ def build_pilot(workspace: Path, *, all_documents: bool = False) -> dict[str, An
     }
     index_metadata["company_ticker"] = "NVDA"
     index_metadata["document_ids"] = sorted(selected_ids)
-    (index_dir / "index_metadata.json").write_text(
-        json.dumps(index_metadata, indent=2), encoding="utf-8"
-    )
+    (index_dir / "index_metadata.json").write_text(json.dumps(index_metadata, indent=2), encoding="utf-8")
 
     report = {
         "status": "complete",
@@ -111,9 +105,7 @@ def build_pilot(workspace: Path, *, all_documents: bool = False) -> dict[str, An
         "warnings": warnings,
         "documents": document_stats,
     }
-    (processed_dir / "processing_report.json").write_text(
-        json.dumps(report, indent=2), encoding="utf-8"
-    )
+    (processed_dir / "processing_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report
 
 
@@ -144,14 +136,13 @@ def main() -> None:
     parser.add_argument(
         "--all-documents",
         action="store_true",
-        help="Process all eligible NVDA manifest records into separate NVDA_full outputs; preserve the two-document pilot.",
+        help="Process all eligible NVDA manifest records into separate NVDA_full "
+        "outputs; preserve the two-document pilot.",
     )
     args = parser.parse_args()
     workspace = args.workspace.resolve()
     report = build_pilot(workspace, all_documents=args.all_documents)
-    results = query_pilot(
-        workspace, args.query, args.cutoff, args.top_k, all_documents=args.all_documents
-    )
+    results = query_pilot(workspace, args.query, args.cutoff, args.top_k, all_documents=args.all_documents)
     print(json.dumps({"report": report, "query_results": results}, indent=2, ensure_ascii=False))
 
 

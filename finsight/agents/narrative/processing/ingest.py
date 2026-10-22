@@ -106,9 +106,7 @@ def _base(document: CorpusDocument) -> dict[str, Any]:
         "publication_date_basis": document.publication_date_basis,
         "source_format": source_format,
         "extraction_method": extraction_method,
-        "original_local_path": (
-            document.original_local_path or document.local_path
-        ).as_posix(),
+        "original_local_path": (document.original_local_path or document.local_path).as_posix(),
     }
 
 
@@ -148,9 +146,7 @@ def _table_rows(table: Tag) -> list[tuple[list[str], list[bool], bool]]:
         cells = row.find_all(["th", "td"], recursive=False)
         if not cells:
             continue
-        cells_and_values = [
-            (cell, re.sub(r"\s+", " ", cell.get_text(" ", strip=True)).strip()) for cell in cells
-        ]
+        cells_and_values = [(cell, re.sub(r"\s+", " ", cell.get_text(" ", strip=True)).strip()) for cell in cells]
         cells_and_values = [(cell, value) for cell, value in cells_and_values if value]
         cells = [cell for cell, _ in cells_and_values]
         values = [value for _, value in cells_and_values]
@@ -167,14 +163,9 @@ def _table_text(table: Tag) -> str:
     if not rows:
         return ""
 
-    thead_candidates = [
-        i for i, (values, _, in_head) in enumerate(rows) if in_head and len(values) > 1
-    ]
+    thead_candidates = [i for i, (values, _, in_head) in enumerate(rows) if in_head and len(values) > 1]
     header_index: int | None = next(
-        (
-            i for i in thead_candidates
-            if any(_PERIOD_HEADER_HINT.search(value) for value in rows[i][0])
-        ),
+        (i for i in thead_candidates if any(_PERIOD_HEADER_HINT.search(value) for value in rows[i][0])),
         thead_candidates[-1] if thead_candidates else None,
     )
     if header_index is None and len(rows[0][0]) > 1 and all(rows[0][1]):
@@ -196,11 +187,7 @@ def _table_text(table: Tag) -> str:
     headers = rows[header_index][0] if header_index is not None else []
     header_offset = (
         1
-        if headers and (
-            not headers[0]
-            or _ROW_HEADER_HINT.match(headers[0])
-            or _UNIT_HEADER_HINT.search(headers[0])
-        )
+        if headers and (not headers[0] or _ROW_HEADER_HINT.match(headers[0]) or _UNIT_HEADER_HINT.search(headers[0]))
         else 0
     )
     caption_tag = table.find("caption", recursive=False)
@@ -319,10 +306,12 @@ def _sec_paragraph_blocks(document: CorpusDocument, soup: BeautifulSoup) -> list
     index = 0
     while index < len(paragraphs):
         text = paragraphs[index]
-        if (re.fullmatch(r"Item\s+\d+[A-Z]?\.?", text, re.IGNORECASE)
-                and index + 1 < len(paragraphs)
-                and len(paragraphs[index + 1]) <= 200
-                and not re.match(r"^Item\s+\d", paragraphs[index + 1], re.IGNORECASE)):
+        if (
+            re.fullmatch(r"Item\s+\d+[A-Z]?\.?", text, re.IGNORECASE)
+            and index + 1 < len(paragraphs)
+            and len(paragraphs[index + 1]) <= 200
+            and not re.match(r"^Item\s+\d", paragraphs[index + 1], re.IGNORECASE)
+        ):
             text += " " + paragraphs[index + 1]
             index += 1
         normalized.append(text)
@@ -342,10 +331,15 @@ def _sec_paragraph_blocks(document: CorpusDocument, soup: BeautifulSoup) -> list
             text = "\n\n".join(pending)
             if section != "Front matter":
                 text = section + "\n\n" + text
-            blocks.append(ProcessedBlock(
-                **_base(document), section=section, page=None,
-                citation_span=f"{section}; paragraph {ordinal}", text=text,
-            ))
+            blocks.append(
+                ProcessedBlock(
+                    **_base(document),
+                    section=section,
+                    page=None,
+                    citation_span=f"{section}; paragraph {ordinal}",
+                    text=text,
+                )
+            )
             pending.clear()
 
     for paragraph in normalized:
@@ -400,12 +394,19 @@ def parse_html(document: CorpusDocument) -> list[ProcessedBlock]:
     starts = [index for index, line in enumerate(lines) if _ITEM_HEADING.match(line)]
     if not starts:
         text = "\n".join(lines)
-        return [
-            ProcessedBlock(
-                **_base(document), section="Document text", page=None,
-                citation_span="HTML document text", text=text,
-            )
-        ] if text else []
+        return (
+            [
+                ProcessedBlock(
+                    **_base(document),
+                    section="Document text",
+                    page=None,
+                    citation_span="HTML document text",
+                    text=text,
+                )
+            ]
+            if text
+            else []
+        )
 
     blocks: list[ProcessedBlock] = []
     if starts[0] > 0:
@@ -413,8 +414,11 @@ def parse_html(document: CorpusDocument) -> list[ProcessedBlock]:
         if front:
             blocks.append(
                 ProcessedBlock(
-                    **_base(document), section="Front matter", page=None,
-                    citation_span="HTML front matter", text=front,
+                    **_base(document),
+                    section="Front matter",
+                    page=None,
+                    citation_span="HTML front matter",
+                    text=front,
                 )
             )
     for position, start in enumerate(starts):
@@ -425,8 +429,11 @@ def parse_html(document: CorpusDocument) -> list[ProcessedBlock]:
         heading = section_lines[0]
         blocks.append(
             ProcessedBlock(
-                **_base(document), section=heading, page=None,
-                citation_span=heading, text="\n".join(section_lines),
+                **_base(document),
+                section=heading,
+                page=None,
+                citation_span=heading,
+                text="\n".join(section_lines),
             )
         )
     return blocks
@@ -447,7 +454,8 @@ def parse_pdf(document: CorpusDocument) -> tuple[list[ProcessedBlock], list[str]
                 from rapidocr import RapidOCR
             except ImportError:
                 warnings.append(
-                    f"{document.document_id}: PDF page {page_number} has no native text and OCR dependencies are unavailable"
+                    f"{document.document_id}: PDF page {page_number} has no native text and OCR "
+                    f"dependencies are unavailable"
                 )
                 continue
             if pdfium_document is None:
@@ -479,8 +487,11 @@ def parse_pdf(document: CorpusDocument) -> tuple[list[ProcessedBlock], list[str]
         base["extraction_method"] = extraction_method
         blocks.append(
             ProcessedBlock(
-                **base, section=title, page=page_number,
-                citation_span=f"PDF page {page_number}", text="\n".join(lines),
+                **base,
+                section=title,
+                page=page_number,
+                citation_span=f"PDF page {page_number}",
+                text="\n".join(lines),
                 validation_status=("ocr_unverified" if extraction_method == "rapidocr_pdf_ocr" else "native_text"),
             )
         )
@@ -563,9 +574,7 @@ def parse_markdown(document: CorpusDocument) -> tuple[list[ProcessedBlock], list
             source_ref = ref_match.group(1) if ref_match else None
             title_match = re.search(r"^###\s+Chart:\s*(.+)$", chart_text, re.MULTILINE)
             chart_section = title_match.group(1).strip() if title_match else section
-            validation_status = (
-                "review_required" if "Validation required" in chart_text else "model_validated"
-            )
+            validation_status = "review_required" if "Validation required" in chart_text else "model_validated"
             add_block(
                 chart_text,
                 content_type="chart",
@@ -574,9 +583,7 @@ def parse_markdown(document: CorpusDocument) -> tuple[list[ProcessedBlock], list
                 validation_status=validation_status,
                 source_ref=source_ref,
                 block_section=chart_section,
-                citation_span=(
-                    f"PDF page {page}, chart {chart_id}" if page else f"Chart {chart_id}"
-                ),
+                citation_span=(f"PDF page {page}, chart {chart_id}" if page else f"Chart {chart_id}"),
             )
             index += 1
             continue

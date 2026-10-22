@@ -25,9 +25,31 @@ from typing import Any
 
 
 DEFAULT_TICKERS = [
-    "AAPL", "GOOGL", "MSFT", "NKE", "NVDA", "MCD", "TSLA", "NFLX",
-    "OPEN", "KSS", "DNUT", "GPRO", "BIRD", "GME", "AMC",
-    "AMZN", "META", "MELI", "SBUX", "PLTR", "INTC", "INTU", "CRM", "ORCL", "AMD",
+    "AAPL",
+    "GOOGL",
+    "MSFT",
+    "NKE",
+    "NVDA",
+    "MCD",
+    "TSLA",
+    "NFLX",
+    "OPEN",
+    "KSS",
+    "DNUT",
+    "GPRO",
+    "BIRD",
+    "GME",
+    "AMC",
+    "AMZN",
+    "META",
+    "MELI",
+    "SBUX",
+    "PLTR",
+    "INTC",
+    "INTU",
+    "CRM",
+    "ORCL",
+    "AMD",
 ]
 SEC_DATA = "https://data.sec.gov"
 SEC_ARCHIVES = "https://www.sec.gov/Archives/edgar/data"
@@ -77,7 +99,7 @@ class SecClient:
                 return payload
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ConnectionError) as exc:
                 last_error = exc
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
         raise RuntimeError(f"Unable to download {url}: {last_error}")
 
     def json(self, url: str) -> dict[str, Any]:
@@ -96,7 +118,7 @@ def _all_filings(client: SecClient, submissions: dict[str, Any], from_date: date
     if from_date is None:
         return result
     for shard in submissions.get("filings", {}).get("files", []):
-        shard_start = date.fromisoformat(shard["filingFrom"])
+        date.fromisoformat(shard["filingFrom"])  # Validate the range start without retaining an unused value.
         shard_end = date.fromisoformat(shard["filingTo"])
         if shard_end < from_date:
             continue
@@ -190,7 +212,8 @@ def download_company(
 ) -> tuple[list[ManifestEntry], list[str]]:
     submissions = client.json(f"{SEC_DATA}/submissions/CIK{int(company['cik']):010d}.json")
     filings = [
-        f for f in _all_filings(client, submissions, from_date)
+        f
+        for f in _all_filings(client, submissions, from_date)
         if (from_date is None or date.fromisoformat(f["filingDate"]) >= from_date)
         and date.fromisoformat(f["filingDate"]) <= cutoff
     ]
@@ -213,15 +236,14 @@ def download_company(
         url = f"{_archive_base(company['cik'], filing['accessionNumber'])}/{filename}"
         entries.append(_save_document(client, root, company, filing, doc_type, url, filename, corpus_folder))
 
-    earnings_filings = [
-        f for f in filings
-        if f["form"] == "8-K" and "2.02" in (f.get("items") or "")
-    ]
+    earnings_filings = [f for f in filings if f["form"] == "8-K" and "2.02" in (f.get("items") or "")]
     for filing in earnings_filings:
         exhibit = _earnings_exhibit(client, company["cik"], filing)
         if exhibit:
             filename, url = exhibit
-            entries.append(_save_document(client, root, company, filing, "earnings_release", url, filename, corpus_folder))
+            entries.append(
+                _save_document(client, root, company, filing, "earnings_release", url, filename, corpus_folder)
+            )
             if from_date is None:
                 break
     if not any(entry.document_type == "earnings_release" for entry in entries):

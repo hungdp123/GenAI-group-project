@@ -1,4 +1,4 @@
-﻿"""Validate provenance in saved canonical development rankings without retrieval."""
+"""Validate provenance in saved canonical development rankings without retrieval."""
 
 from __future__ import annotations
 
@@ -60,12 +60,19 @@ def validate(experiment: Path, queries_path: Path) -> dict:
                 if chunk is None or mapping is None:
                     errors.append(f"{ticker}/{qid}/{method} rank {rank}: passage missing from index/source map: {cid}")
                     continue
-                fields = {"document_id": "document_id", "company_ticker": "company_ticker",
-                          "company_name": "company_name", "document_type": "document_type",
-                          "publication_date": "publication_date", "source_tier": "source_tier",
-                          "source_url": "source_url", "local_path": "local_path",
-                          "citation_span": "citation_span", "text": "text",
-                          "text_sha256": "text_sha256"}
+                fields = {
+                    "document_id": "document_id",
+                    "company_ticker": "company_ticker",
+                    "company_name": "company_name",
+                    "document_type": "document_type",
+                    "publication_date": "publication_date",
+                    "source_tier": "source_tier",
+                    "source_url": "source_url",
+                    "local_path": "local_path",
+                    "citation_span": "citation_span",
+                    "text": "text",
+                    "text_sha256": "text_sha256",
+                }
                 for source_field, chunk_field in fields.items():
                     if item.get(source_field) != chunk.get(chunk_field):
                         errors.append(f"{ticker}/{qid}/{method} rank {rank}: {source_field} differs from index")
@@ -76,7 +83,9 @@ def validate(experiment: Path, queries_path: Path) -> dict:
                     errors.append(f"{ticker}/{qid}/{method} rank {rank}: passage after cutoff")
                 if hashlib.sha256(chunk["text"].encode("utf-8")).hexdigest() != chunk["text_sha256"]:
                     errors.append(f"{ticker}/{qid}/{method} rank {rank}: passage text hash mismatch")
-                if mapping.get("document_id") != chunk.get("document_id") or mapping.get("source_sha256") != source_hashes.get(chunk.get("document_id")):
+                if mapping.get("document_id") != chunk.get("document_id") or mapping.get(
+                    "source_sha256"
+                ) != source_hashes.get(chunk.get("document_id")):
                     errors.append(f"{ticker}/{qid}/{method} rank {rank}: source mapping identity mismatch")
                 spans = mapping.get("source_char_spans", [])
                 if not spans or any(len(span) != 2 or span[0] < 0 or span[1] <= span[0] for span in spans):
@@ -89,18 +98,41 @@ def validate(experiment: Path, queries_path: Path) -> dict:
         wanted = {(q["query_id"], m) for q in questions if q["ticker"] == ticker for m in ("R1", "R2", "R3", "R4")}
         if observed != wanted:
             errors.append(f"{ticker}: expected {len(wanted)} query/method rankings, found {len(observed)}")
-        checks.append({"ticker": ticker, "query_method_rankings": len(observed),
-                       "expected_query_method_rankings": len(wanted), "corpus_fingerprint": index["corpus_fingerprint"]})
-    return {"status": "complete" if not errors else "failed", "created_at": datetime.now(timezone.utc).isoformat(),
-            "scope": "Saved canonical92 rankings; no retrieval/model calls", "claim_count": len(questions),
-            "company_count": len(config["tickers"]), "query_method_rankings": sum(x["query_method_rankings"] for x in checks),
-            "ranked_passages_checked": total, "missing_url_occurrences": missing_urls,
-            "content_types": dict(content_types), "error_count": len(errors), "errors": errors,
-            "query_set_sha256": query_hash, "overflow_policy": config["overflow_policy"],
-            "companies": checks,
-            "limitations": ["Checks saved ranked passage identity, metadata, date scope, citation metadata and source-map identity.",
-                            "Does not rerun retrieval, judge relevance/entailment, inspect original PDF accuracy, or validate generated answers.",
-                            "Recorded character spans are checked for shape and source identity; source-text OCR/extraction accuracy is outside this audit."]}
+        checks.append(
+            {
+                "ticker": ticker,
+                "query_method_rankings": len(observed),
+                "expected_query_method_rankings": len(wanted),
+                "corpus_fingerprint": index["corpus_fingerprint"],
+            }
+        )
+    return {
+        "status": "complete" if not errors else "failed",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "scope": "Saved canonical92 rankings; no retrieval/model calls",
+        "claim_count": len(questions),
+        "company_count": len(config["tickers"]),
+        "query_method_rankings": sum(x["query_method_rankings"] for x in checks),
+        "ranked_passages_checked": total,
+        "missing_url_occurrences": missing_urls,
+        "content_types": dict(content_types),
+        "error_count": len(errors),
+        "errors": errors,
+        "query_set_sha256": query_hash,
+        "overflow_policy": config["overflow_policy"],
+        "companies": checks,
+        "limitations": [
+            "Checks saved ranked passage identity, metadata, date scope, citation metadata and source-map identity.",
+            (
+                "Does not rerun retrieval, judge relevance/entailment, inspect original PDF "
+                "accuracy, or validate generated answers."
+            ),
+            (
+                "Recorded character spans are checked for shape and source identity; "
+                "source-text OCR/extraction accuracy is outside this audit."
+            ),
+        ],
+    }
 
 
 def main():
@@ -133,4 +165,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
