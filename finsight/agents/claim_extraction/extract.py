@@ -58,6 +58,29 @@ def _stored_type(row: dict) -> SubClaimType:
     return SubClaimType(specific_type(stored.value, text, row.get("measure")))
 
 
+def iter_claim_records(path: Path):
+    """Rows in a claim catalog. A `.json` file may be one array; `.jsonl` is one row per line."""
+    text = path.read_text(encoding="utf-8")
+    if text.lstrip().startswith("["):
+        payload = json.loads(text)
+        if isinstance(payload, list):
+            for row in payload:
+                if isinstance(row, dict):
+                    yield row
+            return
+    for line in text.splitlines():
+        if line.strip():
+            yield json.loads(line)
+
+
+def stored_rows(path: Path):
+    """Catalog rows, with a multi-measure sentence already split into one row per result."""
+    from finsight.agents.claim_extraction.build import expand_stored_row
+
+    for row in iter_claim_records(path):
+        yield from expand_stored_row(row)
+
+
 def load_stored_claims(path: Path, video_id: str | None, company_ticker: str | None) -> list[SubClaim] | None:
     """Sentences stored for this post when the corpus was built.
 
@@ -68,10 +91,7 @@ def load_stored_claims(path: Path, video_id: str | None, company_ticker: str | N
         return None
     found = False
     claims: list[SubClaim] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
+    for row in stored_rows(path):
         if str(row.get("video_id") or "") != video_id:
             continue
         found = True
@@ -104,10 +124,7 @@ def load_claim_rows(
     if not video_ids or not path.exists():
         return []
     rows: list[tuple[SubClaim, str]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
+    for row in stored_rows(path):
         video_id = str(row.get("video_id") or "")
         if video_id not in video_ids:
             continue
@@ -187,10 +204,7 @@ def load_stored_reasons(path: Path, video_id: str | None, company_ticker: str | 
     if not video_id or not path.exists():
         return {}
     reasons: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
+    for row in stored_rows(path):
         if str(row.get("video_id") or "") != video_id:
             continue
         ticker = row.get("company_ticker")
