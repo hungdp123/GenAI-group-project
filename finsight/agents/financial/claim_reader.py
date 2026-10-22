@@ -290,9 +290,13 @@ def _owner(marks: list[tuple[int, str]], pos: int) -> str:
     return before[-1] if before else "self"
 
 
+# A clause ends at ; : ! ? or a full stop. A dot between two digits ("96.2 billion") is a decimal point, not a stop.
+_CLAUSE_END = r"[;:!?]|(?<!\d)\.|\.(?!\d)"
+
+
 def _clause_start(text: str, pos: int) -> int:
-    cut = max(text.rfind(c, 0, pos) for c in ".;:!?")
-    return cut + 1
+    cuts = [m.end() for m in re.finditer(_CLAUSE_END, text[:pos])]
+    return cuts[-1] if cuts else 0
 
 
 def _clean_prompt(prompt: str | None) -> str:
@@ -311,7 +315,7 @@ def _read(text: str, ticker: str, implied_ok: bool) -> Reading:
         start = max(_clause_start(text, m.start), mentions[i - 1].end if i else 0)
         nxt = next((x.start for x in mentions[i + 1:]), len(text))
         stop = min(nxt, len(text))
-        sentence_end = re.search(r"[.;!?]", text[m.end:])
+        sentence_end = re.search(r"[;!?]|(?<!\d)\.|\.(?!\d)", text[m.end:])
         if sentence_end:
             stop = min(stop, m.end + sentence_end.start())
         before, words = text[start:m.start], text[start:stop]
