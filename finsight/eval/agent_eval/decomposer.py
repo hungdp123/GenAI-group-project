@@ -15,8 +15,12 @@ from finsight.eval.run_eval import load_dataset
 
 
 def evaluate(registry: AgentRegistry) -> AgentReport:
-    agent = registry.decomposer
+    del registry
+    from finsight.agents.decomposition.stub import StubDecomposer
+
+    agent = StubDecomposer()
     report = AgentReport("decomposer", "Person 3 (Amelia)", implementation_name(agent))
+    report.notes.append("The running app reads stored claims. This score is the keyword splitter only.")
     tp = fp = fn = 0
     exact_count = analysed = gold_total = gold_matched = errors = 0
     advice_cases = advice_caught = 0

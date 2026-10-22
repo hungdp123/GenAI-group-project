@@ -17,7 +17,7 @@ from finsight.contracts.schemas import (
 
 
 def test_schema_version():
-    assert SCHEMA_VERSION == "0.4"
+    assert SCHEMA_VERSION == "0.7"
 
 
 def test_extra_fields_forbidden():
@@ -31,6 +31,18 @@ def test_evidence_roundtrip():
         source_tier=SourceTier.TIER_1, doc_type="10-Q", company="CMPX",
         publication_date=date(2025, 7, 25), produced_by="financial", computed_value=0.14,
     )
+    assert EvidenceItem.model_validate_json(item.model_dump_json()) == item
+
+
+def test_evidence_comparison_is_optional_and_roundtrips():
+    base = dict(
+        evidence_id="e1", sub_claim_id="sc1", stance=Stance.NEUTRAL, content="Gross margin 46% vs 44%",
+        source_tier=SourceTier.TIER_1, doc_type="10-Q", company="CMPX", publication_date=date(2025, 7, 25),
+        produced_by="financial_xbrl", computed_value=0.46, metric_name="gross_margin",
+    )
+    plain = EvidenceItem(**base)
+    assert plain.comparison_value is None and plain.comparison_period is None
+    item = EvidenceItem(**base, comparison_value=0.44, comparison_period="quarter ended 2024-06-30")
     assert EvidenceItem.model_validate_json(item.model_dump_json()) == item
 
 

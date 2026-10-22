@@ -1,0 +1,13 @@
+{
+  "version": "source_priority_v1_conservative",
+  "high_types": ["10-K", "10-K/A", "20-F", "20-F/A", "10-Q", "10-Q/A", "8-K", "8-K/A", "6-K", "6-K/A", "earnings_release"],
+  "medium_types": ["earnings_presentation", "investor_presentation", "special_presentation", "investor_day_presentation", "earnings_call_transcript", "prepared_remarks"],
+  "unknown_priority": "MEDIUM",
+  "counter_query_suffix": "risks limitations uncertainty decline",
+  "p1_sufficiency": "semantic_review_required_always_expand",
+  "p2_normalized_score_gap": 0.03,
+  "p2_max_rank_promotion": 2,
+  "candidate_k": 50,
+  "top_k": 10,
+  "rrf_k": 60
+}

@@ -1,8 +1,3 @@
-"""Runtime settings and the agent registry. Owner: Person 5 (Hung).
-
-To swap your stub for the real agent, change ONE line in DEFAULT_IMPLEMENTATIONS
-(or set the env var shown next to it, e.g. FINSIGHT_IMPL_FINANCIAL=finsight.agents.financial.agent:XbrlFinancialAgent).
-"""
 
 from __future__ import annotations
 
@@ -15,42 +10,27 @@ from typing import Any
 
 import yaml
 
+from finsight.agents.claim_extraction.thesaurus import corpus_aliases
 from finsight.contracts.interfaces import (
     AdviceBoundary,
     Auditor,
-    Decomposer,
     FinancialAgent,
     NarrativeAgent,
     Retriever,
     TierPolicy,
 )
 
-# The placeholder stubs. Never edit this when you swap in your agent: the end-to-end tests pin to these
-# so demo expectations stay stable while real agents come in one at a time.
-STUB_IMPLEMENTATIONS: dict[str, str] = {
-    "decomposer": "finsight.agents.decomposition.stub:StubDecomposer",
-    "financial": "finsight.agents.financial.stub:StubFinancialAgent",
-    "narrative": "finsight.agents.narrative.stub:StubNarrativeAgent",
-    "retriever": "finsight.agents.narrative.retriever_stub:StubRetriever",
+
+DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
+    "financial": "finsight.agents.financial.agent:XbrlFinancialAgent",
+    "narrative": "finsight.agents.narrative.rag.collect_evidence:NarrativeEvidenceAgent",
+    "retriever": "finsight.agents.narrative.retrieval.retriever:CorpusRetriever",
     "auditor": "finsight.agents.auditor.stub:StubAuditor",
-    "advice_boundary": "finsight.agents.advice_boundary.stub:StubAdviceBoundary",
+    "advice_boundary": "finsight.agents.advice_boundary.agent:AdviceBoundaryAgent",
     "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",
 }
 
-# What the app actually runs: slot -> "module:Class". Env override: FINSIGHT_IMPL_<SLOT upper>.
-# SWAP YOUR AGENT HERE: change only your own line(s), so merges never conflict.
-DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
-    "decomposer": "finsight.agents.decomposition.stub:StubDecomposer",  # Person 3
-    "financial": "finsight.agents.financial.stub:StubFinancialAgent",  # Person 1
-    "narrative": "finsight.agents.narrative.stub:StubNarrativeAgent",  # Person 2
-    "retriever": "finsight.agents.narrative.retriever_stub:StubRetriever",  # Person 2
-    "auditor": "finsight.agents.auditor.stub:StubAuditor",  # Person 3
-    "advice_boundary": "finsight.agents.advice_boundary.stub:StubAdviceBoundary",  # Person 4
-    "tier_policy": "finsight.agents.tier_policy.stub:StubTierPolicy",  # Person 4
-}
-
 _PROTOCOLS: dict[str, type] = {
-    "decomposer": Decomposer,
     "financial": FinancialAgent,
     "narrative": NarrativeAgent,
     "retriever": Retriever,
@@ -59,11 +39,9 @@ _PROTOCOLS: dict[str, type] = {
     "tier_policy": TierPolicy,
 }
 
-# Companies in the frozen corpus: ticker -> aliases matched (case-insensitively) in the claim.
-# DECISION: placeholder corpus with the demo company only; Person 2 / Person 4 extend it.
-CORPUS_COMPANIES: dict[str, list[str]] = {
-    "CMPX": ["Company X", "CMPX"],
-}
+# Spoken names, legal names, tickers, and product names. The list lives in thesaurus.py.
+# Company X (CMPX) is included there for the demo. YouTube is not a search name.
+CORPUS_COMPANIES: dict[str, list[str]] = corpus_aliases()
 
 # USD per 1M tokens (input, output), standard tier. Real calls to a model missing here are refused.
 # OpenAI prices checked against https://developers.openai.com/api/docs/pricing on 2026-10-02.
@@ -79,11 +57,18 @@ PRICE_TABLE: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.15, 0.60),
     "claude-sonnet-5-5": (3.0, 15.0),
     "claude-haiku-4-5-20251001": (1.0, 5.0),
+    # Gemini Developer API paid tier, text, checked 2026-10-16. Output includes thinking tokens.
+    "gemini-2.5-flash": (0.30, 2.50),
 }
 
 # DECISION: testing defaults to the cheapest model of the course model's family (gpt-5.4-nano, ~12x cheaper).
 # Final reported runs must opt in to the course model explicitly: FINSIGHT_LLM_MODEL=gpt-5.4.
-DEFAULT_MODELS = {"mock": "mock-model", "anthropic": "claude-sonnet-5-5", "openai": "gpt-5.4-nano"}
+DEFAULT_MODELS = {
+    "mock": "mock-model",
+    "anthropic": "claude-sonnet-5-5",
+    "openai": "gpt-5.4-nano",
+    "gemini": "gemini-2.5-flash",
+}
 FINAL_REPORT_MODEL = "gpt-5.4"
 
 # Total course credit, for `finsight usage`.
@@ -105,6 +90,7 @@ class Settings:
     corpus_as_of_date: date = date(2025, 7, 31)
     corpus_companies: dict[str, list[str]] = field(default_factory=lambda: dict(CORPUS_COMPANIES))
     logs_dir: Path = Path("logs")
+    posts_dir: Path = Path("data/influencers/youtube")
     max_workers: int = 4
     max_claim_chars: int = 5000
     rag_top_k: int = 5
@@ -148,7 +134,9 @@ def get_settings() -> Settings:
         max_retries=int(os.getenv("FINSIGHT_MAX_RETRIES", "1")),
         corpus_as_of_date=date.fromisoformat(os.getenv("FINSIGHT_CORPUS_AS_OF", "2025-07-31")),
         logs_dir=Path(os.getenv("FINSIGHT_LOGS_DIR", "logs")),
+        posts_dir=Path(os.getenv("FINSIGHT_POSTS_DIR", "data/influencers/youtube")),
         max_workers=int(os.getenv("FINSIGHT_MAX_WORKERS", "4")),
+        corpus_companies=dict(CORPUS_COMPANIES),
     )
 
 
@@ -161,7 +149,6 @@ def _load(path: str) -> Any:
 class AgentRegistry:
     """One instance of every agent for a single run. Build a fresh registry per run."""
 
-    decomposer: Decomposer
     financial: FinancialAgent
     narrative: NarrativeAgent
     retriever: Retriever

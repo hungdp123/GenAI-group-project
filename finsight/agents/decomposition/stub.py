@@ -15,7 +15,7 @@ _RULES: list[tuple[SubClaimType, str, str, bool]] = [
      "The user asks what they personally should do with {name}.", False),
     (SubClaimType.HISTORICAL_GROWTH, r"\brevenue\b|\bgrowth\b|\bgrew\b",
      "{name}'s recent revenue growth is strong.", True),
-    (SubClaimType.PROFITABILITY_CASH_LEVERAGE, r"\bmargins?\b|\bcash flow\b|\bdebt\b|\bprofit",
+    (SubClaimType.PROFITABILITY, r"\bmargins?\b|\bcash flow\b|\bprofit",
      "{name}'s margins are expanding.", True),
     (SubClaimType.DEMAND_ATTRIBUTION, r"\bAI\b|\bdemand\b",
      "{name}'s revenue growth is driven by AI infrastructure demand.", False),
@@ -34,7 +34,7 @@ class StubDecomposer:
     def decompose(self, claim: str, cutoff_date: date) -> list[SubClaim]:
         ticker = detect_ticker(claim)
         # The claim may not name the company (the user answered "which company?" separately).
-        # The orchestrator attaches the ticker afterwards; the text just says "The company".
+        # Claim extraction attaches the ticker afterwards; the text just says "The company".
         name = company_name(ticker) if ticker else "The company"
         sub_claims: list[SubClaim] = []
         for sub_claim_type, pattern, template, quantitative in _RULES:

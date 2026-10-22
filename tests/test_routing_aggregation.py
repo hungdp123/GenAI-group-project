@@ -41,6 +41,9 @@ def test_guards():
     capped = rule.model_copy(update={"highest_verdict": P})
     assert routing.cap_verdict(S, capped)[0] is P and routing.cap_verdict(C, capped)[0] is C
     assert routing.is_raise(I, S) and not routing.is_raise(S, I) and not routing.is_raise(I, C)
+    both = rule.model_copy(update={"tier_requirement": [SourceTier.TIER_1, SourceTier.TIER_2]})
+    assert routing.cap_tier2_only_support(S, [_item(Stance.SUPPORTING, SourceTier.TIER_2)], both)[0] is P
+    assert routing.cap_tier2_only_support(S, [_item(Stance.SUPPORTING, SourceTier.TIER_1)], both)[0] is S
 
 
 def test_scope():
