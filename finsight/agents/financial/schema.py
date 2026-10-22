@@ -1,4 +1,4 @@
-"""
+""" 
 Financial evidence schema
 """
 
@@ -21,7 +21,7 @@ class FinancialFact(BaseModel):
     """One reported XBRL value that is traceable to the filing it came from."""
     ticker: str
     cik: int
-    concept: str                      # canonical name, e.g. "Revenue"
+    concept: str                      # canonical name e.g. "Revenue"
     xbrl_tag: str                     # us-gaap tag actually used
     value: float
     unit: str = "USD"

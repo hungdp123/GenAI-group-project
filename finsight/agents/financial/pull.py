@@ -1,5 +1,5 @@
-"""
-Pulls SEC Company Facts data
+""" 
+Pulls SEC Company Facts
 """
 
 import argparse
@@ -28,8 +28,9 @@ def fetch(url, ua):
         return r.read()
 
 
+# looks up the CID from the ticker list
 def resolve_ciks(ua):
-    """ticker -> CIK from SEC's official list; CIK_OVERRIDES when CIK is in the config.py file."""
+    """ticker -> CIK from SEC's official list; CIK_OVERRIDES when CIK is in the config.py file"""
     listed = {v["ticker"].upper(): int(v["cik_str"]) for v in json.loads(fetch(TICKER_LIST_URL, ua)).values()}
     return {t: CIK_OVERRIDES.get(t, listed.get(t.upper())) for t in COMPANIES}
 
@@ -41,8 +42,9 @@ def write_csv(path, rows):
         w.writerows(rows)
 
 
+# downloads the SEC files for a company
 def download_company(ticker, cik, out, ua, manifest):
-    """Save both raw files for one company and return them parsed."""
+    """Save both raw files for one company and return them parsed"""
     raw = {}
     for kind, tmpl in URLS.items():
         time.sleep(0.3)   # SEC limit: 10 requests per second
@@ -55,6 +57,7 @@ def download_company(ticker, cik, out, ua, manifest):
     return raw
 
 
+# used when concepts.py and config.py have been edited and facts.csv and filings.csv need to be rebuild
 def rebuild_offline(out):
     """Re-normalize the saved raw files after changing concepts.py"""
     facts, filings = [], []
@@ -72,6 +75,7 @@ def rebuild_offline(out):
     print(f"Rebuilt {len(facts)} facts and {len(filings)} filings from {out / 'raw'} (manifest unchanged)")
 
 
+# main function that runs when python -m finsight.agents.financial.pull is run
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(DEFAULT_DATA_DIR))

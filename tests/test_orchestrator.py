@@ -299,7 +299,10 @@ def test_a_stated_claim_checks_the_matching_line_only(tmp_path, monkeypatch):
     assert "match the claim in the prompt" in (fa.checked_post or "")
     agents = [call.agent for call in out.decision_log.agent_calls]
     assert "decomposer" not in agents
-    assert agents.count("financial") == 1
+    # Only the matching line is gathered: the margin line never reaches the financial agent. The fixture has
+    # no fiscal-year filing (no period named = latest fiscal year), so the tier check may retry once (D22).
+    financial = [call.sub_claim_id for call in out.decision_log.agent_calls if call.agent == "financial"]
+    assert financial == ["rev"] * (1 + fa.sub_claim_results[0].retries_used)
 
 
 def test_a_prompt_with_no_claim_checks_the_video(tmp_path, monkeypatch):

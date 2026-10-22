@@ -1,7 +1,7 @@
-"""
-Deterministic financial tools
+""" 
+Deterministic financial tools 
 
-When data is missing, they return status="insufficient_data" or "out_of_scope" (ticker not in corpus)
+When data is missing, they return status="insufficient_data" or "out_of_scope" (ticker not in corpus) 
 """
 
 from __future__ import annotations
@@ -16,15 +16,16 @@ from .schema import FinancialEvidence, FinancialFact, SeriesPoint, ValueCheck
 from .store import SPAN_ORDER, FactStore, _iso
 
 _CLS = {"quarter": "Q", "annual": "FY"}
-# Concepts used to find a company's period ends. Revenue first; the others cover a company whose revenue tag
-# is not mapped, so one tagging gap does not make every tool fail.
+# Concepts used to find a company's period ends. Revenue first and the others cover a company whose revenue tag
+# is not mapped so one tagging gap does not make every tool fail.
 _ANCHORS = ("Revenue", "NetIncome", "OperatingCashFlow")
 # The latest period is "stale" when it ended more than this many days before the cut-off: a normal filing
-# lag is 1-3 months, so a longer gap means filings are missing from the data or the company stopped filing.
+# lag is 1-3 months so a longer gap means filings are missing from the data or the company stopped filing.
 _STALE_DAYS = {"quarter": 200, "annual": 460}
 _LENGTH_TOLERANCE_DAYS = 6      # a 53-week fiscal year adds 7 days to one quarter and to the year
 
 
+# same question always gets the same ID so evidence can be referenced and repeated runs match
 def _eid(tool, **args):
     return hashlib.sha1(json.dumps([tool, args], sort_keys=True, default=str).encode()).hexdigest()[:12]
 
@@ -38,7 +39,7 @@ def _ff(r):
 
 
 def _raw(store, t, concept, end, span, cutoff):
-    """Reported value, or a quarter derived from two year-to-date facts.
+    """Reported value or a quarter derived from two year-to-date facts.
     -> (value, [facts], formula, derived, warnings) or None."""
     if kind(concept) == "instant":
         f = store.fact(t, concept, "I", cutoff, end=end)
@@ -52,7 +53,7 @@ def _raw(store, t, concept, end, span, cutoff):
             long = store.fact(t, concept, SPAN_ORDER[i], cutoff, end=end)
             if not long:
                 continue
-            # Take the shorter figure as it stood when the longer one was filed, so both are on the same
+            # Take the shorter figure as it stood when the longer one was filed so both are on the same
             # basis. Only if that does not exist, fall back to a later (possibly restated) version.
             warns = []
             short = store.fact(t, concept, SPAN_ORDER[i - 1], long["filed"], start=long["period_start"])
@@ -95,7 +96,7 @@ def _val(store, t, concept, end, span, cutoff):
 
 
 def _period_ends(store, t, cutoff, span):
-    """Period end dates known for a company at the cut-off, from the anchor concepts and the balance sheet."""
+    """Period end dates known for a company at the cut-off from the anchor concepts and the balance sheet."""
     ends = set()
     for concept in _ANCHORS:
         ends.update(store.ends(t, concept, cutoff, ["FY"] if span == "annual" else SPAN_ORDER))
@@ -105,7 +106,7 @@ def _period_ends(store, t, cutoff, span):
 
 
 def _days(part):
-    """Length in days of the period a value covers, or None if it cannot be read off the facts."""
+    """Length in days of the period a value covers or None if it cannot be read off the facts."""
     facts, derived = part[1], part[3]
     if derived and len(facts) == 2:                     # derived quarter: from the short figure's end to the long one's
         return (date.fromisoformat(facts[0]["period_end"]) - date.fromisoformat(facts[1]["period_end"])).days
@@ -122,8 +123,8 @@ def _resolve_end(store, t, period_end, span, cutoff):
 
 
 def _near(store, t, concept, end, days, cutoff):
-    """Comparable period end ~`days` earlier (+-10d, handles 52/53-week fiscal years). None if there is no
-    period within 10 days of the target, e.g. after a change of fiscal year end: better no comparison than
+    """Comparable period end ~`days` earlier (+-10d handles 52/53-week fiscal years). None if there is no
+    period within 10 days of the target e.g. after a change of fiscal year end so that better no comparison than
     a wrong one."""
     target = date.fromisoformat(end) - timedelta(days=days)
     cands = store.ends(t, concept, cutoff) + _period_ends(store, t, cutoff, "quarter")
@@ -187,6 +188,7 @@ def _guard(store, tool, t, metric, span, period_end, cutoff):
 
 
 # ------------------------------------------------------------------ tools
+# pull one financial fact; no calculations involved
 def get_financial_fact(store: FactStore, ticker: str, concept: str, span: str = "quarter",
                        period_end="latest", cutoff_date: Optional[date] = None) -> FinancialEvidence:
     """A reported (or year-to-date-differenced) value for one concept and period."""
@@ -206,6 +208,7 @@ def get_financial_fact(store: FactStore, ticker: str, concept: str, span: str = 
     return _ev(tool, ticker, concept, span, end, cutoff_date, [p], p[0], unit(concept), p[2], warnings=notes)
 
 
+# computes growth; either yoy or qoq
 def compute_growth(store: FactStore, ticker: str, concept: str = "Revenue", basis: str = "yoy",
                    span: str = "quarter", period_end="latest", cutoff_date: Optional[date] = None) -> FinancialEvidence:
     """Growth of a concept vs the same period a year earlier (yoy) or the prior quarter (qoq)."""
@@ -232,7 +235,7 @@ def compute_growth(store: FactStore, ticker: str, concept: str = "Revenue", basi
     if prev[0] <= 0:
         return mk(parts=[cur, prev], reason="comparison value is zero or negative; growth rate not meaningful")
     g = cur[0] / prev[0] - 1
-    # Things that make the two periods not strictly comparable. The number is still returned, with a warning.
+    # Things that make the two periods not strictly comparable. The number is still returned but with a warning.
     d_cur, d_prev = _days(cur), _days(prev)
     if d_cur and d_prev and abs(d_cur - d_prev) > _LENGTH_TOLERANCE_DAYS:
         notes.append(f"the two periods differ in length ({d_cur} vs {d_prev} days), e.g. a 53-week fiscal year")
@@ -248,7 +251,7 @@ def compute_growth(store: FactStore, ticker: str, concept: str = "Revenue", basi
               formula=f"{_n(concept, cur[0])} ({end}) / {_n(concept, prev[0])} ({prev_end}) - 1 = {g:.4f}")
 
 
-_METRICS = {  # metric: (numerator concepts with sign, denominator concept or None)
+_METRICS = {  # metric: (numerator and denominator concepts)
     "gross_margin": ([("GrossProfit", 1)], "Revenue"),
     "operating_margin": ([("OperatingIncome", 1)], "Revenue"),
     "net_margin": ([("NetIncome", 1)], "Revenue"),
@@ -288,6 +291,7 @@ def compute_metric(store: FactStore, ticker: str, metric: str, span: str = "quar
     if d <= 0:
         return mk(parts=parts, reason=f"{den} is zero or negative; ratio not meaningful")
     return mk(parts=parts, value=n / d, unit="ratio", formula=f"({expr}) / {den} {d:,.0f} = {n / d:.4f}")
+
 
 
 def compute_trend(store: FactStore, ticker: str, item: str, periods: int = 6, span: str = "quarter",
@@ -355,6 +359,93 @@ def compute_trend(store: FactStore, ticker: str, item: str, periods: int = 6, sp
         warnings=sorted(warns), direction=direction, series=series))
 
 
+def _last_quarter_ends(store, t, end, n, cutoff):
+    """The n quarter ends ending at `end`, latest first; fewer if the data has a gap."""
+    ends = [end]
+    while len(ends) < n:
+        e = _near(store, t, _ANCHORS[0], ends[-1], 91, cutoff)
+        if not e:
+            break
+        ends.append(e)
+    return ends
+
+
+def compute_ttm(store: FactStore, ticker: str, item: str = "Revenue", period_end="latest",
+                cutoff_date: Optional[date] = None) -> FinancialEvidence:
+    """Trailing twelve months ending at a quarter end: the sum of the four quarters ending there for a flow
+    concept, or a margin / free cash flow built from those sums. Balance-sheet and per-share items have no
+    twelve-month figure."""
+    metric = f"{item}_ttm"
+    end, bad, notes = _guard(store, "compute_ttm", ticker, metric, "quarter", period_end, cutoff_date)
+    if bad:
+        return bad
+
+    def mk(**k):
+        return _ev("compute_ttm", ticker, metric, "ttm", end, cutoff_date, warnings=notes, **k)
+
+    if item in _METRICS:
+        num, den = _METRICS[item]
+    elif item in CONCEPTS:
+        num, den = [(item, 1)], None
+    else:
+        return mk(reason=f"unknown item; choose a concept {sorted(CONCEPTS)} or metric {sorted(_METRICS)}")
+    names = [c for c, _ in num] + ([den] if den else [])
+    if any(kind(c) == "instant" or not additive(c) for c in names):
+        return mk(reason="balance-sheet and per-share items have no twelve-month figure")
+    ends = _last_quarter_ends(store, ticker, end, 4, cutoff_date)
+    if len(ends) < 4:
+        return mk(reason=f"only {len(ends)} of the four quarters ending {end} are in the data")
+    parts, sums = [], {}
+    for c in names:
+        total = 0.0
+        for e in ends:
+            p = _val(store, ticker, c, e, "quarter", cutoff_date)
+            if not p:
+                return mk(parts=parts, reason=f"{c} missing for the quarter ending {e}")
+            parts.append(p)
+            total += p[0]
+        sums[c] = total
+    n = sum(sums[c] * s for c, s in num)
+    expr = " ".join(f"{'-' if s < 0 else '+'} {c} {sums[c]:,.0f}" for c, s in num).lstrip("+ ")
+    quarters = f"four quarters ending {ends[-1]} to {ends[0]}"
+    if den is None:
+        u = unit(item) if item in CONCEPTS else "USD"
+        return mk(parts=parts, value=n, unit=u, formula=f"{expr} ({quarters}) = {n:,.0f}")
+    d = sums[den]
+    if d <= 0:
+        return mk(parts=parts, reason=f"{den} is zero or negative; ratio not meaningful")
+    return mk(parts=parts, value=n / d, unit="ratio", formula=f"({expr}) / {den} {d:,.0f} ({quarters}) = {n / d:.4f}")
+
+
+def compute_ttm_growth(store: FactStore, ticker: str, concept: str = "Revenue", period_end="latest",
+                       cutoff_date: Optional[date] = None) -> FinancialEvidence:
+    """Trailing-twelve-month figure vs the twelve months ending a year earlier."""
+    metric = f"{concept}_ttm_growth_yoy"
+    end, bad, notes = _guard(store, "compute_ttm_growth", ticker, metric, "quarter", period_end, cutoff_date)
+    if bad:
+        return bad
+
+    def mk(**k):
+        return _ev("compute_ttm_growth", ticker, metric, "ttm", end, cutoff_date, **k)
+
+    cur = compute_ttm(store, ticker, concept, end, cutoff_date)
+    prev_end = _near(store, ticker, concept, end, 365, cutoff_date)
+    prev = compute_ttm(store, ticker, concept, prev_end, cutoff_date) if prev_end else None
+    if cur.status != "ok" or prev is None or prev.status != "ok":
+        why = cur.reason if cur.status != "ok" else (prev.reason if prev else "no period a year earlier")
+        return mk(reason=f"missing twelve-month figure: {why}")
+    if prev.value <= 0:
+        return mk(reason="comparison value is zero or negative; growth rate not meaningful")
+    g = cur.value / prev.value - 1
+    out = mk(value=g, unit="ratio", warnings=sorted(set(notes) | set(cur.warnings) | set(prev.warnings)),
+             formula=f"{cur.value:,.0f} (12 months to {end}) / {prev.value:,.0f} (12 months to {prev_end}) - 1 "
+                     f"= {g:.4f}")
+    inputs = list({(f.accession, f.xbrl_tag, f.period_start, f.period_end): f
+                   for f in cur.inputs + prev.inputs}.values())
+    return out.model_copy(update=dict(inputs=inputs, as_of_date=max(f.filed for f in inputs),
+                                      derived=cur.derived or prev.derived))
+
+
 def check_stated_value(evidence: FinancialEvidence, stated: float, tolerance: float = 0.01) -> ValueCheck:
     """Execution-comparison helper. For unit='ratio' the tolerance is absolute (0.01 = 1 percentage
     point; pass stated 14% as 0.14). For other units it is relative (0.01 = 1%)."""
@@ -399,9 +490,13 @@ TOOL_SPECS = [
           {"item": {"type": "string", "enum": sorted(CONCEPTS) + sorted(_METRICS)},
            "periods": {"type": "integer", "minimum": 2, "maximum": 12},
            "basis": {"type": "string", "enum": ["level", "yoy"]}}, ["item"]),
+    _spec("compute_ttm", compute_ttm.__doc__,
+          {"item": {"type": "string", "enum": sorted(CONCEPTS) + sorted(_METRICS)}}, ["item"]),
+    _spec("compute_ttm_growth", compute_ttm_growth.__doc__, {"concept": _CONCEPT_ENUM}, ["concept"]),
 ]
 TOOLS = {"get_financial_fact": get_financial_fact, "compute_growth": compute_growth,
-         "compute_metric": compute_metric, "compute_trend": compute_trend}
+         "compute_metric": compute_metric, "compute_trend": compute_trend,
+         "compute_ttm": compute_ttm, "compute_ttm_growth": compute_ttm_growth}
 
 
 def call_tool(store: FactStore, name: str, args: dict) -> FinancialEvidence:
