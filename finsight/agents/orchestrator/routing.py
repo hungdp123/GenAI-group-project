@@ -231,7 +231,7 @@ INFLUENCERS: dict[str, tuple[str, ...]] = {
     "joseph_carlson": ("Joseph Carlson", "Carlson"),
     "mark_roussin": ("Mark Roussin", "Roussin"),
     "alex_reffett": ("Alex Reffett", "Reffett"),
-    "meet_kevin": ("Meet Kevin", "Kevin Paffrath"),
+    "meet_kevin": ("Kevin Paffrath", "Paffrath", "Meet Kevin"),
 }
 INFLUENCER_CHANNELS: dict[str, frozenset[str]] = {
     "joseph_carlson": frozenset({"joseph_carlson", "joseph_carlson_after_hours"}),

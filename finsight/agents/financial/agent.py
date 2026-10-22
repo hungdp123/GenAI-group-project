@@ -54,10 +54,12 @@ _GROWTH_CONCEPTS = [
 _METRIC_RULES = [
     (r"\bgross margins?", "gross_margin", True),
     (r"\boperating margins?", "operating_margin", True),
+    (r"\b(free cash flow|fcf) margins?", "fcf_margin", True),
     (r"\b(net|profit) margins?|\bprofitab", "net_margin", True),
     (r"\bfree cash flow|\bfcf\b", "free_cash_flow", True),
     (r"\bcash flow|\bcash generation", "OperatingCashFlow", True),
     (r"\bmargins?", "gross_margin", True),
+    (r"\bcash ratio\b", "cash_ratio", True),
     (r"\bliquidity|\bcurrent ratio", "current_ratio", True),
     # A debt amount is not calculated here. Tags differ by company, so the narrative agent quotes it.
     # Debt-to-equity is a leverage claim. gather() returns nothing for that type until the ratio is wired.

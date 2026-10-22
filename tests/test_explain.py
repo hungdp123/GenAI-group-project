@@ -3,7 +3,7 @@
 from datetime import date
 
 from finsight import execute
-from finsight.agents.advice_boundary.stub import StubAdviceBoundary
+from finsight.agents.advice_boundary.agent import AdviceBoundaryAgent
 from finsight.agents.orchestrator.explain import source_label, summary, verdict_label
 from finsight.agents.orchestrator.render import render_assessment
 from finsight.contracts.schemas import (
@@ -41,7 +41,7 @@ def test_explanations_are_plain_and_add_no_numbers(monkeypatch, tmp_path):
 
 
 def test_explanations_never_trip_the_output_advice_gate(monkeypatch, tmp_path):
-    gate = StubAdviceBoundary()
+    gate = AdviceBoundaryAgent()
     for r in _demo(monkeypatch, tmp_path).sub_claim_results:
         assert not gate.check(r.explanation, AdviceStage.OUTPUT).flagged
 

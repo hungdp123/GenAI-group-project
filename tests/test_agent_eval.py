@@ -40,7 +40,10 @@ def test_stub_scores_reflect_what_the_stubs_actually_do():
     assert audit["false-alarm rate (correct evidence rejected)"] == 0.0  # ...but approves correct evidence
     assert guardrails.evaluate_tier_policy(stubs).metrics["illegal raises (verdict made stronger)"] == 0
     advice = guardrails.evaluate_advice_boundary(stubs).metrics
-    assert advice["input (user's request): recall (advice caught)"] < 1.0  # stub patterns miss some phrasings
+    assert advice["input (user's request): recall (advice caught)"] == 1.0
+    assert advice["input (user's request): precision (flags that were right)"] == 1.0
+    assert advice["output (FinSight's answer): recall (advice caught)"] == 1.0
+    assert advice["output (FinSight's answer): precision (flags that were right)"] == 1.0
     assert decomposer.evaluate(_reg()).metrics["advice requests flagged (PERSONALIZED_ADVICE)"] == 1.0
 
 

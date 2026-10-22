@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
-from finsight.agents.advice_boundary.stub import without_advice
+from finsight.agents.advice_boundary.agent import without_advice
 from finsight.agents.claim_extraction.build import claims_catalog_path
 from finsight.agents.claim_extraction.extract import extract_claims as run_extraction
 from finsight.agents.claim_extraction.extract import (

@@ -34,6 +34,21 @@ class Extraction:
     miss: str | None = None
 
 
+def _with_growth(claim: SubClaim) -> list[SubClaim]:
+    """Keep a margin claim, and add operating-income or EPS growth when the same sentence names it."""
+    from finsight.agents.claim_extraction.build import Kind, _extra_kinds
+
+    extras = _extra_kinds(claim.text, Kind(claim.sub_claim_type.value, measure=claim.measure))
+    claims = [claim]
+    for extra in extras:
+        claims.append(claim.model_copy(update={
+            "sub_claim_id": f"{claim.sub_claim_id}-{extra.measure}",
+            "sub_claim_type": SubClaimType(extra.type),
+            "measure": extra.measure,
+        }))
+    return claims
+
+
 def _stored_type(row: dict) -> SubClaimType:
     """Read a stored type. An older merged row is split from its measure or its words."""
     from finsight.agents.claim_extraction.build import specific_type
@@ -67,7 +82,7 @@ def load_stored_claims(path: Path, video_id: str | None, company_ticker: str | N
             claim_type = _stored_type(row)
         except (KeyError, ValueError):
             continue
-        claims.append(SubClaim(
+        claims.extend(_with_growth(SubClaim(
             sub_claim_id=str(row.get("sub_claim_id") or f"c{len(claims) + 1}"),
             text=str(row.get("text") or row.get("source_span") or ""),
             sub_claim_type=claim_type,
@@ -78,7 +93,7 @@ def load_stored_claims(path: Path, video_id: str | None, company_ticker: str | N
             expansion_rule=row.get("expansion_rule"),
             measure=row.get("measure"),
             quote_time=row.get("quote_time"),
-        ))
+        )))
     return claims if found else None
 
 
@@ -115,7 +130,7 @@ def load_claim_rows(
             measure=row.get("measure"),
             quote_time=row.get("quote_time"),
         )
-        rows.append((claim, video_id))
+        rows.extend((extra, video_id) for extra in _with_growth(claim))
     return rows
 
 

@@ -79,7 +79,10 @@ _MARGIN = re.compile(
     flags=re.IGNORECASE,
 )
 _CASH = re.compile(r"\b(free cash flow|cash flow|fcf|cash generation)\b", flags=re.IGNORECASE)
-_LIQUIDITY = re.compile(r"\b(liquidity|current ratio)\b", flags=re.IGNORECASE)
+_LIQUIDITY = re.compile(r"\b(liquidity|current ratio|cash ratio)\b", flags=re.IGNORECASE)
+_CASH_RATIO = re.compile(r"\bcash ratio\b", flags=re.IGNORECASE)
+_FCF_MARGIN = re.compile(r"\b(free cash flow|fcf) margins?\b", flags=re.IGNORECASE)
+_FREE_CASH = re.compile(r"\bfree cash flow\b|\bfcf\b", flags=re.IGNORECASE)
 _LEVERAGE = re.compile(r"\b(leverage|debt[- ]to[- ]equity|debt/equity)\b", flags=re.IGNORECASE)
 _DEBT_AMOUNT = re.compile(r"\b(debt|indebted|balance sheet)\b", flags=re.IGNORECASE)
 _REVENUE_WORD = re.compile(r"\b(revenues?|sales|top[- ]line)\b", flags=re.IGNORECASE)
@@ -89,11 +92,24 @@ _GROWTH_MEASURE = re.compile(
     flags=re.IGNORECASE,
 )
 _DIRECTION = re.compile(
-    r"\b(grew|growth|rose|risen|doubled|fell|fallen|declined|expanded|expanding|"
-    r"improved|improving|strong|weak|solid|healthy)\b"
-    r"|up \d|down \d|year[- ]over[- ]year",
+    r"\b(grew|growth|rose|risen|doubled|fell|fallen|decline|declined|declining|"
+    r"expanded|expanding|improved|improving|strong|weak|solid|healthy|higher|lower)\b"
+    r"|\b(up|down)\b|shot up|year[- ]over[- ]year",
     flags=re.IGNORECASE,
 )
+_OPERATING_INCOME = re.compile(r"\boperating (income|profits?)\b", flags=re.IGNORECASE)
+_EPS = re.compile(r"\bearnings per share\b|\beps\b", flags=re.IGNORECASE)
+_GROSS_PROFIT = re.compile(r"\bgross profits?\b", flags=re.IGNORECASE)
+_EXCLUDING_GAINS = re.compile(
+    r"\b(exclud\w+|adjusted|non-gaap)\b.{0,60}\b(gains?|income|earnings|profits?)\b"
+    r"|\b(income|earnings|profits?)\b.{0,60}\b(exclud\w+|adjusted|non-gaap)\b",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_RUN_RATE = re.compile(r"\brun[- ]rate\b|\bannuali[sz]", flags=re.IGNORECASE)
+_SERVICES_MARGIN = re.compile(r"\bservices margin\b", flags=re.IGNORECASE)
+_LEAVE_TYPE = frozenset({
+    "DEMAND_ATTRIBUTION", "CONTINUATION", "BUSINESS_RISK", "COMPARATIVE", "PERSONALIZED_ADVICE",
+})
 _NUMBER = re.compile(r"\d|billion|million", flags=re.IGNORECASE)
 _SEGMENT = re.compile(
     r"\b(segment|division|aws|azure|instagram|waymo|iphone|google cloud|youtube|data centers?)\b",
@@ -211,6 +227,8 @@ def _rows_for(sentence: str, video_id: str, influencer: str, title: str, upload_
         if ticker is None:
             continue
         rows.extend(_materialize(quote, kind, ticker, video_id, influencer, title, upload_date))
+        for extra in _extra_kinds(quote, kind):
+            rows.extend(_materialize(quote, extra, ticker, video_id, influencer, title, upload_date))
     return rows
 
 
@@ -280,23 +298,91 @@ def _classify(text: str) -> Kind | None:
         return Kind("LEVERAGE")
     if _DEBT_AMOUNT.search(text):
         return Kind("OTHER")
+    if _CASH_RATIO.search(text):
+        return Kind("LIQUIDITY")
     if _LIQUIDITY.search(text):
         return Kind("LIQUIDITY")
+    if _FCF_MARGIN.search(text):
+        return Kind("CASH_GENERATION", measure="fcf_margin")
+    if _ocf_growth(text):
+        return Kind("HISTORICAL_GROWTH", measure="operating_cash_flow")
     if _CASH.search(text):
         return Kind("CASH_GENERATION")
+    if _no_financial_formula(text):
+        if _SERVICES_MARGIN.search(text):
+            return Kind("OTHER", measure="segment")
+        return Kind("OTHER")
     if _MARGIN.search(text):
         return Kind("PROFITABILITY")
-    if _GROWTH_MEASURE.search(text) and (_DIRECTION.search(text) or _NUMBER.search(text)):
+    if _operating_income_growth(text):
+        return Kind("HISTORICAL_GROWTH", measure="operating_income")
+    if _eps_growth(text):
+        return Kind("HISTORICAL_GROWTH", measure="diluted_eps")
+    if _GROWTH_MEASURE.search(text) and _moving(text):
         if _NET_INCOME_WORD.search(text) and not _REVENUE_WORD.search(text):
             return Kind("NET_INCOME_GROWTH")
         return Kind("HISTORICAL_GROWTH")
     return None
 
 
+def _moving(text: str) -> bool:
+    return bool(_DIRECTION.search(text) or _NUMBER.search(text))
+
+
+def _operating_income_growth(text: str) -> bool:
+    return bool(_OPERATING_INCOME.search(text) and _moving(text))
+
+
+def _eps_growth(text: str) -> bool:
+    return bool(_EPS.search(text) and _moving(text))
+
+
+def _ocf_growth(text: str) -> bool:
+    """Operating cash flow changed. Free cash flow stays a cash-generation claim."""
+    if _FREE_CASH.search(text) or not _moving(text):
+        return False
+    return bool(re.search(r"\b(operating cash flow|cash from operations|cash flow)\b", text, flags=re.IGNORECASE))
+
+
+def _no_financial_formula(text: str) -> bool:
+    """A figure the financial agent cannot calculate. Routing stays with the narrative agent."""
+    if _RUN_RATE.search(text) or _EXCLUDING_GAINS.search(text) or _SERVICES_MARGIN.search(text):
+        return True
+    return bool(_GROSS_PROFIT.search(text) and not _MARGIN.search(text))
+
+
+def _extra_kinds(text: str, kind: Kind) -> list[Kind]:
+    """A margin sentence can also name operating-income or EPS growth. Keep both."""
+    if kind.expansion or kind.type == "HISTORICAL_GROWTH" or _no_financial_formula(text):
+        return []
+    extras: list[Kind] = []
+    if _operating_income_growth(text):
+        extras.append(Kind("HISTORICAL_GROWTH", measure="operating_income"))
+    if _eps_growth(text):
+        extras.append(Kind("HISTORICAL_GROWTH", measure="diluted_eps"))
+    if _ocf_growth(text):
+        extras.append(Kind("HISTORICAL_GROWTH", measure="operating_cash_flow"))
+    return extras
+
+
 def specific_type(stored: str, text: str, measure: str | None) -> str:
-    """Split an older merged profitability row into the measure it actually names."""
+    """Split an older merged profitability row into the measure it actually names.
+
+    Operating-income growth and diluted EPS growth use the financial agent.
+    A claim with no formula there stays with the narrative agent.
+    """
     if measure in _TYPE_BY_MEASURE:
         return _TYPE_BY_MEASURE[measure]
+    if stored not in _LEAVE_TYPE:
+        if _no_financial_formula(text):
+            return "OTHER"
+        # A margin row stays a margin row. The growth line is added beside it.
+        if stored != "PROFITABILITY" and (_operating_income_growth(text) or _eps_growth(text) or _ocf_growth(text)):
+            return "HISTORICAL_GROWTH"
+        if _CASH_RATIO.search(text):
+            return "LIQUIDITY"
+        if _FCF_MARGIN.search(text):
+            return "CASH_GENERATION"
     if stored != "PROFITABILITY_CASH_LEVERAGE":
         return stored
     kind = _classify(text)

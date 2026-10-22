@@ -1,6 +1,6 @@
 """A stored video keeps each company's sentence. The quote stays the post's words."""
 
-from finsight.agents.claim_extraction.build import claims_from_transcript
+from finsight.agents.claim_extraction.build import claims_from_transcript, specific_type
 
 
 def _rows(text: str) -> list[dict]:
@@ -38,3 +38,46 @@ def test_nvidia_and_amd_are_stored_as_separate_claims():
     assert all("40,000" not in row["text"] for row in rows)
     assert all("would worry" not in row["text"] for row in rows)
     assert all("Would you rather" not in row["text"] for row in rows)
+
+
+def test_operating_income_and_eps_growth_go_to_the_financial_agent():
+    rows = _rows(
+        "Nvidia's operating income shot up 124% giving them a 66.2% operating margin. "
+        "Tesla's earnings per share have been in decline."
+    )
+    nvidia = [row for row in rows if row["company_ticker"] == "NVDA"]
+    assert any(row["sub_claim_type"] == "HISTORICAL_GROWTH" and row["measure"] == "operating_income" for row in nvidia)
+    assert any(row["sub_claim_type"] == "PROFITABILITY" for row in nvidia)
+    tesla = [row for row in rows if row["company_ticker"] == "TSLA"]
+    assert tesla[0]["sub_claim_type"] == "HISTORICAL_GROWTH"
+    assert tesla[0]["measure"] == "diluted_eps"
+
+
+def test_cash_formulas_the_financial_agent_can_compute_are_routed_to_it():
+    rows = _rows(
+        "Nvidia's operating cash flow grew 20%. "
+        "Nvidia's free cash flow margin is 15%. "
+        "Nvidia's cash ratio is 1.2. "
+        "Nvidia's free cash flow grew."
+    )
+    by_text = {row["text"]: row for row in rows}
+    assert by_text["Nvidia's operating cash flow grew 20%."]["sub_claim_type"] == "HISTORICAL_GROWTH"
+    assert by_text["Nvidia's operating cash flow grew 20%."]["measure"] == "operating_cash_flow"
+    assert by_text["Nvidia's free cash flow margin is 15%."]["sub_claim_type"] == "CASH_GENERATION"
+    assert by_text["Nvidia's cash ratio is 1.2."]["sub_claim_type"] == "LIQUIDITY"
+    assert by_text["Nvidia's free cash flow grew."]["sub_claim_type"] == "CASH_GENERATION"
+    assert specific_type("OTHER", "the cash ratio is 1.2", None) == "LIQUIDITY"
+
+
+def test_a_claim_with_no_formula_stays_off_the_financial_agent():
+    rows = _rows(
+        "Tesla's gross profit has been in decline. "
+        "Google's net income fell once you exclude the investment gains. "
+        "Amazon's revenue run rate is 142 billion dollars. "
+        "Google's Services margin sat at 40%."
+    )
+    financial = {"HISTORICAL_GROWTH", "NET_INCOME_GROWTH", "PROFITABILITY", "CASH_GENERATION", "LIQUIDITY", "LEVERAGE"}
+    assert rows
+    assert all(row["sub_claim_type"] not in financial for row in rows)
+    assert specific_type("NET_INCOME_GROWTH", "gross profit has been in decline", None) == "OTHER"
+    assert specific_type("OTHER", "operating income shot up 124%", None) == "HISTORICAL_GROWTH"
