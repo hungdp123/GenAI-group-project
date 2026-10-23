@@ -8,7 +8,14 @@ from finsight.agents.claim_extraction.fields import (
     fields_match,
     parse_fields,
 )
-from finsight.agents.claim_extraction.ingest import build_updated_claims, label_unresolved, paid_completer
+from finsight.agents.claim_extraction.ingest import (
+    _context_span,
+    build_updated_claims,
+    figure_without_measure,
+    label_figure_measures,
+    label_unresolved,
+    paid_completer,
+)
 
 
 def test_a_stated_24_percent_does_not_match_17_or_23():
@@ -67,6 +74,80 @@ def test_a_paid_label_fills_a_company_the_rules_missed():
     assert labeled[0]["fields"]["company"] == "GOOGL"
     assert labeled[0]["company_source"] == "llm"
     assert paid_completer("mock") is None
+
+
+def test_a_bare_figure_takes_the_measure_from_the_lines_around_it():
+    rows = [
+        {
+            "sub_claim_type": "OTHER",
+            "text": "In fact, 22% this most recent quarter.",
+            "fields": {"company": "GOOGL", "metrics": [], "values": [{"value": 22, "unit": "percent"}]},
+        },
+        {
+            "sub_claim_type": "HISTORICAL_GROWTH",
+            "text": "Google revenue grew by 17.5%.",
+            "fields": {"metrics": ["revenue"]},
+        },
+    ]
+    seen: list[str] = []
+
+    def completer(prompt: str) -> str:
+        seen.append(prompt)
+        return "1 revenue"
+
+    labeled = label_figure_measures(
+        rows,
+        completer,
+        lambda row: "Before: Google revenue grew by 17.5%. Sentence: " + row["text"],
+    )
+    assert "22%" in seen[0]
+    assert "Google revenue grew" not in seen[0].split("Sentence:", 1)[-1].split("\n", 1)[0]
+    assert labeled[0]["sub_claim_type"] == "HISTORICAL_GROWTH"
+    assert labeled[0]["inherited_measure"] == "revenue"
+    assert "revenue" in labeled[0]["fields"]["metrics"]
+    assert labeled[0]["measure_source"] == "llm"
+    assert labeled[1]["sub_claim_type"] == "HISTORICAL_GROWTH"
+    assert "measure_source" not in labeled[1]
+
+
+def test_a_price_figure_stays_other():
+    rows = [{"sub_claim_type": "OTHER", "text": "The stock is up 25%.", "fields": {"metrics": []}}]
+    labeled = label_figure_measures(rows, lambda _prompt: "1 NONE")
+    assert labeled[0]["sub_claim_type"] == "OTHER"
+    assert labeled[0]["inherited_measure"] is None
+    assert labeled[0]["measure_source"] == "llm"
+
+
+def test_a_debt_amount_stays_other():
+    rows = [{"sub_claim_type": "OTHER", "text": "That is $12 billion.", "fields": {"metrics": []}}]
+    labeled = label_figure_measures(rows, lambda _prompt: "1 debt")
+    assert labeled[0]["sub_claim_type"] == "OTHER"
+    assert labeled[0]["inherited_measure"] == "debt"
+    assert "debt" in labeled[0]["fields"]["metrics"]
+
+
+def test_context_reaches_back_to_the_named_measure():
+    sentences = [
+        "Google grew its revenue by 17.5%.",
+        "So, we're looking at accelerated growth from Google.",
+        "Overall, AI is making Google grow.",
+        "Now, how is AI making Google grow?",
+        "Well, through a lot of various ways.",
+        "Google grew by 21%.",
+        "In fact, 22% this most recent quarter.",
+        "22% is massive.",
+    ]
+    text = _context_span(sentences, 6)
+    assert "revenue by 17.5%" in text
+    assert text.index("Sentence:") > text.index("revenue")
+
+
+def test_a_sentence_that_names_revenue_is_not_sent():
+    assert figure_without_measure("Google revenue grew by 17.5%.") is False
+    rows = [{"sub_claim_type": "OTHER", "text": "Google revenue grew by 17.5%.", "fields": {"metrics": ["revenue"]}}]
+    labeled = label_figure_measures(rows, lambda _prompt: "1 margin")
+    assert labeled[0]["sub_claim_type"] == "OTHER"
+    assert "measure_source" not in labeled[0]
 
 
 def test_a_short_follow_on_keeps_the_measure(tmp_path):

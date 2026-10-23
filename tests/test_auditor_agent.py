@@ -147,7 +147,8 @@ def test_draft16_margin_that_fell_does_not_support_a_rise():
     kind = {"kind": SubClaimType.PROFITABILITY_CASH_LEVERAGE}
     for label in (Stance.NEUTRAL, Stance.SUPPORTING, Stance.CHALLENGING):    # the collector's label is ignored
         r = audit(*_fin(*args, stance=label, **kind))
-        assert r.verdict is Verdict.CONTRADICTED and r.evidence_stances["XBRL-META-operating_margin"] is Stance.CHALLENGING
+        assert r.verdict is Verdict.CONTRADICTED
+        assert r.evidence_stances["XBRL-META-operating_margin"] is Stance.CHALLENGING
 
 
 def _text_item(sub_claim_id, content, doc_type="10-Q", tier=SourceTier.TIER_1, company="Company X"):
@@ -343,20 +344,31 @@ def _verdict(text, metric, value, content, kind=SubClaimType.HISTORICAL_GROWTH):
 
 @pytest.mark.parametrize("text,metric,value,content,expected", [
     # a bound is not a target: 13.1% is above 10%, 5% growth is below 10%
-    ("Amazon's operating margin is above 10%", "operating_margin", 0.131, "Operating margin 13.1% vs 11.0%", Verdict.SUPPORTED),
-    ("Amazon's operating margin is above 10%", "operating_margin", 0.08, "Operating margin 8.0% vs 7.0%", Verdict.CONTRADICTED),
-    ("Apple has less than 10% earnings growth", "net_income_growth_yoy", 0.05, "Net income $98.4B vs $93.7B (+5.0% YoY)", Verdict.SUPPORTED),
-    ("Apple has less than 10% earnings growth", "net_income_growth_yoy", 0.195, "Net income $112.0B vs $93.7B (+19.5% YoY)", Verdict.CONTRADICTED),
+    ("Amazon's operating margin is above 10%", "operating_margin", 0.131,
+     "Operating margin 13.1% vs 11.0%", Verdict.SUPPORTED),
+    ("Amazon's operating margin is above 10%", "operating_margin", 0.08,
+     "Operating margin 8.0% vs 7.0%", Verdict.CONTRADICTED),
+    ("Apple has less than 10% earnings growth", "net_income_growth_yoy", 0.05,
+     "Net income $98.4B vs $93.7B (+5.0% YoY)", Verdict.SUPPORTED),
+    ("Apple has less than 10% earnings growth", "net_income_growth_yoy", 0.195,
+     "Net income $112.0B vs $93.7B (+19.5% YoY)", Verdict.CONTRADICTED),
     # sign: the computed figure's own sign decides
-    ("Amazon's free cash flow has recently turned negative", "free_cash_flow", -8.8e9, "Free cash flow was -$8.8B in Q2 2026", Verdict.SUPPORTED),
-    ("Amazon's free cash flow has recently turned negative", "free_cash_flow", 5.0e9, "Free cash flow was $5.0B in Q2 2026", Verdict.CONTRADICTED),
+    ("Amazon's free cash flow has recently turned negative", "free_cash_flow", -8.8e9,
+     "Free cash flow was -$8.8B in Q2 2026", Verdict.SUPPORTED),
+    ("Amazon's free cash flow has recently turned negative", "free_cash_flow", 5.0e9,
+     "Free cash flow was $5.0B in Q2 2026", Verdict.CONTRADICTED),
     # "doubled" = 1.9 to 2.1 times
-    ("Nvidia's revenue doubled", "revenue_growth_yoy", 1.059, "Revenue $96.2B vs $46.7B (+105.9% YoY)", Verdict.SUPPORTED),
-    ("Nvidia's revenue doubled", "revenue_growth_yoy", 0.80, "Revenue $90B vs $50B (+80.0% YoY)", Verdict.CONTRADICTED),
+    ("Nvidia's revenue doubled", "revenue_growth_yoy", 1.059,
+     "Revenue $96.2B vs $46.7B (+105.9% YoY)", Verdict.SUPPORTED),
+    ("Nvidia's revenue doubled", "revenue_growth_yoy", 0.80,
+     "Revenue $90B vs $50B (+80.0% YoY)", Verdict.CONTRADICTED),
     # dollar amount: rounding to the stated precision, not a flat 1%
-    ("Alphabet's revenue was $110 billion", "revenue", 109.9e9, "Revenue was $109.9bn in Q1 2026", Verdict.SUPPORTED),
-    ("Alphabet's revenue was $110 billion", "revenue", 114.0e9, "Revenue was $114.0bn in Q1 2026", Verdict.CONTRADICTED),
-    ("Alphabet's revenue was $96.2 billion", "revenue", 96.8e9, "Revenue was $96.8bn in Q1 2026", Verdict.CONTRADICTED),
+    ("Alphabet's revenue was $110 billion", "revenue", 109.9e9,
+     "Revenue was $109.9bn in Q1 2026", Verdict.SUPPORTED),
+    ("Alphabet's revenue was $110 billion", "revenue", 114.0e9,
+     "Revenue was $114.0bn in Q1 2026", Verdict.CONTRADICTED),
+    ("Alphabet's revenue was $96.2 billion", "revenue", 96.8e9,
+     "Revenue was $96.8bn in Q1 2026", Verdict.CONTRADICTED),
 ])
 def test_what_the_subclaim_states_decides_the_verdict(text, metric, value, content, expected):
     kind = PCF if metric in ("operating_margin", "free_cash_flow") else SubClaimType.HISTORICAL_GROWTH
@@ -386,11 +398,21 @@ def test_ratio_direction_ignores_the_dates_in_the_financial_agents_wording():
 
 
 def test_context_only_item_never_changes_the_label():
-    sc, [main] = _fin("META", "Meta", "Meta's revenue grew 33%", "revenue_growth_yoy", 0.331,
-                      "Revenue was $56.31bn in the quarter ended 2026-03-31 vs $42.31bn a year earlier: +33.1% year on year.",
-                      "quarter ended 2026-03-31", date(2026, 4, 30))
-    ctx = main.model_copy(update={"evidence_id": "ctx", "metric_name": "revenue_ttm_growth_yoy_context", "computed_value": -0.05,
-                                  "content": "Context only. Revenue was $200bn in the last 12 months vs $210bn: -4.8% year on year."})
+    sc, [main] = _fin(
+        "META", "Meta", "Meta's revenue grew 33%", "revenue_growth_yoy", 0.331,
+        "Revenue was $56.31bn in the quarter ended 2026-03-31 vs $42.31bn a year earlier: "
+        "+33.1% year on year.",
+        "quarter ended 2026-03-31", date(2026, 4, 30),
+    )
+    ctx = main.model_copy(update={
+        "evidence_id": "ctx",
+        "metric_name": "revenue_ttm_growth_yoy_context",
+        "computed_value": -0.05,
+        "content": (
+            "Context only. Revenue was $200bn in the last 12 months vs $210bn: "
+            "-4.8% year on year."
+        ),
+    })
     r = audit(sc, [main, ctx])
     assert r.passed and r.verdict is Verdict.SUPPORTED and r.evidence_stances["ctx"] is Stance.NEUTRAL
 
