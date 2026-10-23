@@ -231,23 +231,44 @@ class Nodes:
         aliases = self.ctx.settings.corpus_companies.get(req.company_ticker or "", [])
         display = routing.INFLUENCERS[state.influencer][0]
         company = aliases[0] if aliases else req.company_ticker
-        matched = posts.posts_for(posts.load_posts(self.ctx.settings.posts_dir), state.influencer, aliases)
+        stored = posts.posts_for(posts.load_posts(self.ctx.settings.posts_dir), state.influencer, aliases)
         # The Company X demo is outside the project window. Real companies stay inside it.
         if req.company_ticker != "CMPX":
-            matched = [row for row in matched if posts.in_window(row)]
+            stored = [row for row in stored if posts.in_window(row)]
+        # A post published after the cut-off had not been said yet. It is not a candidate.
+        matched = [
+            row for row in stored
+            if (uploaded := posts.post_date(row)) is not None and uploaded <= req.cutoff_date
+        ]
         with_text = [row for row in matched if row.get("transcript")]
         listed_only = [row for row in matched if not row.get("transcript")]
         self.rec.event(
             "collect_posts",
             f"{display}: {len(with_text)} posts with text, {len(listed_only)} listed without text, "
-            f"about {req.company_ticker}",
+            f"about {req.company_ticker}, on or before {req.cutoff_date}",
         )
-        if not with_text and not listed_only and req.company_ticker == "CMPX":
+        if not stored and req.company_ticker == "CMPX":
             self.rec.event("collect_posts", "placeholder company; no stored post, so the submitted sentence is checked")
             return {}
         pasted = state.post_id or posts.video_id_from_text(state.raw_input)
         if pasted and not any(row.get("video_id") == pasted for row in matched):
+            later = next((row for row in stored if row.get("video_id") == pasted), None)
+            published = posts.post_date(later) if later else None
+            if published is not None and published > req.cutoff_date:
+                return _stop(
+                    AssessmentStatus.REFUSED,
+                    f"That post was published on {published.isoformat()}, "
+                    f"after the cut-off {req.cutoff_date.isoformat()}.",
+                )
             return _stop(AssessmentStatus.REFUSED, "That post is not in the store.")
+        if not matched and any(
+            (uploaded := posts.post_date(row)) is not None and uploaded > req.cutoff_date for row in stored
+        ):
+            return _stop(
+                AssessmentStatus.REFUSED,
+                f"No stored post from {display} about {company} was published on or before "
+                f"{req.cutoff_date.isoformat()}.",
+            )
         if not with_text and listed_only:
             return _stop(
                 AssessmentStatus.REFUSED,
