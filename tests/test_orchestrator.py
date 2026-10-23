@@ -427,7 +427,8 @@ def test_failed_audit_retry_is_replanned(monkeypatch, tmp_path):
 
 
 def test_typed_cutoff_does_not_override_a_stored_post(monkeypatch, tmp_path):
-    forced = _demo(monkeypatch, tmp_path, cutoff=date(2025, 1, 31)).assessment
+    # A later cut-off still reviews the post as of the day it was published.
+    forced = _demo(monkeypatch, tmp_path, cutoff=date(2025, 12, 31)).assessment
     plain = _demo(monkeypatch, tmp_path).assessment
     assert forced.as_of_date == plain.as_of_date == date(2025, 7, 31)
     assert forced.overall_verdict == plain.overall_verdict
@@ -451,9 +452,44 @@ def test_cutoff_parsed_from_claim_text():
     assert fa.as_of_date == date(2025, 7, 31) and not fa.cutoff_was_defaulted
 
 
-def test_early_cutoff_does_not_replace_the_post_date():
+def test_early_cutoff_drops_a_post_published_later():
     fa = execute(DEMO_CLAIM, date(2025, 1, 31)).assessment
-    assert fa.as_of_date == date(2025, 7, 31) and not fa.cutoff_was_defaulted
+    assert fa.status is AssessmentStatus.REFUSED
+    assert "2025-01-31" in (fa.refusal_reason or "")
+
+
+def test_a_post_after_the_cutoff_is_not_offered(monkeypatch, tmp_path):
+    folder = tmp_path / "posts"
+    text = "Company X data center revenue grew 107%."
+    rows = [
+        {
+            "influencer": "joseph_carlson", "video_id": "earlyVID01", "title": "Earlier video",
+            "description": "Company X", "upload_date": "2026-09-01", "transcript": text,
+            "channel": "Joseph Carlson",
+        },
+        {
+            "influencer": "joseph_carlson", "video_id": "lateVID0001", "title": "Later video",
+            "description": "Company X", "upload_date": "2026-09-20", "transcript": text,
+            "channel": "Joseph Carlson",
+        },
+    ]
+    (folder / "posts.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    monkeypatch.setenv("FINSIGHT_POSTS_DIR", str(folder))
+    out = execute(
+        "Joseph Carlson said Company X data center revenue grew 107%.",
+        date(2026, 9, 1),
+        registry=demo_registry(),
+    )
+    fa = out.assessment
+    blob = " ".join(
+        part for part in (
+            fa.clarification_question, fa.checked_post, fa.summary, fa.refusal_reason,
+            *(event.message for event in out.decision_log.events),
+        ) if part
+    )
+    assert "lateVID0001" not in blob and "2026-09-20" not in blob
+    assert "Two stored posts" not in (fa.clarification_question or "")
+    assert "earlyVID01" in blob
 
 
 def test_an_impossible_date_is_asked_again():

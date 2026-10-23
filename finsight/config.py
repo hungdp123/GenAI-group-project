@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import csv
 import importlib
 import os
 from dataclasses import dataclass, field
@@ -74,6 +75,11 @@ FINAL_REPORT_MODEL = "gpt-5.4"
 # Total course credit, for `finsight usage`.
 COURSE_BUDGET_USD = 150.0
 
+# Used only when the SEC corpus is not on disk (CI, a fresh checkout). A local corpus
+# replaces this with the latest filing date in data/sec/processed/filings.csv.
+FALLBACK_CORPUS_AS_OF = date(2025, 7, 31)
+FILINGS_CSV = Path("data") / "sec" / "processed" / "filings.csv"
+
 BOUNDARY_DISCLAIMER = (
     "This evaluates the evidence for the stated claim. "
     "It is not a personalized investment recommendation."
@@ -87,7 +93,7 @@ class Settings:
     llm_provider: str = "mock"
     llm_model: str = "mock-model"
     max_retries: int = 1
-    corpus_as_of_date: date = date(2025, 7, 31)
+    corpus_as_of_date: date = FALLBACK_CORPUS_AS_OF
     corpus_companies: dict[str, list[str]] = field(default_factory=lambda: dict(CORPUS_COMPANIES))
     logs_dir: Path = Path("logs")
     posts_dir: Path = Path("data/influencers/youtube")
@@ -123,6 +129,38 @@ def set_llm_mode(paid: bool, model: str | None = None, provider: str = "openai")
     return path
 
 
+def latest_corpus_date(path: Path | None = None) -> date | None:
+    """Latest `filed` date in the SEC corpus. None when that file is not on disk."""
+    csv_path = path or FILINGS_CSV
+    if not csv_path.is_file():
+        return None
+    latest: date | None = None
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            raw = (row.get("filed") or "")[:10]
+            if len(raw) != 10:
+                continue
+            try:
+                filed = date.fromisoformat(raw)
+            except ValueError:
+                continue
+            if latest is None or filed > latest:
+                latest = filed
+    return latest
+
+
+def corpus_as_of_date() -> date:
+    """Cut-off used when the user does not give one.
+
+    FINSIGHT_CORPUS_AS_OF wins. Otherwise the latest filing date in the local corpus.
+    The 31 Jul 2025 fallback is only for a checkout that has no filings file.
+    """
+    override = os.getenv("FINSIGHT_CORPUS_AS_OF")
+    if override:
+        return date.fromisoformat(override)
+    return latest_corpus_date() or FALLBACK_CORPUS_AS_OF
+
+
 def get_settings() -> Settings:
     """Settings for this run. LLM mode precedence: env var > config.yaml > mock (free)."""
     local = read_local_config()
@@ -132,7 +170,7 @@ def get_settings() -> Settings:
         llm_provider=provider,
         llm_model=model or DEFAULT_MODELS.get(provider, "mock-model"),
         max_retries=int(os.getenv("FINSIGHT_MAX_RETRIES", "1")),
-        corpus_as_of_date=date.fromisoformat(os.getenv("FINSIGHT_CORPUS_AS_OF", "2025-07-31")),
+        corpus_as_of_date=corpus_as_of_date(),
         logs_dir=Path(os.getenv("FINSIGHT_LOGS_DIR", "logs")),
         posts_dir=Path(os.getenv("FINSIGHT_POSTS_DIR", "data/influencers/youtube")),
         max_workers=int(os.getenv("FINSIGHT_MAX_WORKERS", "4")),
