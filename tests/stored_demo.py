@@ -15,6 +15,7 @@ from finsight.agents.decomposition.stub import StubDecomposer
 from finsight.agents.financial.stub import StubFinancialAgent
 from finsight.agents.narrative.demo.stub import StubNarrativeAgent
 from finsight.config import AgentRegistry
+from finsight.agents.auditor.stub import StubAuditor
 
 from demo import DEMO_CLAIM, DEMO_CUTOFF
 
@@ -22,7 +23,11 @@ DEMO_PROMPT = "Is Joseph Carlson right about Company X?"
 
 
 def demo_registry(**overrides) -> AgentRegistry:
-    agents = {"financial": StubFinancialAgent(), "narrative": StubNarrativeAgent()}
+    agents = {
+        "auditor": StubAuditor(),
+        "financial": StubFinancialAgent(),
+        "narrative": StubNarrativeAgent(),
+    }
     agents.update(overrides)
     return AgentRegistry.from_config(**agents)
 
@@ -58,6 +63,7 @@ def prepared_demo(monkeypatch, tmp_path: Path, *, transcript: str = DEMO_CLAIM, 
     (claims / "claims.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
     monkeypatch.setenv("FINSIGHT_POSTS_DIR", str(posts))
     if pin_impl:
+        monkeypatch.setenv("FINSIGHT_IMPL_AUDITOR", "finsight.agents.auditor.stub:StubAuditor")
         monkeypatch.setenv("FINSIGHT_IMPL_FINANCIAL", "finsight.agents.financial.stub:StubFinancialAgent")
         monkeypatch.setenv("FINSIGHT_IMPL_NARRATIVE", "finsight.agents.narrative.demo.stub:StubNarrativeAgent")
 

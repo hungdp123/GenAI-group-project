@@ -1,57 +1,137 @@
-# Claim spec
+# FinSight dev claims: draft summary
 
-Short reference. Full rules live in `docs/knowledge_layer.md` (Irine's branch). This file only summarises, flags differences, and lists open decisions.
+Draft of the dev evaluation set in `claims_dev_drafts.jsonl` (56 items). Built on 15 Oct 2026; items 09, 20 and 21 changed on 16 Oct 2026 to add Palantir, Netflix and Mercado Libre; items 26 to 33 added on 17 Oct 2026, items 34 to 53 on 17 to 18 Oct 2026 (Alex Reffett scrape), items 54 to 56 on 18 Oct 2026 (trailing-12-month ruling and the Meet Kevin finds). Not yet in the repo dataset.
 
-## 1. Terms
+## 1. What this is
 
-- **Claim**: the user's whole input. **Sub-claim**: one checkable point inside it (as in `schemas.py` v0.4).
-- The pasted claim and the influencer post are the material under test, never evidence.
+A set of test claims, each written the way a user would paste them, with the expected result for each. Every item is built from a real YouTube post by Mark Roussin, Joseph Carlson (main channel or After Hours) or Alex Reffett and checked against real SEC numbers and filing text. It is used to tune FinSight. A separate heldout set, with different claims, is built later and run once at the end.
 
-## 2. Taxonomy (details: KL §4)
+**What each item records:** what the user types, who the influencer is, what the influencer actually said, the cut-off date the system should use, what the system should do with the request, and the expected verdict for each checkable sub-claim.
 
-| Group | Types |
-|---|---|
-| Financial (calculated, Tier 1 only) | HISTORICAL_GROWTH, NET_INCOME_GROWTH, PROFITABILITY, CASH_GENERATION, LIQUIDITY, LEVERAGE |
-| Narrative | DEMAND_ATTRIBUTION, CONTINUATION, BUSINESS_RISK, OTHER (not in table) |
-| No lookup | COMPARATIVE with no named measure (always Insufficient Evidence). A named measure across two companies in the table is checked once per company. |
+**Sources**
 
-Advice is refused at screening (KL §2) and never becomes a sub-claim.
+- Influencer posts: YouTube scrape of 9 Oct 2026 (window 1 Apr to 30 Sep 2026). Mark Roussin, Joseph Carlson, Joseph Carlson After Hours. Alex Reffett: scrape of 15 Oct 2026 (channel @TickerSymbolYOU, 29 videos with transcripts, same window; the YouTube dates for older videos are month-level, so the real upload date is used).
+- Numbers: SEC pull of 11 Oct 2026 (`facts.csv`, `filings.csv`), used for growth, margins and cash flow.
+- Filing text: per-company narrative folders (10-K, 10-Q, earnings releases). Used for Amazon, Meta, AMD, Apple, Salesforce, Starbucks, Oracle, Palantir and Mercado Libre (Mercado Libre: earnings releases only; see section 7). Netflix items use the numbers only.
+- Rules: Irine's rule book, `docs/knowledge_layer.md` (branch `irine`), plus the team decisions in section 5.
 
-## 3. Decomposition format (KL §3, §5, §6, §7)
+## 2. The items
 
-- Keep the user's words; add nothing from model knowledge.
-- Only KL §5 expansions allowed (e.g. "financially strong" becomes 4 children). Expanded children store the parent phrase and rule name.
-- Max 8 sub-claims; drop order in KL §3; dropped quotes are recorded.
-- Pure opinion is left out and listed as "nothing to check". Price or ranking inside a post is kept and labelled Insufficient Evidence.
-- Every sub-claim uses the request cut-off (default: newest document date, stated in the report).
+The full item table (user wording, what the influencer said, expected result for each of the 56 items) is in the shared OneDrive folder as `FinSight_Dev_Claims.docx`. It is generated from `claims_dev_drafts.jsonl`, which is the source of truth; regenerate the document when items change.
 
-## 4. Schema (short)
+Companies used: Google/Alphabet, Amazon, Meta, Microsoft, NVIDIA, AMD, Apple, Starbucks, Salesforce, Mercado Libre, Palantir, Netflix, Tesla.
 
-Per sub-claim: `claim_id, text, source_span, parent_span, expansion_rule, type, cut_off, collector` (KL §7).
-Per dev item: see `docs/eval_dataset_guide.md`, plus the fields below.
+Categories: `adversarial_advice` (1), `ask_which_post` (1), `comparison` (4), `cutoff_trap` (10), `injection` (1), `misremembered` (3), `missing_name_answered` (3), `missing_name_refused` (1), `no_stored_post` (2), `normal` (23), `out_of_scope` (4), `record` (2), `temporal` (1).
 
-New dev-item fields for the influencer module (all null until posts are scraped):
-`influencer`, `post_text`, `post_date`, `user_matches_post`, `influencer_missing_behavior`, `gold_source` (`user_sentence` or `post`).
+Gold verdicts across all sub-claims: CONTRADICTED 23, INSUFFICIENT_EVIDENCE 15, not yet set 1, PARTIALLY_SUPPORTED 2, SUPPORTED 39.
 
-## 5. Verification labels (KL §11, §13)
+## 3. Expected results
 
-Supported, Partially Supported, Contradicted, Insufficient Evidence. Caps per type are in KL §4 and §11. Overall label rules are in KL §13.
+**Verdict on each sub-claim** (one of four):
 
-## 6. Differences found
+| Verdict | Meaning |
+| --- | --- |
+| `SUPPORTED` | The allowed evidence states the claim, including value and direction. |
+| `PARTIALLY_SUPPORTED` | Agrees in part, is forward-looking, or only an earnings release (Tier 2) states it. |
+| `CONTRADICTED` | A financial claim disagrees with the filing in value or direction. |
+| `INSUFFICIENT_EVIDENCE` | The stored documents cannot decide: not mentioned, outside the window or cut-off, a missing tag, a price, or a ranking against peers. |
 
-| Item | KL doc | Code / other |
-|---|---|---|
-| Types | 11, kept separate in code | `SubClaimType` has NET_INCOME_GROWTH, PROFITABILITY, CASH_GENERATION, LIQUIDITY, and LEVERAGE. Older rows may still say PROFITABILITY_CASH_LEVERAGE and are split on load. |
-| Sub-claim fields | KL §7 list | `SubClaim` has `sub_claim_id, text, sub_claim_type, company_ticker, is_quantitative` |
-| Influencer module | Not mentioned | Not in schema or dataset guide |
+**What the system does with the whole request** (`expected_outcome`):
 
-## 7. Open decisions
+| Outcome | Meaning | Items |
+| --- | --- | --- |
+| `PROCESS` | Checked normally (including two-influencer comparisons, which are decomposed into one claim per influencer, and record prompts, which check every stored post) | 01, 02, 07, 08, 09, 10, 11, 12, 13, 15, 16, 17, 18, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 45, 46, 47, 48, 50, 51, 54, 55, 56 |
+| `PROCESS_AFTER_CLARIFICATION` | System asks one question (name, spelling, date, or confirmation), the user answers, then it is checked | 03, 05, 14, 20, 21, 49 (49 asks which post) |
+| `REFUSE_ADVICE` | Whole message refused because it asks for investment advice | 06 |
+| `REFUSE_OUT_OF_SCOPE` | Stopped because the request is only a price, an index or macro remark, names two companies with their own claims, or is a company outside scope | 23, 52, 53 |
+| `REJECT_NO_INFLUENCER` | No influencer name after one question, so rejected and logged as incomplete | 04 |
+| `REJECT_INCOMPLETE` | Still unclear after one question, so rejected and logged as incomplete | 22 |
+| `REFUSE_NO_STORED_POST` | The influencer has no stored post about the company, so the request is refused | 33, 44 |
 
-1. **Which type enum is final?** Settled 19 Oct 2026. The separate types are final: historical growth, net income growth, profitability (including gross margin), cash generation, liquidity, and leverage. A debt amount is not leverage. It is quoted by the narrative agent. Leverage stays with the financial agent, which returns no ratio yet.
-2. **Why 8 for the cap?** KL gives no rationale. Ask Irine.
-3. **If the user's sentence differs from the real post, which is checked?** Settled 16 Oct 2026. A stored row is checked when it shares the measure and any stated figure, including a paraphrase. "Grew 24%" does not attach to a row that says 17%. If no stored row is that close, the transcript is searched. One close spoken sentence is shown and confirmed before it is checked. Several are shown and the user picks one. If nothing is close, the reply says the line is not in the stored videos and stops.
-4. **Claim with no influencer named: valid input or Clarification?** Only 3 influencers are chosen, so they may not have covered every company. Undecided.
-5. **Cut-off date: user-typed, defaulted, or tied to the post date?** Likely user-typed; how it relates to the post date is undecided.
-6. **Price claim inside a post (draft-07): what type?** KL §6 gives the label (Insufficient Evidence) but §4 requires every sub-claim to have a type and none fits a price. OTHER would trigger a document search that §6 says should not happen. Options: add a PRICE type that is never searched, or keep OTHER with a rule that price phrases skip the search. Owner: Irine.
-7. **Turnaround phrases (drafts 11, 12): does every sheet measure become its own sub-claim, given the cap of 8?** KL §5 implies yes; confirm. Example: gross margin and inventory would add sub-claims and could pass 8.
-8. **For Hung: does the schema need fields for the influencer post?** The influencer module finds a post (Collect posts) and the Orchestrator and Auditor must then work from that post's text and date. `ClaimRequest` in `schemas.py` only has `raw_claim`, `company_ticker` and `cutoff_date`, and the schema rejects unknown fields, so there is nowhere to carry an influencer name, post text or post date. Options: (a) add optional fields to `ClaimRequest` (e.g. `influencer`, `post_text`, `post_date`) and bump the schema version, or (b) put the post text into `raw_claim` and add nothing. The dev items already carry these fields in the test file only (section 4). This depends on decisions 3 to 5 above, so settle those with the group first.
+## 4. Fields
+
+Fields marked **new** are not in the current `EvalItem` and need adding (section 6).
+
+| Field | Type | What it holds | Status |
+| --- | --- | --- | --- |
+| `item_id` | string | Unique id, e.g. `draft-07` | exists |
+| `split` | `dev` / `heldout` | Which set the item belongs to. All `dev` here. | exists |
+| `category` | string | The kind of test: adversarial_advice, comparison, cutoff_trap, misremembered, missing_name_answered, missing_name_refused, normal, out_of_scope, temporal, injection, no_stored_post, ask_which_post, record | exists; 8 new values (`comparison`, `cutoff_trap`, `misremembered`, `missing_name_answered`, `missing_name_refused`, `no_stored_post`, `ask_which_post`, `record`) |
+| `claim` | string | The text the user types, exactly as written. An invalid date stays here. | exists |
+| `cutoff_date` | date or null | The cut-off the user gave (a real date only). Empty when none was given. | exists |
+| `cutoff_resolved_to` | object or null | The cut-off actually used: `rule` (`user_given`, `user_given_after_clarification`, `latest_filing_date` or `post_date_per_post` for records), `date`, `basis` | **new** |
+| `influencer` | string or null | The name the user gave. Empty if none. Two names joined with `;` for a comparison. | **new** |
+| `clarification_turns` | list | Each question the system asks and the user's reply: `{system, user}`. Empty if no question. Two entries for a second round. | **new** |
+| `influencer_after_clarification` | string or null | The name the user gave after being asked | **new** |
+| `expect_refusal` | bool | True for advice or out-of-scope refusals | exists |
+| `expect_clarification` | bool | True when the system should ask a question first | exists |
+| `expected_outcome` | string | What the system does with the request (section 3) | **new** |
+| `posts` | list | The real posts behind the claim. Each has `influencer`, `channel` (`main` or `after_hours`), `video_id`, `url`, `upload_date`, `title`, `quote` (exact words from the transcript). | **new** |
+| `user_matches_post` | bool or null | False when the user remembers the post wrongly | **new** |
+| `mismatch_note` | string or null | What the user got wrong | **new** |
+| `gold_sub_claims` | list | One entry per checkable point (below). Empty for refused and rejected items. | exists |
+| `gold_source` | string | `post_text`: gold labels come from the real post, not the user's sentence | **new** |
+| `notes` | string | Why the item exists, and anything to watch for | exists |
+
+**Inside each `gold_sub_claims` entry**
+
+| Field | What it holds | Status |
+| --- | --- | --- |
+| `text` | The claim in plain words | exists |
+| `sub_claim_type` | One of Irine's 11 types. Used here: `HISTORICAL_GROWTH` (34), `PROFITABILITY` (13), `OTHER` (16), `CASH_GENERATION` (12), `NET_INCOME_GROWTH` (2), `LIQUIDITY` (1), `LEVERAGE` (1), `COMPARATIVE` (1). | exists; the enum needs the 11 names |
+| `gold_verdict` | One of the four verdicts. Empty only where the answer is still pending (item 05, Azure). | exists |
+| `evidence` | Where the label comes from: the calculation from `facts.csv` or the filing passage | exists |
+| `influencer` | Which influencer a sub-claim belongs to (comparison items) | **new** |
+| `rule_note` | Which rule decides the label, when it is not obvious | **new** |
+| `post_id` | Which post a sub-claim comes from (record items) | **new** |
+
+## 5. Rules these items follow
+
+**Cut-off date**
+- The cut-off is the system's review date, not the post date. A post can be dated after the cut-off.
+- If the user gives none, it defaults to the filing date of that company's newest 10-K or 10-Q. News articles are not used. A document filed on the cut-off date is included; one filed after is not.
+- "Last quarter" means the latest quarter ending on or before the cut-off. A period after the cut-off, or older than the latest 10-K plus four quarters, is Insufficient Evidence.
+
+**Matching numbers**
+- A percentage matches within 0.5 percentage points. "About" or rounded wording does not widen this (20% against an actual 21.8% is Contradicted).
+- A dollar amount matches after rounding to the precision the user stated.
+- **Periods (team ruling, 18 Oct).** No period named: use the latest fiscal year. "Trailing", "last 12 months" or "TTM": use the sum of the last four quarters. If the fiscal year contradicts a claim that named no period, the financial agent also shows the last-12-months figure as context only; the label does not change. Items 20 and 54.
+- Free cash flow is operating cash flow minus capital spending. "Recently" or "quarter" means the latest quarter against the same quarter a year earlier.
+
+**Influencer name**
+- A missing name gets one question. If there is still no name, the request is rejected and logged as incomplete.
+- A first name only or a misspelling also gets one question.
+- Mark Roussin, Joseph Carlson and Alex Reffett are the in-scope names. Items 55 and 56 use Kevin Paffrath (Meet Kevin), who is not in the 13 Oct rule book influencer table, so they are out of scope unless the team adds him. Joseph Hogue is not allowed. Joseph Carlson's two channels are one name.
+- A prompt that names two influencers is decomposed into two claims, one per influencer, and is processed only when both names are in scope (team answer, 17 Oct). This differs from section 2 of the 13 Oct rule book, which stops such a prompt; the rule book text needs updating. Items 02, 46, 47 and 48 follow the team answer.
+
+**Misremembered claims**
+- The label is based on what the influencer actually said, not on the user's wording.
+- The system first tells the user what the post says and asks to confirm. Yes or maybe proceeds. No gets one more question, and if that fails the request is rejected as incomplete.
+
+**Segments**
+- A segment figure (AWS, Azure, AMD data center) is checked by the narrative agent only. The financial agent has no segment data and handles only company-wide figures (confirmed by Venes, 17 Oct). The label comes from filing text. Items 03, 05, 18 and 19 involve a segment.
+
+**Record prompts**
+- A prompt asking whether an influencer has been consistent or accurate about a company over time does not ask which post. Every stored post with text is checked and each post's own date is its cut-off (a typed date does not replace it). There is no single overall label; the report gives a consistency sentence and an accuracy count. Items 50 and 51.
+
+**Calculations**
+- Only the section 11 calculations are used. Growth in operating income, gross profit or EPS is not one of them, so those parts are Insufficient Evidence (items 34 and 41). 
+
+**Other**
+- Advice mixed with a claim: refuse the whole message. A price inside an otherwise checkable post is Insufficient Evidence. A request that is only a price is out of scope.
+- A level word with no guideline ("very high margins") is Insufficient Evidence.
+- At most 8 sub-claims per request. Earnings-release text with no matching filing can support a claim only partially. News never supports a claim.
+
+## 7. Known gaps
+
+- **Empty narrative files.** These are 0 KB in the narrative folders: Amazon FY2025 10-K and Q2 2026 10-Q; Apple FY2025 10-K and the Q2 and Q3 FY26 10-Qs; Starbucks FY2024 and FY2025 10-Ks. Items 19 and 24 carry a caution until they are re-saved. SEC numbers are not affected.
+- **Mercado Libre narrative.** In the 2024-2026 folder every 10-Q and the FY2025 10-K are 0 KB; only the earnings releases and the FY2023 and FY2024 10-Ks can be read. Item 21 rests on `facts.csv` and is corroborated by the 2026-08-05 release. The 2021-2023 folder was not sent (outside the corpus window).
+- **Missing narrative zips.** Google, NVIDIA, Netflix and Microsoft arrived empty. Item 05's Azure sub-claim waits on Microsoft.
+- **Alex Reffett:** 29 of his 46 listed videos have a transcript; the other 17 are not stored, so item 44 (no stored post) could be a missing-transcript case instead. His older videos only have month-level dates; the real upload date is used.
+- **Held back.** An AMD data-center comparison (Alex and Roussin, a segment figure; AMD narrative files not checked) is not in the set. Items 42 and 43 (Microsoft) can be dropped as a pair if the team prefers.
+- **Operating income, gross profit and EPS growth.** Items 34 and 41 rely on these not being section 11 calculations. If the team adds them, the Insufficient Evidence labels become Supported.
+- **Meet Kevin items (55, 56).** Found by a teammate. The net income part rests on facts.csv; the gains figure and both Services margin figures are the teammate's reading and need the Google 10-Q text. Kevin's scrape has 33 transcripts in the window. Decide whether to add him to the influencer table.
+- **Earlier error, fixed 18 Oct.** Items 48 and 51 had used two Joseph Hogue videos as Carlson; both were replaced with real Carlson and Roussin posts. All posts in the set are now checked against the scrape's influencer field.
+- **Validator.** Items 49 to 51 need new fields or flows (`ask_which_post`, `record`, `post_id`).
+- **Heldout set:** not built. It needs different claims, at least 2 items per category, and two labelers per item.
+- **Labeling:** gold labels here are from one labeler and have not been double-checked.

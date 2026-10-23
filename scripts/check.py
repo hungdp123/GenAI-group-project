@@ -118,6 +118,7 @@ def check_scenarios() -> None:
     ])) + "\n", encoding="utf-8")
     os.environ["FINSIGHT_POSTS_DIR"] = str(posts)
     from finsight import execute
+    from finsight.config import STUB_IMPLEMENTATIONS
 
     def verdicts(fa):
         return [(r.sub_claim.sub_claim_id, r.verdict.value) for r in fa.sub_claim_results]
@@ -150,11 +151,15 @@ def check_scenarios() -> None:
     early = execute(DEMO, date(2025, 1, 31)).assessment
     step("cut-off before all evidence -> INSUFFICIENT_EVIDENCE", early.overall_verdict.value == "INSUFFICIENT_EVIDENCE")
 
+    # Forced failures are a feature of the STUB auditor only, so pin it for this one step: a real auditor
+    # (correctly) finds nothing wrong with the demo evidence and never fails.
     os.environ["FINSIGHT_STUB_FAIL_SUB_CLAIMS"] = "sc1"
+    os.environ["FINSIGHT_IMPL_AUDITOR"] = STUB_IMPLEMENTATIONS["auditor"]
     try:
         retried = execute(DEMO, CUTOFF)
     finally:
         os.environ.pop("FINSIGHT_STUB_FAIL_SUB_CLAIMS")
+        os.environ.pop("FINSIGHT_IMPL_AUDITOR", None)
     sc1 = retried.assessment.sub_claim_results[0]
     step("failed audit -> 1 re-planned retry, then SUPPORTED",
          sc1.retries_used == 1 and sc1.verdict.value == "SUPPORTED",

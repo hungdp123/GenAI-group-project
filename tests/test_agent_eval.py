@@ -26,8 +26,10 @@ def test_stub_scores_reflect_what_the_stubs_actually_do():
     from finsight.agents.financial.stub import StubFinancialAgent
     from finsight.agents.narrative.demo.retriever_stub import StubRetriever
     from finsight.agents.narrative.demo.stub import StubNarrativeAgent
+    from finsight.agents.auditor.stub import StubAuditor
 
     stubs = AgentRegistry.from_config(
+        auditor=StubAuditor(),
         financial=StubFinancialAgent(),
         narrative=StubNarrativeAgent(),
         retriever=StubRetriever(),
