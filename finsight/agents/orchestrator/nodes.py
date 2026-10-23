@@ -45,6 +45,7 @@ from finsight.contracts.schemas import (
     FinSightState,
     RetryRecord,
     Stance,
+    SubClaimType,
     TemporalViolation,
     ClaimRequest,
     Verdict,
@@ -98,6 +99,21 @@ def _without_advice(final: FinalAssessment) -> FinalAssessment:
     summary = without_advice(final.summary or "")
     summary = f"{note} {summary}".strip()
     return final.model_copy(update={"summary": summary, "sub_claim_results": results})
+
+
+# Knowledge layer section 13: request-wide caps on second looks and on extra narrative searches.
+MAX_SECOND_LOOKS = 8
+MAX_EXTRA_SEARCHES = 4
+
+
+def _no_second_look(sub_claim: SubClaim, collectors: list[str], evidence: list[EvidenceItem]) -> str | None:
+    """Why another pass cannot help (knowledge layer section 13), or None when a second look is allowed."""
+    if sub_claim.sub_claim_type is SubClaimType.COMPARATIVE:
+        return "a comparative claim"
+    if collectors == ["financial"] and not evidence:
+        return ("the financial agent returned no figure: a missing filing tag, a period after the cut-off, "
+                "or a ratio section 11 does not define")
+    return None
 
 
 def _said_and_verified(state: FinSightState, results: list[SubClaimResult], text: str, overall: Verdict | None):
@@ -402,7 +418,7 @@ class Nodes:
     # -- 5. plan ------------------------------------------------------------
 
     def plan(self, state: FinSightState) -> dict[str, Any]:
-        """The LLM router picks financial / narrative / both per sub-claim; caps and tiers stay from the rule."""
+        """Route each sub-claim by its knowledge-layer rule. No LLM is called."""
         plan, pending, insufficient = {}, [], dict(state.insufficient_reasons)
         cutoff = state.request.cutoff_date if state.request else None
 
@@ -423,8 +439,7 @@ class Nodes:
             entry = routing.plan_entry(sub_claim, rule)
             if decision is not None:
                 entry = entry.model_copy(update={"collectors": list(decision.collectors)})
-                self.rec.event("plan", f"{sub_claim.sub_claim_id}: {decision.target} ({decision.source}) - "
-                                       f"{decision.reason}")
+                self.rec.event("plan", f"{sub_claim.sub_claim_id}: {decision.target} - {decision.reason}")
             elif error is not None:
                 # DECISION: a failed router call keeps the knowledge-layer route instead of dropping the sub-claim.
                 self.rec.event("plan", f"{sub_claim.sub_claim_id}: router failed ({error}); "
@@ -435,8 +450,6 @@ class Nodes:
                 continue
             if entry.collectors:
                 pending.append(sub_claim.sub_claim_id)
-            elif decision is not None and decision.source == "llm":
-                insufficient[sub_claim.sub_claim_id] = f"No evidence agent can check this: {decision.reason}"
             else:
                 insufficient[sub_claim.sub_claim_id] = (
                     rule.note or f"No evidence collector for {sub_claim.sub_claim_type.value}.")
@@ -535,12 +548,17 @@ class Nodes:
         Yes -> accept. No -> the orchestrator re-plans the sub-claim (adds the rule's retry_collectors)
         and re-gathers it with feedback, at most `max_retries` times. Still failing -> the sub-claim
         becomes INSUFFICIENT_EVIDENCE and the rest of the answer is kept.
+
+        Knowledge layer section 13: no second look when another pass cannot help (a comparative claim,
+        or a financial claim with no figure), and at most 8 second looks and 4 extra searches per request.
         """
         max_retries = self.ctx.settings.max_retries
         retry, feedback, plan = [], dict(state.feedback), dict(state.routing_plan)
         retries_used, insufficient = dict(state.retries_used), dict(state.insufficient_reasons)
         shortfalls = dict(state.tier_shortfalls)
         sub_claims = {c.sub_claim_id: c for c in state.sub_claims}
+        looks = sum(retries_used.values())
+        searches = sum(n for cid, n in retries_used.items() if "narrative" in plan[cid].collectors)
         for sub_claim_id in state.pending_sub_claim_ids:
             audit = state.audits.get(sub_claim_id)
             if sub_claim_id in insufficient or audit is None:
@@ -558,10 +576,24 @@ class Nodes:
                 hint = audit.feedback_for_retry or "; ".join(audit.failure_reasons)
 
             used = retries_used.get(sub_claim_id, 0)
-            if used < max_retries:
+            replanned = routing.replan_entry(plan[sub_claim_id], rule)
+            searches_again = "narrative" in replanned.collectors
+            stop = None
+            if used >= max_retries:
+                stop = f"still failing after {used} retr{'y' if used == 1 else 'ies'}"
+            elif skip := _no_second_look(sub_claims[sub_claim_id], plan[sub_claim_id].collectors,
+                                         state.evidence.get(sub_claim_id, [])):
+                stop = f"no second look: {skip}"
+            elif looks >= MAX_SECOND_LOOKS:
+                stop = f"the run stopped because the cap of {MAX_SECOND_LOOKS} second looks was hit"
+            elif searches_again and searches >= MAX_EXTRA_SEARCHES:
+                stop = f"the run stopped because the cap of {MAX_EXTRA_SEARCHES} extra searches was hit"
+            if stop is None:
+                looks += 1
+                searches += searches_again
                 retries_used[sub_claim_id] = used + 1
                 feedback[sub_claim_id] = hint
-                plan[sub_claim_id] = routing.replan_entry(plan[sub_claim_id], rule)
+                plan[sub_claim_id] = replanned
                 if plan[sub_claim_id].collectors != state.routing_plan[sub_claim_id].collectors:
                     self.rec.plan(plan[sub_claim_id])
                     self.rec.event("retry_or_accept", f"{sub_claim_id}: re-planned collectors -> "
@@ -569,7 +601,7 @@ class Nodes:
                 retry.append(sub_claim_id)
                 self.rec.retry(RetryRecord(sub_claim_id=sub_claim_id, attempt=used + 1, feedback=f"{problem} | {hint}"))
             else:
-                insufficient[sub_claim_id] = f"{problem} (still failing after {used} retr{'y' if used == 1 else 'ies'})"
+                insufficient[sub_claim_id] = f"{problem} ({stop})"
                 if audit.passed:
                     shortfalls[sub_claim_id] = insufficient[sub_claim_id]
                 self.rec.retry(RetryRecord(sub_claim_id=sub_claim_id, attempt=used, feedback=problem, exhausted=True))
