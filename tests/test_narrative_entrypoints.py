@@ -147,8 +147,12 @@ def test_registry_matches_new_main_slots_and_preserves_other_agents():
     assert set(DEFAULT_IMPLEMENTATIONS) == set(AgentRegistry.__dataclass_fields__)
     assert DEFAULT_IMPLEMENTATIONS["financial"] == "finsight.agents.financial.agent:XbrlFinancialAgent"
     assert DEFAULT_IMPLEMENTATIONS["advice_boundary"] == "finsight.agents.advice_boundary.agent:AdviceBoundaryAgent"
-    assert DEFAULT_IMPLEMENTATIONS["narrative"] == "finsight.agents.narrative.stub:NarrativeAgent"
-    assert DEFAULT_IMPLEMENTATIONS["retriever"] == "finsight.agents.narrative.retriever_stub:NarrativeRetriever"
+    assert DEFAULT_IMPLEMENTATIONS["narrative"] == (
+        "finsight.agents.narrative.rag.collect_evidence:NarrativeEvidenceAgent"
+    )
+    assert DEFAULT_IMPLEMENTATIONS["retriever"] == (
+        "finsight.agents.narrative.retrieval.retriever:CorpusRetriever"
+    )
 
 
 @pytest.fixture

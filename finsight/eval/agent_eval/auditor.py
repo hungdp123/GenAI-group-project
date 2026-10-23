@@ -20,6 +20,7 @@ from finsight.contracts.schemas import (
     Stance,
     SubClaim,
     SubClaimType,
+    Verdict,
 )
 from finsight.eval.agent_eval.common import AgentReport, CaseResult, implementation_name, ratio
 
@@ -106,6 +107,16 @@ def endorses(result: AuditResult) -> bool:
     return result.passed and result.verdict.is_positive
 
 
+# Mutations where the right outcome is not a rejection: the conflict must show up in the verdict.
+SURFACE_ONLY = {"conflicting evidence"}
+
+
+def caught_mistake(name: str, result: AuditResult) -> bool:
+    if name in SURFACE_ONLY:
+        return not (result.passed and result.verdict is Verdict.SUPPORTED)
+    return not endorses(result)
+
+
 def evaluate(registry: AgentRegistry) -> AgentReport:
     agent = registry.auditor
     report = AgentReport("auditor", "Person 3 (Amelia)", implementation_name(agent))
@@ -125,15 +136,24 @@ def evaluate(registry: AgentRegistry) -> AgentReport:
             return None
 
     clean_ok = clean_total = 0
+    neutral_ok = neutral_total = 0
     for base in BASES:
         result = run(f"clean/{base.base_id}", base.sub_claim, base.evidence)
-        if result is None:
-            continue
-        clean_total += 1
-        clean_ok += endorses(result)
-        report.cases.append(CaseResult(f"clean/{base.base_id}", endorses(result),
-                                       "correct evidence endorsed" if endorses(result)
-                                       else f"FALSE ALARM: {result.verdict.value} {result.failure_reasons}"))
+        if result is not None:
+            clean_total += 1
+            clean_ok += endorses(result)
+            report.cases.append(CaseResult(f"clean/{base.base_id}", endorses(result),
+                                           "correct evidence endorsed" if endorses(result)
+                                           else f"FALSE ALARM: {result.verdict.value} {result.failure_reasons}"))
+        # the same correct evidence as the collectors actually send it: stance NEUTRAL (the auditor judges stance)
+        neutral = [e.model_copy(update={"stance": Stance.NEUTRAL}) for e in base.evidence]
+        result = run(f"clean-neutral-label/{base.base_id}", base.sub_claim, neutral)
+        if result is not None:
+            neutral_total += 1
+            neutral_ok += endorses(result)
+            report.cases.append(CaseResult(f"clean-neutral-label/{base.base_id}", endorses(result),
+                                           "correct evidence endorsed without a stance label" if endorses(result)
+                                           else f"FALSE ALARM: {result.verdict.value} {result.failure_reasons}"))
 
     per_type: dict[str, tuple[int, int]] = {}
     for name, (kind, mutate) in MUTATIONS.items():
@@ -144,7 +164,7 @@ def evaluate(registry: AgentRegistry) -> AgentReport:
             result = run(f"{name}/{base.base_id}", sub_claim, evidence)
             if result is None:
                 continue
-            caught = not endorses(result)
+            caught = caught_mistake(name, result)
             got, total = per_type.get(name, (0, 0))
             per_type[name] = (got + caught, total + 1)
             reason = "; ".join(result.failure_reasons) or result.verdict.value
@@ -157,6 +177,7 @@ def evaluate(registry: AgentRegistry) -> AgentReport:
         "broken cases": total_all,
         "catch rate (broken evidence rejected)": ratio(caught_all, total_all),
         "false-alarm rate (correct evidence rejected)": ratio(clean_total - clean_ok, clean_total),
+        "false-alarm rate when collectors send stance NEUTRAL": ratio(neutral_total - neutral_ok, neutral_total),
         **{f"  catches: {name}": ratio(g, t) for name, (g, t) in per_type.items()},
         "errors": errors,
     }

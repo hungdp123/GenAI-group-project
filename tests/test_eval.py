@@ -19,7 +19,8 @@ def test_validator_catches_leak_and_bad_items(tmp_path, monkeypatch):
     from finsight.eval import run_eval
 
     dev = (run_eval.DATASET_DIR / "claims_dev.jsonl").read_text(encoding="utf-8")
-    leaked = dev.splitlines()[0].replace('"dev-001"', '"ho-x"').replace('"split": "dev"', '"split": "heldout"')
+    first = json.loads(dev.splitlines()[0])
+    leaked = json.dumps({**first, "item_id": "ho-x", "split": "heldout"})
     (tmp_path / "claims_dev.jsonl").write_text(dev, encoding="utf-8")
     (tmp_path / "claims_heldout.jsonl").write_text(leaked, encoding="utf-8")
     monkeypatch.setattr(run_eval, "DATASET_DIR", tmp_path)
@@ -67,9 +68,12 @@ def test_full_dev_eval(tmp_path):
     rows = list(csv.DictReader((out / "sub_claims.csv").open()))
     finsight_rows = [r for r in rows if r["system"] == "finsight"]
     assert finsight_rows
-    raw = json.loads((out / "raw" / "finsight" / "dev-001.json").read_text(encoding="utf-8"))
+    # A claim with no influencer named must stop and ask which influencer (looked up, not hardcoded,
+    # so renumbering the dev set does not break this test).
+    no_name = next(i for i in load_dataset("dev") if i.category == "missing_name_refused")
+    raw = json.loads((out / "raw" / "finsight" / f"{no_name.item_id}.json").read_text(encoding="utf-8"))
     assert raw["status"] == "NEEDS_CLARIFICATION"
-    assert "stored claims" in raw["clarification_question"]
+    assert "influencer" in raw["clarification_question"].lower()
     assert len(list((out / "raw" / "finsight").glob("*.json"))) == len(load_dataset("dev"))
     assert list((out / "logs").glob("*.json"))
     assert "| Task success rate | " in summary

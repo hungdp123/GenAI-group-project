@@ -77,21 +77,18 @@ def test_injection_text_in_evidence_is_ignored():
 # -- Financial Analysis Agent mistakes ---------------------------------------------------------
 
 
-@pending
 def test_units_or_scale_error():
     """14.0 (percent) reported where the contract expects a fraction (0.14)."""
     r = _audit(GROWTH, [_ev(computed_value=14.0)])
     assert not endorses(r) and r.numeric_check is not None and not r.numeric_check.matches
 
 
-@pending
 def test_calculation_error():
     """(4560 - 4000) / 4000 = 0.14, but the agent reported 0.12."""
     r = _audit(GROWTH, [_ev(computed_value=0.12)])
     assert not endorses(r) and r.numeric_check is not None and not r.numeric_check.matches
 
 
-@pending
 def test_stated_number_contradicted_by_computed_number():
     """Sub-claim says 30%; filings say 14%. That is a contradiction, not support."""
     claim = GROWTH.model_copy(update={"text": "Company X's revenue grew 30% year over year."})
@@ -101,7 +98,6 @@ def test_stated_number_contradicted_by_computed_number():
     assert not r.numeric_check.matches
 
 
-@pending
 def test_wrong_metric():
     """Segment revenue used for a total-revenue sub-claim."""
     r = _audit(GROWTH, [_ev(metric_name="data_center_segment_revenue_growth", computed_value=0.31,
@@ -109,7 +105,6 @@ def test_wrong_metric():
     assert not endorses(r)
 
 
-@pending
 def test_wrong_comparison_period():
     """Quarter-on-quarter growth used for a year-over-year sub-claim."""
     r = _audit(GROWTH, [_ev(metric_name="revenue_growth_qoq", computed_value=0.05,
@@ -117,13 +112,11 @@ def test_wrong_comparison_period():
     assert not endorses(r)
 
 
-@pending
 def test_wrong_company():
     r = _audit(GROWTH, [_ev(company="Company Y")])
     assert not endorses(r)
 
 
-@pending
 def test_publication_date_is_period_end_not_filing_date():
     """A 10-Q cannot be published on its own period-end date: the cut-off filter would be fooled."""
     r = _audit(GROWTH, [_ev(publication_date=date(2025, 6, 30))])
@@ -146,7 +139,6 @@ def _nar(sub_claim: SubClaim = DEMAND, **kw) -> EvidenceItem:
     return EvidenceItem(**(base | kw))
 
 
-@pending
 def test_citation_does_not_entail_sub_claim():
     """Mentions AI, but never says AI drove the growth."""
     r = _audit(DEMAND, [_nar(content="Company X presented its AI roadmap at a developer conference.")])
@@ -154,14 +146,12 @@ def test_citation_does_not_entail_sub_claim():
     assert r.citation_check is not None and not r.citation_check.entails
 
 
-@pending
 def test_missing_provenance():
     """No URL and no citation span: the quote cannot be checked against its source."""
     r = _audit(DEMAND, [_nar(url=None, citation_span=None)])
     assert not r.passed and r.failure_reasons and r.feedback_for_retry
 
 
-@pending
 def test_stance_mislabelled():
     """A margin decline labelled as SUPPORTING a 'margins are expanding' sub-claim."""
     claim = SubClaim(sub_claim_id="sc5", text="Company X's margins are expanding.",
@@ -171,7 +161,6 @@ def test_stance_mislabelled():
     assert not endorses(r)
 
 
-@pending
 def test_hedged_forward_looking_language_is_not_proof():
     claim = SubClaim(sub_claim_id="sc4", text="Company X's growth will continue.",
                      sub_claim_type=SubClaimType.CONTINUATION, company_ticker="CMPX")
@@ -180,7 +169,6 @@ def test_hedged_forward_looking_language_is_not_proof():
     assert r.verdict is not Verdict.SUPPORTED
 
 
-@pending
 def test_wrong_source_tier_label():
     """A news article labelled Tier 2 (only filings and IR material can be Tier 1-2)."""
     r = _audit(DEMAND, [_nar(doc_type="news", source_tier=SourceTier.TIER_2,
@@ -188,7 +176,6 @@ def test_wrong_source_tier_label():
     assert not r.passed and r.failure_reasons
 
 
-@pending
 def test_number_from_text_is_not_verified():
     """'+31%' quoted from narrative text, with no XBRL computation behind it."""
     claim = SubClaim(sub_claim_id="sc6", text="Company X's Data Center revenue grew 31% year over year.",
@@ -200,7 +187,6 @@ def test_number_from_text_is_not_verified():
 # -- Across both agents -------------------------------------------------------------------------
 
 
-@pending
 def test_conflicting_evidence_is_flagged():
     """XBRL says +14%, a narrative chunk says revenue fell, and both are labelled SUPPORTING."""
     conflicting = _nar(GROWTH, evidence_id="ER-REV", content="Total revenue fell 3% year over year.",
