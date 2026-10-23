@@ -86,10 +86,16 @@ _HEDGE = re.compile(r"\b((?-i:may)|might|could|possibly|potentially|uncertain|un
                     r"cannot predict)\b", re.I)
 _NEGATED_ATTRIBUTION = re.compile(
     r"(rather than|instead of|not (?:due to|driven by|because of|attributable to)|unrelated to|other than)", re.I)
-_FORWARD = re.compile(r"\b(expect\w*|guid\w*|outlook|anticipat\w*|forecast\w*|continu\w*|will|going forward|"
-                      r"next (?:quarter|year|fiscal)|through (?:the )?next|plans? to|target\w*)\b", re.I)
-_FORWARD_AGAINST = re.compile(r"\b(remain(?:s)? elevated|pressure\w*|headwind\w*|decelerat\w*|soften\w*|weaker|cautio\w*|"
-                              r"uncertain\w*|moderat\w*)\b", re.I)
+_FORWARD = re.compile(
+    r"\b(expect\w*|guid\w*|outlook|anticipat\w*|forecast\w*|continu\w*|will|going forward|"
+    r"next (?:quarter|year|fiscal)|through (?:the )?next|plans? to|target\w*)\b",
+    re.I,
+)
+_FORWARD_AGAINST = re.compile(
+    r"\b(remain(?:s)? elevated|pressure\w*|headwind\w*|decelerat\w*|soften\w*|weaker|"
+    r"cautio\w*|uncertain\w*|moderat\w*)\b",
+    re.I,
+)
 _FORWARD_FOR = re.compile(r"\b(strong|robust|continu\w*|accelerat\w*|growth|grow\w*|increas\w*|higher|record)\b", re.I)
 _QOQ = re.compile(r"\bqoq\b|quarter[- ](?:on|over)[- ]quarter|sequential", re.I)
 _QOQ_CLAIM = _QOQ
@@ -142,8 +148,11 @@ def _money(text: str) -> list[float]:
 
 
 def _money_half_unit(text: str) -> float:
-    """Half a unit in the last stated digit of the (first) dollar amount: "$110 billion" -> $0.5bn, "$96.2bn" -> $0.05bn.
-    Team rule: a dollar amount matches after rounding to the stated precision."""
+    """Half a unit in the last stated digit of the first dollar amount.
+
+    "$110 billion" is $0.5bn and "$96.2bn" is $0.05bn. A dollar amount matches after rounding
+    to the stated precision.
+    """
     m = _MONEY_RE.search(text)
     if not m:
         return 0.0
@@ -208,10 +217,21 @@ def _polarity_stems(sub_claim: SubClaim) -> set[str]:
 
 _ABOVE = r"(?:above|over|more than|greater than|higher than|exceed\w*|at least|north of)"
 _BELOW = r"(?:below|under|less than|lower than|fewer than|at most|south of)"
-_THRESH_PCT = re.compile(rf"\b({_ABOVE}|{_BELOW})\s+(?:about |around |roughly )?({_NUM})\s?(?:%|percent\b|per cent\b)", re.I)
-_THRESH_USD = re.compile(rf"\b({_ABOVE}|{_BELOW})\s+(?:about |around |roughly )?(-)?\$\s?({_NUM})\s?(bn|billion|b|million|m|thousand|k)?(?![a-z])", re.I)
-_MULTIPLE = {"doubl": (1.9, 2.1), "tripl": (2.85, 3.15), "halv": (0.45, 0.55)}   # "doubled" band: team rule, 1.9 to 2.1
-_NEGATIVE = re.compile(r"\b(?:turned|gone|went|going|is|are|was|were|been|become|became|remains?)?\s*(?:negative|in the red|burn(?:ing|ed)? cash)\b", re.I)
+_THRESH_PCT = re.compile(
+    rf"\b({_ABOVE}|{_BELOW})\s+(?:about |around |roughly )?({_NUM})\s?(?:%|percent\b|per cent\b)",
+    re.I,
+)
+_THRESH_USD = re.compile(
+    rf"\b({_ABOVE}|{_BELOW})\s+(?:about |around |roughly )?"
+    rf"(-)?\$\s?({_NUM})\s?(bn|billion|b|million|m|thousand|k)?(?![a-z])",
+    re.I,
+)
+_MULTIPLE = {"doubl": (1.9, 2.1), "tripl": (2.85, 3.15), "halv": (0.45, 0.55)}  # doubled: 1.9 to 2.1
+_NEGATIVE = re.compile(
+    r"\b(?:turned|gone|went|going|is|are|was|were|been|become|became|remains?)?\s*"
+    r"(?:negative|in the red|burn(?:ing|ed)? cash)\b",
+    re.I,
+)
 _POSITIVE = re.compile(r"\b(?:turned|went|became|become|is|are|was|were)\s+positive\b", re.I)
 _DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 _PLAIN_PAIR = re.compile(rf"(-?{_NUM})\s*x?[^\d]{{0,30}}?\b(?:vs\.?|versus|compared with|against)\s*(-?{_NUM})", re.I)
@@ -357,7 +377,8 @@ class AuditorAgent:
         unusable: list[tuple[EvidenceItem, str]] = []
         for item in evidence:                       # 1. judge the stance (the collector's own label is ignored)
             numeric = item.computed_value is not None
-            if (item.metric_name or "").endswith("_context") and has_main:   # information only: it never moves the label
+            # A context item is information only. It never moves the label.
+            if (item.metric_name or "").endswith("_context") and has_main:
                 stances.append(Stance.NEUTRAL)
                 unusable.append((item, "context only (team ruling, 18 Oct): it does not change the label"))
                 continue
@@ -560,7 +581,8 @@ class AuditorAgent:
         amounts = _money(item.content)
         if len(amounts) >= 2 and not _is_margin(metric):
             return amounts[0] - amounts[1]
-        pair = _PLAIN_PAIR.search(_DATE.sub(" ", item.content))   # "as at 2026-06-30 vs 2.98x": the date is not a figure
+        # "as at 2026-06-30 vs 2.98x": the date is not a figure.
+        pair = _PLAIN_PAIR.search(_DATE.sub(" ", item.content))
         if pair and not percents and not amounts:
             return float(pair.group(1).replace(",", "")) - float(pair.group(2).replace(",", ""))
         return None
