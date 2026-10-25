@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import math
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -266,14 +267,21 @@ class FiveWayRetriever:
         raise KeyError(chunk_id)
 
     def _rerank(self, query: str, candidates: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-        if not candidates:
-            return []
-        scores = self.reranker.score(query, [item["text"] for item in candidates])
-        if len(scores) != len(candidates):
-            raise ValueError("Reranker returned a different number of scores than candidates")
-        ranked = [
-            {**item, "retrieval_score": float(score)}
-            for item, score in zip(candidates, scores, strict=True)
-        ]
-        ranked.sort(key=lambda item: (-item["retrieval_score"], item["chunk_id"]))
-        return _diverse(ranked, len(ranked))
+        return rerank_candidates(query, candidates, self.reranker)
+
+
+def rerank_candidates(
+    query: str, candidates: Sequence[dict[str, Any]], reranker: RerankerBackend,
+) -> list[dict[str, Any]]:
+    """Shared experimental/runtime cross-encoder ranking and citation diversification."""
+    if not candidates:
+        return []
+    scores = list(reranker.score(query, [item["text"] for item in candidates]))
+    if len(scores) != len(candidates):
+        raise ValueError("Reranker returned a different number of scores than candidates")
+    ranked = [{**item, "retrieval_score": float(score)}
+              for item, score in zip(candidates, scores, strict=True)]
+    if any(not math.isfinite(item["retrieval_score"]) for item in ranked):
+        raise ValueError("Reranker returned a non-finite score")
+    ranked.sort(key=lambda item: (-item["retrieval_score"], item["chunk_id"]))
+    return _diverse(ranked, len(ranked))
