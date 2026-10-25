@@ -1,5 +1,7 @@
 # Narrative Agent: Chunking, Metadata, and Retrieval Schema
 
+> Current metadata definitions are in [Workflow B](../workflow/workflow_b_processing_and_indexes.md#source-metadata-and-traceability), with returned evidence fields in [Workflow C](../workflow/workflow_c_rag.md#how-source-metadata-becomes-evidence). This file is retained as an older implementation note.
+
 **Status: implementation note / draft for review.** This document describes the current code in `finsight/agents/narrative/`. It records what the pilot currently does; it is not evidence that the team has formally approved these choices as a project standard.
 
 ## 1. Processing flow
