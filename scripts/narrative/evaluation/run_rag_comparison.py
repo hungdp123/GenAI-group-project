@@ -1,4 +1,4 @@
-"""Run a C1-C4 by BM25/dense/hybrid/R4 matrix through the existing RAG flow."""
+"""Run a C1-C4 retrieval/RAG matrix; generation uses local Ollama by default."""
 from __future__ import annotations
 
 import argparse
@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from scripts.narrative.evaluation.evaluate_rag_pilot import load_cases, read_json, write_json
+from scripts.narrative.evaluation.model_options import add_model_options, configure_cli_model, describe_cli_model
 from scripts.narrative.evaluation.resume import archive_state, matrix_compatible
 from scripts.narrative.evaluation.run_rag_pilot import run as run_configuration, sha
 
@@ -21,6 +22,9 @@ def run(args: argparse.Namespace) -> dict:
         raise ValueError("Strategies and backends must be unique")
     pairs = list(itertools.product(args.strategies, args.backends))
     retrieval_only = getattr(args, "retrieval_only", False)
+    retry_errors = getattr(args, "retry_generation_errors", False)
+    if retry_errors and (not args.resume or retrieval_only):
+        raise ValueError("--retry-generation-errors requires --resume and a full RAG run")
     output = args.output_dir.resolve()
     if output.exists() and any(output.iterdir()) and not args.resume:
         raise ValueError("Output exists; use --resume with identical settings or a new output folder")
@@ -69,6 +73,7 @@ def run(args: argparse.Namespace) -> dict:
                 output_dir=output / "configurations" / arm / backend,
                 resume=True, prepare_only=True, model_cache=models,
                 retrieval_only=retrieval_only,
+                retry_generation_errors=retry_errors,
             ))
         # Validate every requested dataset/build before the first model call.
         for job in jobs:
@@ -108,7 +113,7 @@ def run(args: argparse.Namespace) -> dict:
         lock.unlink()
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path,
                         default=Path("data/narrative/evaluation/test_claims_v1/cases.csv"))
@@ -126,17 +131,24 @@ def main() -> None:
     parser.add_argument("--candidate-k", type=int, default=50)
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--max-tokens", type=int, default=1500)
-    parser.add_argument("--ollama-model")
-    parser.add_argument("--ollama-host", default="http://localhost:11434")
-    parser.add_argument("--ollama-context", type=int, default=20000)
+    add_model_options(parser)
     parser.add_argument("--rerank-overflow", choices=("error", "truncate"), default="error")
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--retrieval-only", action="store_true",
                         help="Save and score retrieval rankings without any LLM generation calls")
     parser.add_argument("--resume", action="store_true",
                         help="Reuse saved results; allow increasing the case limit with identical inputs/settings")
+    parser.add_argument("--retry-generation-errors", action="store_true",
+                        help="With --resume, archive/retry GENERATION_ERROR cases; keep OK and INVALID_GENERATION")
     parser.add_argument("--output-dir", required=True, type=Path)
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
+    configure_cli_model(args)
+    print(describe_cli_model(args), flush=True)
     try:
         report = run(args)
     except (OSError, ValueError, KeyError, IndexError) as exc:
