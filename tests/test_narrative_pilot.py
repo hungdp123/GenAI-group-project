@@ -152,6 +152,22 @@ def test_index_retrieval_enforces_company_and_cutoff(tmp_path):
     assert evidence[0].citation_span
 
 
+def test_full_index_retains_earlier_sources_with_identical_text(tmp_path):
+    text = "Blackwell data center demand grew strongly."
+    # A newer copy must not remove the only version eligible at an earlier cutoff.
+    chunks = chunk_blocks([_block(text, "2026-01-01"), _block(text, "2025-02-26")])
+    payload = build_index(
+        chunks, tmp_path / "full.json", corpus_fingerprint="full", target_words=800,
+        overlap_words=120, deduplicate_text=False,
+    )
+    assert payload["chunk_count"] == 2
+    assert payload["duplicates_excluded"] == 0
+    results = search_index(payload, "Blackwell demand", 5, date(2025, 7, 31), "NVDA")
+    assert len(results) == 1
+    assert results[0]["publication_date"] == "2025-02-26"
+    assert len(search_index(payload, "Blackwell demand", 5, date(2026, 2, 1), "NVDA")) == 2
+
+
 class _FakeEmbeddingBackend:
     model_name = "test-embedding"
 

@@ -19,6 +19,7 @@ from typing import Any
 
 from finsight.agents.narrative.rag.collect_evidence import NarrativeEvidenceAgent, build_queries
 from finsight.agents.narrative.rag.evidence_summary import prepare_narrative_evidence
+from finsight.agents.narrative.retrieval.retriever import BACKENDS
 from finsight.contracts.schemas import SubClaim, SubClaimType
 
 
@@ -38,6 +39,8 @@ def run_basic_narrative_rag(
     experiment_dir: Path | str | None = None,
     stance_method: str | None = None,
     retrieval_only: bool = False,
+    reranker_model: str | None = None,
+    rerank_overflow: str | None = None,
 ) -> dict[str, Any]:
     """Return relevant source passages, exact facts and a cited evidence summary.
 
@@ -60,29 +63,16 @@ def run_basic_narrative_rag(
     if experiment is not None and not (experiment / "companies" / ticker / "index.json").is_file():
         raise FileNotFoundError(f"Experiment index is missing for {ticker}: {experiment}")
 
-    def experiment_index(t: str) -> Path:
-        return experiment / "companies" / t / "index.json"
-
-    def experiment_retriever(t: str):
-        from finsight.agents.narrative.retrieval.retriever import CorpusRetriever
-
-        path = experiment_index(t)
-        return CorpusRetriever(
-            index_path=path,
-            company_ticker=t,
-            qdrant_dir=path.parent / "qdrant",
-            backend=backend,
-            candidate_k=candidate_k,
-        )
-
     collector = NarrativeEvidenceAgent(
         corpus_root=corpus_root,
         backend=backend,
         top_k=top_k,
         candidate_k=candidate_k,
         stance_method="none",
-        index_path_factory=experiment_index if experiment is not None else None,
-        retriever_factory=experiment_retriever if experiment is not None else None,
+        reranker_model=reranker_model,
+        rerank_overflow=rerank_overflow,
+        index_template=str(experiment / "companies/{ticker}/index.json") if experiment is not None else None,
+        qdrant_template=str(experiment / "companies/{ticker}/qdrant") if experiment is not None else None,
     )
     started = time.perf_counter()
     items = collector.gather(sub_claim, cutoff)
@@ -125,6 +115,8 @@ def run_basic_narrative_rag(
         "claim": claim,
         "cutoff_date": cutoff.isoformat(),
         "backend": backend,
+        "reranking": (collector.last_search or {}).get("reranking"),
+        "index": (collector.last_search or {}).get("index"),
         "retrieval": {
             "count": len(candidates),
             "elapsed_ms": elapsed_ms,
@@ -143,9 +135,11 @@ def main() -> None:
     parser.add_argument("--ticker", required=True)
     parser.add_argument("--claim", required=True)
     parser.add_argument("--cutoff", required=True, type=date.fromisoformat)
-    parser.add_argument("--backend", choices=("bm25", "dense", "hybrid", "auto"), default="bm25")
+    parser.add_argument("--backend", type=str.lower, choices=BACKENDS, default="bm25")
     parser.add_argument("--top-k", type=int, default=3, help="Per support/counter search")
     parser.add_argument("--candidate-k", type=int, default=50)
+    parser.add_argument("--reranker-model")
+    parser.add_argument("--rerank-overflow", choices=("error", "truncate"))
     parser.add_argument("--corpus-root", type=Path)
     parser.add_argument("--experiment-dir", type=Path)
     parser.add_argument("--output", type=Path)
@@ -174,13 +168,15 @@ def main() -> None:
             experiment_dir=args.experiment_dir,
             stance_method=args.stance_method,
             retrieval_only=args.retrieval_only,
+            reranker_model=args.reranker_model,
+            rerank_overflow=args.rerank_overflow,
         )
     except Exception as exc:
         parser.exit(2, f"Narrative retrieval failed: {type(exc).__name__}: {exc}\n")
     rendered = json.dumps(result, ensure_ascii=False, indent=2)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     model_slug = re.sub(r"[^A-Za-z0-9._-]+", "-", result["llm"].get("model") or "none")
-    output = args.output or Path("data/narrative/experiments/narrative_basic_rag") / (
+    output = args.output or Path("data/narrative/experiments/standalone_rag") / (
         f"{result['ticker']}-{model_slug}-evidence-{stamp}.json"
     )
     output.parent.mkdir(parents=True, exist_ok=True)

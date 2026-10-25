@@ -41,7 +41,7 @@ include = ["finsight*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["tests"]
+pythonpath = [".", "tests"]
 
 [tool.ruff]
 line-length = 120

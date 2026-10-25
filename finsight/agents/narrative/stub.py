@@ -126,6 +126,8 @@ class NarrativeAgent(NarrativeEvidenceAgent):
             "claim": sub_claim.text,
             "cutoff_date": cutoff_date.isoformat(),
             "backend": self.backend,
+            "reranking": (self.last_search or {}).get("reranking"),
+            "index": (self.last_search or {}).get("index"),
             "sub_claim_id": sub_claim.sub_claim_id,
             "sub_claim_type": sub_claim.sub_claim_type.value,
             "feedback": feedback,

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from finsight.agents.narrative.corpus.processing.index import load_index
-from finsight.agents.narrative.retrieval.retriever import BACKENDS, CorpusRetriever
+from finsight.agents.narrative.retrieval.retriever import BACKENDS, CorpusRetriever, normalize_backend
 from finsight.contracts.interfaces import Retriever
 from finsight.contracts.schemas import EvidenceItem, Stance, SubClaim, SubClaimType
 
@@ -190,17 +190,31 @@ class NarrativeEvidenceAgent:
         *,
         corpus_root: Path | str | None = None,
         backend: str | None = None,
-        top_k: int = 5,
-        candidate_k: int = 50,
+        top_k: int | None = None,
+        candidate_k: int | None = None,
         classifier: StanceClassifier | None = None,
         stance_method: str | None = None,
         retriever_factory: Callable[[str], Retriever] | None = None,
         index_path_factory: Callable[[str], Path] | None = None,
+        index_template: str | None = None,
+        qdrant_template: str | None = None,
+        reranker_model: str | None = None,
+        rerank_overflow: str | None = None,
     ) -> None:
         self.corpus_root = Path(corpus_root or os.getenv("FINSIGHT_NARRATIVE_CORPUS_ROOT", "data/narrative/processed"))
-        self.backend = backend or os.getenv("FINSIGHT_NARRATIVE_BACKEND", "bm25")
-        if self.backend not in BACKENDS:
-            raise ValueError(f"Unknown backend: {self.backend}")
+        self.index_template = index_template or os.getenv("FINSIGHT_NARRATIVE_INDEX_TEMPLATE")
+        self.qdrant_template = qdrant_template or os.getenv("FINSIGHT_NARRATIVE_QDRANT_TEMPLATE")
+        for template in (self.index_template, self.qdrant_template):
+            if template:
+                expanded = template.replace("{ticker}", "PLTR")
+                if "{" in expanded or "}" in expanded:
+                    raise ValueError("Index path templates may use only the {ticker} placeholder")
+        self.backend = normalize_backend(backend or os.getenv("FINSIGHT_NARRATIVE_BACKEND", "bm25"))
+        self.reranker_model = reranker_model
+        self.rerank_overflow = rerank_overflow
+        top_k = top_k if top_k is not None else int(os.getenv("FINSIGHT_NARRATIVE_TOP_K", "5"))
+        candidate_k = (candidate_k if candidate_k is not None else
+                       int(os.getenv("FINSIGHT_NARRATIVE_CANDIDATE_K", "50")))
         if not 1 <= top_k <= 50 or candidate_k < top_k:
             raise ValueError("Require 1 <= top_k <= 50 and candidate_k >= top_k")
         requested = stance_method or os.getenv("FINSIGHT_NARRATIVE_STANCE_METHOD", "none")
@@ -221,6 +235,8 @@ class NarrativeEvidenceAgent:
         self, sub_claim: SubClaim, cutoff_date: date, feedback: str | None, reason: str,
         support_query: str = "", counter_query: str = "",
         support: list[EvidenceItem] | None = None, counter: list[EvidenceItem] | None = None,
+        reranking: dict | None = None,
+        index_info: dict | None = None,
     ) -> None:
         record = {
             "at": datetime.now(timezone.utc).isoformat(),
@@ -237,6 +253,9 @@ class NarrativeEvidenceAgent:
             "assessment_status": "NOT_ASSESSED",
             "stance_method": "none",
             "top_k": self.top_k,
+            "candidate_k": self.candidate_k,
+            "reranking": reranking,
+            "index": index_info,
             "support_query": support_query,
             "counter_query": counter_query,
             "support": [_search_hit(rank, item)
@@ -265,12 +284,25 @@ class NarrativeEvidenceAgent:
         path = (
             self.index_path_factory(ticker)
             if self.index_path_factory
+            else Path(self.index_template.format(ticker=ticker)) if self.index_template
             else self.corpus_root / ticker / "indexes/index.json"
         )
+        qdrant_dir = (Path(self.qdrant_template.format(ticker=ticker)) if self.qdrant_template
+                      else path.parent / "qdrant")
         if not path.is_file():
+            if self.index_template and not self.index_path_factory:
+                raise FileNotFoundError(f"Configured narrative index is missing for {ticker}: {path}")
             self._record_search(sub_claim, cutoff_date, feedback, "no_index", support_query, counter_query)
             return []
         payload = load_index(path)
+        index_info = {
+            "path": str(path.resolve()), "qdrant_dir": str(qdrant_dir.resolve()),
+            "corpus_fingerprint": payload.get("corpus_fingerprint"), "chunking": payload.get("chunking"),
+            "latest_indexed_publication_date": max(
+                (c["publication_date"] for c in payload["chunks"] if c["company_ticker"].upper() == ticker),
+                default=None,
+            ),
+        }
         canonical = {
             c["chunk_id"]: c
             for c in payload["chunks"]
@@ -278,7 +310,8 @@ class NarrativeEvidenceAgent:
         }
         if not canonical:
             self._record_search(
-                sub_claim, cutoff_date, feedback, "no_eligible_passages", support_query, counter_query)
+                sub_claim, cutoff_date, feedback, "no_eligible_passages", support_query, counter_query,
+                index_info=index_info)
             return []
         retriever = (
             self.retriever_factory(ticker)
@@ -286,13 +319,17 @@ class NarrativeEvidenceAgent:
             else CorpusRetriever(
                 company_ticker=ticker,
                 index_path=path,
-                qdrant_dir=path.parent / "qdrant",
+                qdrant_dir=qdrant_dir,
                 backend=self.backend,
                 candidate_k=self.candidate_k,
+                reranker_model=self.reranker_model,
+                rerank_overflow=self.rerank_overflow,
             )
         )
         support = retriever.retrieve(support_query, self.top_k, cutoff_date)
+        support_reranking = getattr(retriever, "last_reranking", None)
         counter = retriever.retrieve(counter_query, self.top_k, cutoff_date)
+        counter_reranking = getattr(retriever, "last_reranking", None)
         items: list[EvidenceItem] = []
         seen: set[str] = set()
         for item in support + counter:
@@ -324,7 +361,8 @@ class NarrativeEvidenceAgent:
             items.append(original)
             seen.add(item.evidence_id)
         self._record_search(
-            sub_claim, cutoff_date, feedback, "ok", support_query, counter_query, support, counter)
+            sub_claim, cutoff_date, feedback, "ok", support_query, counter_query, support, counter,
+            reranking={"support": support_reranking, "counter": counter_reranking}, index_info=index_info)
         return items
 
 
@@ -335,7 +373,7 @@ def main() -> None:
     parser.add_argument("--sub-claim-id", required=True)
     parser.add_argument("--claim-type", choices=[x.value for x in SubClaimType], default="OTHER")
     parser.add_argument("--cutoff", required=True, type=date.fromisoformat)
-    parser.add_argument("--backend", choices=BACKENDS, default=None)
+    parser.add_argument("--backend", type=str.lower, choices=BACKENDS, default=None)
     parser.add_argument(
         "--stance-method",
         choices=["none", "exact", "llm"],
@@ -344,6 +382,8 @@ def main() -> None:
     )
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--candidate-k", type=int, default=50)
+    parser.add_argument("--reranker-model")
+    parser.add_argument("--rerank-overflow", choices=("error", "truncate"))
     parser.add_argument("--feedback")
     parser.add_argument("--corpus-root", type=Path)
     parser.add_argument("--output", type=Path)
@@ -362,6 +402,8 @@ def main() -> None:
         top_k=args.top_k,
         candidate_k=args.candidate_k,
         stance_method=args.stance_method,
+        reranker_model=args.reranker_model,
+        rerank_overflow=args.rerank_overflow,
     )
     evidence = agent.gather(claim, args.cutoff, args.feedback)
     preparation = {}
@@ -380,6 +422,8 @@ def main() -> None:
     result = {
         "status": "OK" if evidence else "NO_EVIDENCE",
         **preparation,
+        "reranking": (agent.last_search or {}).get("reranking"),
+        "index": (agent.last_search or {}).get("index"),
         "pipeline": "narrative_evidence_retrieval" if args.retrieval_only else "narrative_evidence_rag",
         "assessment_status": "NOT_ASSESSED",
         "queries": dict(
