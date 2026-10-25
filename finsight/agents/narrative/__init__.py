@@ -6,9 +6,9 @@ Runtime imports:
 Collector contract: gather(SubClaim, cutoff_date, feedback) -> list[EvidenceItem].
 Retriever contract: retrieve(query, top_k, cutoff_date) -> list[EvidenceItem].
 The basic_rag entry point prepares cited evidence with an LLM, without stance or
-claim verdict. verdict_baseline retains
-historical answer generation. Workflow modules
-below cover source preparation, evaluation and inference without import-time work.
+claim verdict. verdict_baseline retains historical answer generation and the
+Ollama adapter used by current evidence preparation and evaluation. Workflow
+modules below cover preparation, evaluation and inference without import-time work.
 """
 
 from importlib import import_module
@@ -27,17 +27,13 @@ WORKFLOW_MODULES = {
     "retrieve_basic_rag_evidence": "finsight.agents.narrative.rag.basic_rag",
     "prepare_cited_evidence": "finsight.agents.narrative.rag.evidence_summary",
     "generate_basic_rag_answer": "finsight.agents.narrative.rag.verdict_baseline",
-    "generate_92_claim_answers": "finsight.agents.narrative.evaluation.run_basic_rag_batch",
     "validate_production_provenance": "finsight.agents.narrative.evaluation.validate_retrieval_provenance",
-    "validate_experiment_provenance": "finsight.agents.narrative.evaluation.validate_canonical_provenance",
-    "verify_integration": "finsight.agents.narrative.evaluation.verify_agent_integration",
     "prepare_experiment": "scripts.narrative.experiments.prepare_narrative_experiment",
     "prepare_evidence_labels": "scripts.narrative.datasets.prepare_narrative_labels",
-    "validate_chunking": "scripts.narrative.chunking.validate_narrative_chunking",
-    "build_adaptive_chunks": "scripts.narrative.chunking.build_adaptive_narrative_chunks",
-    "compare_chunking": "scripts.narrative.chunking.compare_narrative_chunking",
-    "compare_retrieval_priority": "scripts.narrative.retrieval.compare_narrative_retrieval_priority",
-    "compare_canonical_92": "scripts.narrative.retrieval.compare_canonical_development",
+    "build_full_chunking_indexes": "scripts.narrative.retrieval.build_full_chunking_indexes",
+    "run_rag_comparison": "scripts.narrative.evaluation.run_rag_comparison",
+    "evaluate_rag_comparison": "scripts.narrative.evaluation.evaluate_rag_comparison",
+    "evaluate_ragas": "scripts.narrative.evaluation.evaluate_ragas",
 }
 
 _EXPORTS = {

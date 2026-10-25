@@ -89,6 +89,37 @@ Select the explicit implementations below when the orchestrator should use LLM e
 
 The orchestrator owns routing and retry decisions. Narrative accepts feedback for another evidence pass; it does not run its own multi-step retry loop. The Auditor interprets the evidence and determines the claim verdict under the application's assessment rules. A successfully connected collector alone does not prove final-verdict accuracy.
 
+#### Default chunks and retrieval backend
+
+The orchestrator uses saved indexes; it does not choose a chunking strategy or rebuild chunks for each claim.
+
+| Setting | Code default when no override is set | Example command below |
+|---|---|---|
+| Chunk/index location | `data/narrative/processed/chunking_strategies/C1/full_v1/<TICKER>/indexes/index.json` | Same C1 location |
+| Chunking | C1: 800-word target, 120-word overlap | C1 |
+| Retrieval backend | `bm25` (R1) | `bm25` (R1) |
+| Returned passages per search direction | `5` before deduplication and LLM selection | `3` |
+
+These defaults apply when `AgentRegistry.from_config()` creates the built-in Narrative collector and retriever, including the LLM-preparing wrappers. Standalone RAG defaults remain unchanged. The C1 indexes must already exist; the application does not rebuild them or fall back to canonical indexes.
+
+`FINSIGHT_NARRATIVE_CORPUS_ROOT` selects the saved chunk/index build, while `FINSIGHT_NARRATIVE_BACKEND` selects retrieval independently. Setting the backend to `r4` activates hybrid retrieval plus the cross-encoder; it does not select C4. An index template (`FINSIGHT_NARRATIVE_INDEX_TEMPLATE`) overrides the corpus-root index path. A Qdrant template overrides the corresponding vector path, so both must refer to matching artifacts. Existing environment overrides still take precedence. To use the defaults in a session with older settings, clear them before starting a new run:
+
+```powershell
+Remove-Item Env:FINSIGHT_NARRATIVE_CORPUS_ROOT, Env:FINSIGHT_NARRATIVE_BACKEND, Env:FINSIGHT_NARRATIVE_INDEX_TEMPLATE, Env:FINSIGHT_NARRATIVE_QDRANT_TEMPLATE, Env:FINSIGHT_NARRATIVE_INDEX, Env:FINSIGHT_NARRATIVE_QDRANT -ErrorAction SilentlyContinue
+```
+
+After an end-to-end run, inspect its recorded retrieval settings without calling a model:
+
+```powershell
+# Default search-log location; use FINSIGHT_NARRATIVE_SEARCH_LOG if configured.
+$searchLog = if ($env:FINSIGHT_NARRATIVE_SEARCH_LOG) { $env:FINSIGHT_NARRATIVE_SEARCH_LOG } elseif ($env:FINSIGHT_LOGS_DIR) { Join-Path $env:FINSIGHT_LOGS_DIR 'narrative_searches.jsonl' } else { 'logs/narrative_searches.jsonl' }
+$search = Get-Content -LiteralPath $searchLog -Tail 1 | ConvertFrom-Json
+$search | Select-Object at, ticker, sub_claim_id, cutoff, backend, top_k
+$search.index | Select-Object path, qdrant_dir, chunking | Format-List
+```
+
+This shows the latest recorded search, including retries; check its company, claim ID and timestamp against your run. R4 is recorded as `hybrid_cross_encoder`. Logging must be enabled, and a run that stops before Narrative retrieval has no new search record.
+
 #### Orchestrator handoff
 
 Select matching chunks/indexes using [Workflow C, Step 1](workflow_c_rag.md#step-1-select-chunks-and-indexes-for-a-rag-run), then configure the application connection:
@@ -96,7 +127,7 @@ Select matching chunks/indexes using [Workflow C, Step 1](workflow_c_rag.md#step
 ```powershell
 $env:FINSIGHT_IMPL_NARRATIVE = "finsight.agents.narrative.stub:NarrativeAgent"
 $env:FINSIGHT_IMPL_RETRIEVER = "finsight.agents.narrative.retriever_stub:NarrativeRetriever"
-$env:FINSIGHT_NARRATIVE_CORPUS_ROOT = "data/narrative/processed/chunking_strategies/C4/full_v1"
+$env:FINSIGHT_NARRATIVE_CORPUS_ROOT = "data/narrative/processed/chunking_strategies/C1/full_v1"
 $env:FINSIGHT_NARRATIVE_BACKEND = "bm25"
 $env:FINSIGHT_NARRATIVE_TOP_K = "3"
 $env:FINSIGHT_NARRATIVE_CANDIDATE_K = "50"
@@ -128,7 +159,7 @@ not the shared client for all other agents.
 
 #### Python calling example
 
-After applying the connection/model settings above, the application can call the configured agent directly. This example uses the existing MSFT C4 index and does not require the evaluation CSV:
+After applying the connection/model settings above, the application can call the configured agent directly. This example uses the existing MSFT C1 index and does not require the evaluation CSV:
 
 ```python
 from datetime import date
