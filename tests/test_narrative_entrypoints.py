@@ -1,6 +1,7 @@
 """Real registry entry points with temporary indexes and no model requests."""
 
 from datetime import date
+from importlib.util import find_spec
 import json
 from types import SimpleNamespace
 
@@ -138,7 +139,8 @@ def test_demo_paths_remain_loadable_and_separate_from_real_entries():
 
     assert callable(run_basic_narrative_rag)
     assert WORKFLOW_MODULES["extract_pdf_charts_and_promote"].endswith("pdf_chart_processing")
-    assert WORKFLOW_MODULES["generate_92_claim_answers"].endswith("run_basic_rag_batch")
+    for module in WORKFLOW_MODULES.values():
+        assert find_spec(module) is not None, f"Workflow module does not exist: {module}"
 
 
 def test_collector_selects_separate_indexes_and_records_chunking(corpus_root, tmp_path, monkeypatch):

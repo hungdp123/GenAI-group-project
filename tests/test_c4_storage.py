@@ -1,4 +1,4 @@
-"""Layout changes preserve indexed evidence and do not bypass algorithm identities."""
+"""Current builders preserve source records and enforce saved build identities."""
 
 from copy import deepcopy
 import gzip
@@ -6,8 +6,9 @@ import json
 
 import pytest
 
-from scripts.narrative.maintenance.migrate_c4_storage import migrate
-from scripts.narrative.retrieval.c4_storage import BUILDER_PATH, resume_settings, sha256, validate_output
+from scripts.narrative.retrieval.c4_storage import (
+    BUILDER_PATH, resume_settings, sha256, validate_output, write_chunk_artifacts,
+)
 
 
 @pytest.fixture
@@ -42,32 +43,41 @@ def legacy_build(tmp_path):
     return tmp_path, source, destination, settings, report
 
 
-def test_preview_has_no_writes_and_copy_preserves_evidence_and_checkpoints(legacy_build):
-    workspace, source, destination, settings, report = legacy_build
-    assert migrate(workspace, source, destination)["status"] == "PREVIEW"
-    assert not destination.exists()
-    assert migrate(workspace, source, destination, apply=True)["status"] == "COPIED_AND_VERIFIED"
-    assert source.is_dir()  # Original retained for rollback.
-    assert json.loads((destination / "configuration.json").read_text()) == settings
-    assert json.loads((destination / "PLTR/build_report.json").read_text()) == report
-    assert sha256(source / "PLTR/indexes/index.json") == sha256(destination / "PLTR/indexes/index.json")
-    assert sha256(source / "PLTR/indexes/qdrant/storage/data.bin") == sha256(
-        destination / "PLTR/indexes/qdrant/storage/data.bin")
-    assert json.loads((destination / "PLTR/chunks.jsonl").read_text())["chunk_id"] == "original-id"
-    assert json.loads((destination / "PLTR/source_map.jsonl").read_text())["document_id"] == "source-doc"
-    with pytest.raises(FileExistsError):
-        migrate(workspace, source, destination, apply=True)
+def test_chunk_export_preserves_index_vectors_and_source_maps(legacy_build):
+    _, source, _, _, original_report = legacy_build
+    company = source / "PLTR"
+    index = company / "indexes/index.json"
+    vector_bytes = (company / "indexes/qdrant/storage/data.bin").read_bytes()
+    original_index_hash = sha256(index)
+    payload = json.loads(index.read_text())
+    report = write_chunk_artifacts(company, payload)
+    assert json.loads((company / "chunks.jsonl").read_text()) == payload["chunks"][0]
+    assert json.loads((company / "source_map.jsonl").read_text())["document_id"] == "source-doc"
+    assert report["index_sha256"] == original_index_hash == sha256(index)
+    assert (company / "indexes/qdrant/storage/data.bin").read_bytes() == vector_bytes
+    assert json.loads((company / "build_report.json").read_text()) == original_report
+    assert write_chunk_artifacts(company, payload) == report
+    changed = deepcopy(payload)
+    changed["chunks"][0]["text"] = "different source text"
+    with pytest.raises(ValueError, match="Chunk records differ"):
+        write_chunk_artifacts(company, changed)
 
 
-def test_layout_migration_accepts_runner_change_but_rejects_changed_chunker(legacy_build):
-    workspace, source, destination, saved, _ = legacy_build
-    migrate(workspace, source, destination, apply=True)
+def test_recorded_layout_compatibility_cannot_bypass_changed_chunker(legacy_build):
+    workspace, source, _, saved, _ = legacy_build
     current = deepcopy(saved)
     current["code_sha256"][BUILDER_PATH] = sha256(workspace / BUILDER_PATH)
-    assert resume_settings(destination, current, workspace) == saved
+    assert resume_settings(source, saved, workspace) == saved
+    with pytest.raises(ValueError, match="Build configuration/code differs"):
+        resume_settings(source, current, workspace)
+    # Existing compatibility records are still checked by current builders.
+    record = {"source_configuration_sha256": sha256(source / "configuration.json"),
+              "compatible_builder_sha256": sha256(workspace / BUILDER_PATH)}
+    (source / "layout_migration.json").write_text(json.dumps(record), encoding="utf-8")
+    assert resume_settings(source, current, workspace) == saved
     current["code_sha256"]["adaptive_chunking.py"] = "changed-algorithm"
     with pytest.raises(ValueError, match="Chunking/indexing/model inputs changed"):
-        resume_settings(destination, current, workspace)
+        resume_settings(source, current, workspace)
 
 
 def test_new_output_cannot_overwrite_canonical_company_folder(tmp_path):

@@ -68,11 +68,104 @@ indexes/index_metadata.json build metadata
 
 ### Step 2. Enrich PDFs/charts, then promote into company passages
 
+The processor reads retrieval-eligible source manifests, preserves original PDFs and records their SHA-256 hashes. Extracted chart values retain their source page and crop; extraction success does not mean they have been visually verified.
+
+#### Prepare dependencies and audit pages
+
+Run from the repository root. Install the extraction dependencies, keep Ollama running and install your chosen vision model when using local chart extraction:
+
+```powershell
+python -m pip install -e ".[document-ai,retrieval]"
+ollama list
+```
+
+If needed, install the model with `ollama pull MODEL_NAME`. Audit eligible PDF pages without extraction/model calls:
+
+```powershell
+python -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --all --audit-only
+```
+
+#### Extract with local Ollama
+
 ```powershell
 python -u -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --ticker META --ollama-model qwen3-vl:4b-instruct --chart-workers 1 --chart-timeout 900 --promote
 ```
 
-For OpenAI extraction, replace `--ollama-model qwen3-vl:4b-instruct` with `--openai-model gpt-5.4`; requests may incur API charges. Use `--all` instead of the ticker for an all-company batch. The pipeline reuses valid source-matched artifacts; failures or changed inputs may require work. `--promote` merges applicable extracted content into canonical company blocks/chunks and BM25.
+Use an installed Ollama vision model; the report retains its actual model name. `--promote` merges applicable extracted content into canonical company blocks/chunks and BM25. Omit it when you only want extraction artifacts first.
+
+| Option | Purpose / default |
+|---|---|
+| `--all` or `--ticker META` | Select every eligible company or one company. Repeat `--ticker` for several companies. |
+| `--document-id DOC_ID`, `--pages 7-10` | Restrict the document set and extraction pages. |
+| `--experiment NAME` | Select a separate extraction experiment and usage history; default `pdf_chart_processing`. |
+| `--chart-workers` | Concurrent chart jobs; default `1`. |
+| `--chart-timeout` | Provider request timeout; default `300` seconds. The example allows `900`. |
+| `--chart-max-output-tokens` | Per-response output limit: default `4000` for Ollama, `6000` for OpenAI. |
+| `--ollama-context` | Local context window; default `8192`. Increase with the output budget if a dense chart's JSON is cut off. |
+| `--force` | Bypass caches. Leave unset when resuming existing work. |
+
+#### Optional OpenAI extraction and key configuration
+
+The chart adapter reads `OPENAI_API_KEY` first, then `openai_api_key` in the project's gitignored `config.yaml`. `FINSIGHT_SECRETS_FILE` can select a different configuration file. An explicitly supplied Python provider `api_key` argument takes precedence over both.
+
+Create `config.yaml` from `config.example.yaml` if needed and keep the real key there privately:
+
+```yaml
+openai_api_key: "YOUR_OPENAI_API_KEY"
+llm_provider: mock
+```
+
+`--openai-model` explicitly selects paid chart extraction even when the application's shared provider remains `mock`. To process pending work, promote the results and refresh canonical vectors:
+
+```powershell
+python -u -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --all --openai-model gpt-5.4 --chart-workers 1 --chart-timeout 300 --promote --rebuild-vectors
+```
+
+The adapter sends chart crops and nearby extracted text to OpenAI; Docling/OCR stays local. Matching successful chart caches can be reused across provider changes, preserving their original provider/model metadata. Without `--force`, switching providers does not replace every successful extraction.
+
+This chart adapter uses the shared key loader, but its requests bypass the shared spending guard and usage ledger. It does not enforce a dollar spending cap; `--chart-max-output-tokens` limits each response, not total spending.
+
+#### Page routing, outputs and coverage
+
+Readable pages use native text. Ranges needing layout analysis use Docling; zero-text and sparse image-bearing ranges use OCR. Built-in Granite chart extraction stays disabled. Chart candidates are cropped from the original PDF and read by the selected vision provider. Units, signs, periods, legends, accounting basis and uncertainties are retained where available; missing fields stay unknown.
+
+```text
+data/narrative/processed/<TICKER>/experiments/pdf_chart_processing/
+  audit_report.json              selected-page audit
+  experiment_report.json         company progress and coverage
+  <DOCUMENT_ID>/
+    page_audit.json
+    audit.json                   document extraction details
+    blocks.jsonl                 page-cited extracted blocks
+    ranges/pNNN-NNN/              range exports, chart crops and caches
+```
+
+Within a range, `document.md` is readable extracted content; `enhanced/document.enhanced.md` includes successfully extracted chart tables. Structured fields are under `enhanced/charts/*.json`, with matching PNG crops. The company report may lag the newest per-chart files while a document is still running.
+
+Routing and chart detection use heuristics: zero candidates does not prove that a PDF has no charts. `status: partial` records failed extraction operations. Review `documents_with_errors`, `coverage_limitations` and `unsupported_pages`; usable OCR text can remain available even when chart extraction fails.
+
+#### Track OpenAI chart usage
+
+New OpenAI chart requests are recorded separately from RAG generation and judging:
+
+```text
+data/narrative/experiments/pdf_chart_processing/usage/<RUN_ID>/
+  calls.jsonl       new provider requests and returned usage
+  summary.json      combined tokens, cost estimate, status and missing usage
+```
+
+The processor prints the summary path at startup and completion, updates it after each recorded request, and prints combined usage when its finalizer runs, including handled failures or Ctrl+C. Cache reuse does not add historical tokens to the current total. Requests without returned usage or configured pricing have unknown cost, not zero cost; a force-killed process can lose an in-flight request's usage.
+
+Read saved cumulative usage without starting extraction or making API calls:
+
+```powershell
+python -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --all --usage
+python -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --ticker GOOGL --usage
+```
+
+Use `--experiment NAME` for a different experiment's history. Totals cover locally recorded requests since tracking began; earlier extractions and other tools/teammates are not backfilled. `cost_estimate_complete=false` means `estimated_cost_usd` covers only the priced portion. Rates and supported pricing conditions are defined in [chart_usage.py](../../../finsight/agents/narrative/corpus/pdf/chart_usage.py). Reported input includes chart image tokens; output includes reported reasoning tokens. These are local estimates, not account credit or authoritative billing. The `finsight usage` ledger is separate.
+
+#### Promote, stop and resume
 
 If extraction is already complete and only promotion is needed:
 
@@ -80,13 +173,19 @@ If extraction is already complete and only promotion is needed:
 python -u -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --ticker META --promote-only
 ```
 
+Add `--rebuild-vectors` to refresh canonical Qdrant vectors after successful promotion, or use Step 3. Promotion accepts current eligible documents with matching source hashes, writes hashed artifacts under `<TICKER>/enrichments/` and records them in `<TICKER>/pdf_enrichment.json`. Enriched page blocks replace ordinary blocks for those pages; chart/table regions with extracted numeric values are not repeated as narrative text. Charts without numeric values retain descriptive content and available Docling text.
+
+Canonical rebuilds retain extraction artifacts and use staged publication with rollback copies. Source metadata and promoted extraction/coverage hashes contribute to the effective corpus fingerprint, so changed content invalidates stale vectors/caches. This promotion updates the canonical company build; rebuild the separate C1-C4 strategy artifacts below when their parsed source inputs change.
+
 Inspect saved status:
 
 ```powershell
 python -m finsight.agents.narrative.corpus.pdf.pdf_chart_processing --all --status
 ```
 
-Per-document artifacts are under `data/narrative/processed/<TICKER>/experiments/pdf_chart_processing/<DOCUMENT_ID>/`. Available files depend on page routing; not every PDF produces charts or enhanced Markdown. A final report establishes recorded extraction status, not independently verified financial accuracy.
+Use Ctrl+C in the running terminal, then rerun the same command without `--force` to resume. Document/range checkpoints and successful source/crop-matched chart caches are reused. Force termination may prevent the interruption report from being written, although completed caches remain on disk. Do not run two processors against the same company's experiment directory simultaneously.
+
+Coverage limitations remain in the processing report and index. `CorpusRetriever.coverage_limitations(cutoff_date)` exposes company/date-eligible limitations. A completed extraction report establishes recorded processing status, not independently verified financial accuracy.
 
 ### Step 3. Build or refresh vectors after final promotion
 
@@ -299,4 +398,4 @@ writes a root `<build-version>_build_report.json` for `--all`, or
 `<build-version>_<TICKER>_build_report.json` for a single company; each strategy
 also retains its own company and aggregate reports.
 
-After a build is complete, follow [Workflow C: select chunks and indexes for a RAG run](workflow_c_rag.md#step-1-select-chunks-and-indexes-for-a-rag-run). For comparing strategies and measuring quality, follow [Workflow D](workflow_d_evaluation.md#recorded-input-and-build-status).
+After a build is complete, follow [Workflow C: select chunks and indexes for a RAG run](workflow_c_rag.md#step-1-select-chunks-and-indexes-for-a-rag-run). For comparing strategies and measuring quality, follow [Workflow D](workflow_d_evaluation.md).
