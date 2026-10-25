@@ -259,25 +259,19 @@ Get-Content -LiteralPath "$ragRun/comparison.md"
 
 This offline scorer reports source checks, directional retrieval metrics, technical/citation outcomes and recorded generation usage. It makes no new retrieval or model calls. Invalid generations remain visible rather than being counted as successful semantic answers.
 
-#### Step 4. Prepare RAGAS inputs without judge calls
+#### Step 4. Run local RAGAS judging
+
+The evaluator automatically prepares inputs from the saved RAG run, then calls the judge to calculate scores. Gold annotations are evaluator inputs only and are not sent back to Narrative generation.
 
 ```powershell
-python -u -m scripts.narrative.evaluation.evaluate_ragas --run-dir $ragRun --all-cases --max-tokens 3000 --output-dir $judgeRun --prepare-only --resume
+python -u -m scripts.narrative.evaluation.evaluate_ragas --run-dir $ragRun --all-cases --ollama-model qwen3-vl:4b-instruct --ollama-context 20000 --max-tokens 3000 --output-dir $judgeRun --resume
 ```
 
-Inspect `samples/C4/r4/<CASE_ID>/input.json` under `$judgeRun`: the claim, normalized brief, actual supplied contexts, selected contexts and CSV gold reference are separate. Gold annotations are evaluator inputs only and are not sent back to Narrative generation.
+The local judge model is independent of the generation model. Both default to the same Ollama model here; use `--ollama-model <INSTALLED_MODEL>` on the judging command to change the judge. Do not use `--judge-model` for local models: that option explicitly selects the shared provider.
 
-#### Step 5. Run local RAGAS judging
+For a one-case preview, use `--limit 1` consistently in generation and judging. Validate judge explanations on supported, contradicting and unsupported cases before treating local scores as reliable. Local execution can take substantial time, and the judge's effective context window must fit each prompt plus its output budget. The evaluator does not silently shorten evidence to make it fit.
 
-```powershell
-python -u -m scripts.narrative.evaluation.evaluate_ragas --run-dir $ragRun --all-cases --max-tokens 3000 --output-dir $judgeRun --resume
-```
-
-The local judge model is independent of the generation model. Both default to the same Ollama model here; use `--ollama-model <INSTALLED_MODEL>` consistently on preparation/judging commands to change the judge. Do not use `--judge-model` for local models: that option explicitly selects the shared provider.
-
-For a one-case preview, use `--limit 1` consistently in generation, preparation and judging. Validate judge explanations on supported, contradicting and unsupported cases before treating local scores as reliable. Local execution can take substantial time, and the judge's effective context window must fit each prompt plus its output budget. The evaluator does not silently shorten evidence to make it fit.
-
-#### Step 6. Read retrieval and quality reports
+#### Step 5. Read retrieval and quality reports
 
 ```powershell
 Get-Content -LiteralPath "$ragRun/comparison.md"
