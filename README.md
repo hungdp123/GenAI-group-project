@@ -74,8 +74,8 @@ and you get the `finsight` command. Re-activate the virtual environment in every
 
 Narrative uses an LLM to select relevant source passages, extract exact facts and
 write a cited evidence summary, without stance labels or a claim verdict. See
-[the Narrative handoff](docs/narrative/workflow/orchestrator_narrative_handoff.md#llm-evidence-preparation-without-stance-or-verdict)
-and [Week 2 Section 10](docs/narrative/workflow/summary_week_2.md#10-current-narrative-rag-output-cited-evidence-without-stance-or-verdict)
+[Workflow E: orchestrator connection](docs/narrative/workflow/workflow_e_orchestrator_integration.md#orchestrator-handoff)
+and [Workflow C: RAG output](docs/narrative/workflow/workflow_c_rag.md#rag-output)
 for commands, required data, provider settings and output fields. Configuration
 examples are in [config.example.yaml](config.example.yaml). BM25/dense/hybrid
 search and LLM evidence processing are separate steps. The auditor/policy handoff

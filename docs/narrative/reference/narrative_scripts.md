@@ -54,7 +54,7 @@ python -u -m scripts.narrative.chunking.compare_narrative_chunking --run-id $nar
 python -u -m scripts.narrative.retrieval.compare_narrative_retrieval_priority --run-id $narrativeRunId --experiment-id c4_dev_v1 --allow-draft --resume
 ```
 
-Draft-label runs remain diagnostics, not accepted final benchmarks. See the [Week 2 summary](../workflow/summary_week_2.md) for results, prerequisites, review gates and current limitations.
+Draft-label runs remain diagnostics, not accepted final benchmarks. See the [Full Narrative workflow summary](../workflow/summary_full_narrative_agent_flow.md) for results, prerequisites, review gates and current limitations.
 
 ## Relationship to the reusable implementation
 
@@ -70,7 +70,7 @@ This evaluates 92 claims x four retrieval methods with P0, using canonical 800/1
 
 ### Shared responsibilities
 
-These tools coordinate datasets, snapshots, audits and reports. Reusable algorithms and application interfaces remain in `finsight/agents/narrative/`. Commit both the relevant tool packages and the implementation, including their `__init__.py` files and helper dependencies.
+These tools coordinate datasets, snapshots, audits and reports. Reusable algorithms and application interfaces remain in `finsight/agents/narrative/`.
 
 Run from the repository root using `python -m scripts.narrative.<group>.<name>`. Old flat `scripts.<name>` commands have been replaced; there is no second copy of each tool at its old path. The snapshot preparer now includes nested Python tools when freezing code. Existing frozen data/code snapshots, labels and saved result hashes were not rewritten. Use a new experiment version when code-identity checks reject changed source.
 
@@ -86,4 +86,4 @@ The historical module-path report covers `finsight/agents/narrative/`; this page
 - **38 focused tests passed**, covering tool/module command entry points, nested snapshot source selection, historical/current frozen-query layouts, query hash preservation and Basic RAG numerical regressions.
 - Active documentation links resolve; focused test lint and `git diff --check` passed.
 
-No source acquisition, document processing, corpus/index rebuilding, model request, experiment rerun, Git staging, commit or push was performed for this regrouping.
+No source acquisition, document processing, corpus/index rebuilding, model request, experiment rerun or Git operation was performed for this regrouping.

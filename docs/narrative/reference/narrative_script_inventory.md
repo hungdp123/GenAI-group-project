@@ -1,6 +1,6 @@
 # Narrative pipeline: Python file reference
 
-Updated: 18 October 2026. Covers **40 implementation modules and 9 package initializers (49 Python files)** in `finsight/agents/narrative/`. Descriptions were checked against current source and command entry points. For execution order, commands and results, use [summary_week_2.md](../workflow/summary_week_2.md).
+Updated: 18 October 2026. Covers **40 implementation modules and 9 package initializers (49 Python files)** in `finsight/agents/narrative/`. Descriptions were checked against current source and command entry points. For execution order, commands and results, use [summary_full_narrative_agent_flow.md](../workflow/summary_full_narrative_agent_flow.md).
 
 ## 1. How to read this inventory
 
@@ -21,7 +21,7 @@ Package initializers: [root](../../../finsight/agents/narrative/__init__.py), [a
 
 **CLI** identifies a command run from the repository root as `python -m finsight.agents.narrative.<group>.<name>`. **Library** identifies an imported helper, usually not run separately. **Maintenance** commands collect or update sources. **Diagnostic/compatibility** files preserve earlier experiments and demo behavior.
 
-Commit the full package: a file that you never run directly can still be required by another module. Retain stubs and acquisition helpers. Keep credentials in ignored local configuration, and corpus/index artifacts in ignored `data/`.
+Helper modules, stubs and acquisition tools can be required by other modules even when they are not run directly. Keep credentials in local configuration and corpus/index artifacts under `data/`.
 
 ## 2. Corpus preparation and BM25: 6 files
 
@@ -121,11 +121,11 @@ Parallel checks/research:
   evaluation/verify_agent_integration.py  agent/retriever integration checks
 ```
 
-The C1-C4 and R1-R4 x P0-P2 runners live in grouped folders under **`scripts/narrative/`**, outside the reusable implementation package. They reuse `processing/adaptive_chunking.py`, `retrieval/source_priority.py` and existing indexing/retrieval modules. See the [18-tool inventory](narrative_scripts.md) and [summary Section 9](../workflow/summary_week_2.md#9-exact-github-scope). Commit those runners with their imported helpers. Experiment execution does not automatically switch Basic RAG to experimental indexes/policies.
+The C1-C4 and R1-R4 x P0-P2 runners live in grouped folders under **`scripts/narrative/`**, outside the reusable implementation package. They reuse `processing/adaptive_chunking.py`, `retrieval/source_priority.py` and existing indexing/retrieval modules. See the [18-tool inventory](narrative_scripts.md) and the [execution map](../workflow/summary_full_narrative_agent_flow.md#2-execution-map). Experiment execution does not automatically switch Basic RAG to experimental indexes/policies.
 
 ## 10. Current entry-point examples
 
-These illustrate the main commands. Processing/index commands write their documented artifacts. For prerequisites, extraction/promotion commands and the complete workflow, follow the [Week 2 summary](../workflow/summary_week_2.md).
+These illustrate the main commands. Processing/index commands write their documented artifacts. For prerequisites, extraction/promotion commands and the complete workflow, follow the [Full Narrative workflow summary](../workflow/summary_full_narrative_agent_flow.md).
 
 ```powershell
 python -u -m finsight.agents.narrative.corpus.processing.process_corpus --ticker META
@@ -137,8 +137,6 @@ python -u -m finsight.agents.narrative.rag.basic_rag --ticker META --claim "DAP 
 
 Modules with argument parsers support `python -m finsight.agents.narrative.<group>.<name> --help`. **Do not use this pattern for `prepare_manual_ir_metadata` or `verify_agent_integration`: neither has an argument parser, so invoking them runs their work.** Library-only modules are used through their callers.
 
-## 11. Commit and maintenance notes
-
-Commit this inventory, the full Narrative package, required `scripts/` helpers, tests, configuration examples, dependencies and selected evaluation inputs/reports. Keep stubs/acquisition helpers, and retain the existing shared LLM client. Keep credentials, downloaded sources, generated indexes and local experiment caches out of Git. Review shared schema/config changes with the repository owner per `CONTRIBUTING.md`; see [push guide](../workflow/narrative_pipeline_handoff.md).
+## 11. Maintenance and verification notes
 
 Module descriptions were checked through source inspection. The package has since been regrouped; see the migration guide and its verification notes. No corpus/index builds or model requests were made for the regrouping.

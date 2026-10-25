@@ -33,7 +33,7 @@ loader. Run from the project root so the default relative config path resolves t
 Python provider `api_key` argument takes precedence over both.
 
 Create `config.yaml` from `config.example.yaml` if it does not already exist. Add your
-key locally without committing it:
+key in your local configuration:
 
 ```yaml
 openai_api_key: "YOUR_OPENAI_API_KEY"

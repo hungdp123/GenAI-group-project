@@ -28,13 +28,14 @@ def build_index(
     corpus_fingerprint: str,
     target_words: int,
     overlap_words: int,
+    deduplicate_text: bool = True,
 ) -> dict[str, Any]:
-    """Persist unique chunks plus enough metadata for deterministic BM25 search."""
+    """Persist chunks and BM25 metadata, optionally retaining literal source duplicates."""
     unique: list[NarrativeChunk] = []
     seen_text: set[str] = set()
     duplicates = 0
     for chunk in chunks:
-        if chunk.text_sha256 in seen_text:
+        if deduplicate_text and chunk.text_sha256 in seen_text:
             duplicates += 1
             continue
         seen_text.add(chunk.text_sha256)
