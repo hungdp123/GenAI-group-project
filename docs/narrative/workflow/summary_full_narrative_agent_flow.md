@@ -289,7 +289,7 @@ python -u -m scripts.narrative.evaluation.run_rag_comparison --all-cases --strat
 
 ```powershell
 python -u -m scripts.narrative.evaluation.evaluate_rag_comparison --run-dir $ragRun
-python -u -m scripts.narrative.evaluation.evaluate_ragas --run-dir $ragRun --all-cases --max-tokens 3000 --output-dir $judgeRun --resume
+python -u -m scripts.narrative.evaluation.evaluate_ragas --run-dir $ragRun --all-cases --ollama-model qwen3-vl:4b-instruct --ollama-context 20000 --max-tokens 3000 --output-dir $judgeRun --resume
 ```
 
 RAGAS reads the saved generation outputs; it does not repeat retrieval or generation. To evaluate an existing RAG run, set `$ragRun` to that folder and run Step 3.
