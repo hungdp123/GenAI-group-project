@@ -10,10 +10,17 @@ from finsight.agents.claim_extraction.fields import (
 )
 from finsight.agents.claim_extraction.ingest import (
     _context_span,
+    _judge_batch,
+    apply_block_label,
+    apply_judge_label,
+    block_labels,
+    labels_differ,
     build_updated_claims,
     figure_without_measure,
+    label_bare_context,
     label_figure_measures,
     label_unresolved,
+    needs_context_label,
     paid_completer,
 )
 
@@ -142,6 +149,67 @@ def test_context_reaches_back_to_the_named_measure():
     assert text.index("Sentence:") > text.index("revenue")
 
 
+def test_an_outside_company_ends_the_carried_company_and_keeps_its_measure():
+    sentences = [
+        "Waymo is a tough competitor.",
+        "Uber management indicated that trip growth accelerated.",
+        "Uber is still gaining a larger market share.",
+        "Yes, in terms of the company's total bookings, we achieved a growth of 22%.",
+        "This is actually an acceleration compared to the 22% increase in the first quarter.",
+        "Revenue grew by 14%, which is less than the growth in bookings.",
+    ]
+    labels = block_labels(sentences)
+    assert labels[0][0] == "GOOGL"
+    assert labels[3] == ("UBER", "bookings")
+    assert labels[4] == ("UBER", "bookings")
+    assert labels[5] == ("UBER", "revenue")
+    row = {
+        "sub_claim_id": "vid-GOOGL-t80",
+        "sub_claim_type": "OTHER",
+        "company_ticker": "GOOGL",
+        "text": sentences[4],
+        "fields": {"company": "GOOGL", "metrics": []},
+    }
+    apply_block_label(row, "UBER", "bookings", own_measure=None)
+    assert row["company_ticker"] == "UBER"
+    assert row["sub_claim_id"] == "vid-UBER-t80"
+    assert row["inherited_measure"] == "bookings"
+    assert row["sub_claim_type"] == "OTHER"
+
+
+def test_a_bare_figure_takes_the_company_from_the_surrounding_lines():
+    rows = [{
+        "sub_claim_id": "vid-GOOGL-t80",
+        "sub_claim_type": "OTHER",
+        "company_ticker": "GOOGL",
+        "text": "This is actually an acceleration compared to the 22% increase in the first quarter.",
+        "fields": {"company": "GOOGL", "metrics": [], "values": [{"value": 22, "unit": "percent"}]},
+    }]
+    assert needs_context_label(rows[0]["text"]) is True
+    labeled = label_bare_context(
+        rows,
+        lambda _prompt: "1. UBER, NONE",
+        lambda row: "Before: Uber is still gaining share. Sentence: " + row["text"],
+    )
+    assert labeled[0]["company_ticker"] == "UBER"
+    assert labeled[0]["sub_claim_id"] == "vid-UBER-t80"
+    assert labeled[0]["sub_claim_type"] == "OTHER"
+    assert labeled[0]["inherited_measure"] is None
+
+
+def test_a_sentence_that_names_its_company_is_not_relabeled():
+    rows = [{
+        "sub_claim_id": "vid-GOOGL-t1",
+        "sub_claim_type": "HISTORICAL_GROWTH",
+        "company_ticker": "GOOGL",
+        "text": "Google revenue grew by 17.5%.",
+        "fields": {"company": "GOOGL", "metrics": ["revenue"]},
+    }]
+    labeled = label_bare_context(rows, lambda _prompt: "1 UBER revenue")
+    assert labeled[0]["company_ticker"] == "GOOGL"
+    assert labeled[0]["sub_claim_id"] == "vid-GOOGL-t1"
+
+
 def test_a_sentence_that_names_revenue_is_not_sent():
     assert figure_without_measure("Google revenue grew by 17.5%.") is False
     rows = [{"sub_claim_type": "OTHER", "text": "Google revenue grew by 17.5%.", "fields": {"metrics": ["revenue"]}}]
@@ -170,3 +238,56 @@ def test_a_short_follow_on_keeps_the_measure(tmp_path):
     assert "revenue" in follow["fields"]["metrics"]
     assert follow["extractor"] == "rules"
     assert claims_catalog_path(posts) == path
+
+
+def test_the_check_keeps_the_company_and_measure_that_fit_the_sentence():
+    older = {"company_ticker": "GOOGL", "measure": None, "sub_claim_type": "OTHER"}
+    newer = {"company_ticker": "CLOUD", "inherited_measure": "revenue", "sub_claim_type": "HISTORICAL_GROWTH"}
+    assert labels_differ(older, newer) is True
+    assert labels_differ(older, {"company_ticker": "GOOGL", "measure": None}) is False
+    row = {
+        "sub_claim_id": "vid-CLOUD-t8",
+        "company_ticker": "CLOUD",
+        "sub_claim_type": "HISTORICAL_GROWTH",
+        "fields": {"company": "CLOUD", "metrics": []},
+    }
+    apply_judge_label(row, "82%, GOOGL", "revenue", "OTHER")
+    assert row["company_ticker"] == "GOOGL"
+    assert row["sub_claim_id"] == "vid-GOOGL-t8"
+    assert row["inherited_measure"] == "revenue"
+    assert row["sub_claim_type"] == "HISTORICAL_GROWTH"
+    cleared = {
+        "sub_claim_id": "vid-HEY-t5",
+        "company_ticker": "HEY",
+        "sub_claim_type": "NET_INCOME_GROWTH",
+        "fields": {"company": "HEY", "metrics": ["profit"]},
+    }
+    apply_judge_label(cleared, "NONE", "none", "OTHER")
+    assert cleared["company_ticker"] == "NONE"
+    assert cleared["inherited_measure"] is None
+    assert cleared["sub_claim_type"] == "OTHER"
+
+
+def test_the_check_reads_one_company_and_measure_per_line():
+    items = [
+        {
+            "old_company": "GOOGL",
+            "old_measure": None,
+            "new_company": "UBER",
+            "new_measure": "bookings",
+            "context": "Sentence: growth of 22%.",
+        },
+        {
+            "old_company": "NVDA",
+            "old_measure": None,
+            "new_company": "MICRON",
+            "new_measure": "margin",
+            "context": "Sentence: Gross margins came in at 84.9%.",
+        },
+    ]
+    found = _judge_batch(
+        lambda _prompt: "1. UBER, bookings\n2. MICRON margin",
+        items,
+    )
+    assert found[1] == ("UBER", "bookings")
+    assert found[2] == ("MICRON", "margin")
