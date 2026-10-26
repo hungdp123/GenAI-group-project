@@ -28,10 +28,10 @@ from finsight.agents.claim_extraction.extract import (
 )
 from finsight.agents.claim_extraction.prepare import post_limits
 from finsight.agents.claim_extraction.select import MATCH_NOTE, choose_line, miss_text, stated_claim
-from finsight.agents.orchestrator import explain, pending, posts, router, routing
+from finsight.agents.orchestrator import clues, explain, pending, posts, router, routing
 from finsight.agents.orchestrator.aggregation import highest_tier, overall_verdict
 from finsight.agents.orchestrator.expansion import report_units
-from finsight.agents.orchestrator.render import render_assessment
+from finsight.agents.orchestrator.render import fmt_numeric_check, render_assessment
 from finsight.config import BOUNDARY_DISCLAIMER, AgentRegistry, Settings
 from finsight.contracts.schemas import (
     AdviceDecision,
@@ -174,7 +174,9 @@ class Nodes:
             pending.remember_cutoff(settings.logs_dir, claim)
         cutoff, defaulted = routing.resolve_cutoff(state.cutoff_input, claim, settings.corpus_as_of_date)
         request = ClaimRequest(request_id=new_request_id(), raw_claim=claim, company_ticker=state.company_hint,
-                                cutoff_date=cutoff, cutoff_was_defaulted=defaulted)
+                                cutoff_date=cutoff, cutoff_was_defaulted=defaulted,
+                                cutoff_source="corpus_default" if defaulted else "user",
+                                requested_cutoff=None if defaulted else cutoff)
         self.rec.start(request.request_id, state.raw_input, cutoff)
         self.rec.event("intake", f"cutoff={cutoff} defaulted={defaulted}")
         update: dict[str, Any] = {
@@ -337,12 +339,18 @@ class Nodes:
         )
         uploaded = posts.post_date(chosen)
         fields: dict[str, Any] = {"raw_claim": transcript or str(chosen.get("transcript") or "").strip()}
-        # A cut-off the user typed stays the review date. Otherwise the post date is the cut-off.
-        if uploaded is not None and (state.cutoff_input is not None or not state.cutoff_from_prompt):
+        # The user's date (--cutoff or typed in the text) only chose which posts were eligible. The SEC evidence
+        # stops at the matched post's date: the claim is judged on what was public when it was said.
+        if uploaded is not None:
             fields["cutoff_date"] = uploaded
             fields["cutoff_was_defaulted"] = False
+            fields["cutoff_source"] = "post_date"
             if self.rec.log is not None:
                 self.rec.log.cutoff_date = uploaded
+        elif uploaded is None and req.cutoff_source == "corpus_default":
+            # No date from the user and none on the post: evidence runs to the corpus date, which may be
+            # after the claim was made. Said in the output, not only the log.
+            self.rec.event("collect_posts", "post has no publication date; evidence cut-off stays the corpus date")
         request = req.model_copy(update=fields)
         when = uploaded.strftime("%d %b %Y").lstrip("0") if uploaded else "an unknown date"
         label = (
@@ -396,7 +404,18 @@ class Nodes:
             )
         for note in extracted.notes:
             self.rec.event("extract_claims", note)
-        update: dict[str, Any] = {"sub_claims": extracted.sub_claims}
+        sub_claims = extracted.sub_claims
+        conflicts: list[str] = []
+        if state.from_stored_post:
+            # Period clues ride along with each line; the line itself is still the claim that is checked.
+            sub_claims = clues.with_clues(sub_claims, req.raw_claim, focus)
+            conflicts = clues.prompt_conflicts(focus, sub_claims, req.company_ticker)
+            for claim in sub_claims:
+                if claim.context:
+                    self.rec.event("extract_claims", f"{claim.sub_claim_id} context: {claim.context[:200]}")
+            for note in conflicts:
+                self.rec.event("extract_claims", f"prompt vs post: {note}")
+        update: dict[str, Any] = {"sub_claims": sub_claims}
         if extracted.insufficient_reasons:
             update["insufficient_reasons"] = extracted.insufficient_reasons
         label = state.checked_post or ""
@@ -407,6 +426,8 @@ class Nodes:
         if extracted.dropped_by_cap:
             quoted = "; ".join(f'"{quote}"' for quote in extracted.dropped_by_cap)
             label = f"{label} Not checked, past the cap of 8: {quoted}.".strip()
+        if conflicts:
+            label = f"{label} {' '.join(conflicts)}".strip()
         if label != (state.checked_post or ""):
             update["checked_post"] = label
         if extracted.status is not None:
@@ -697,6 +718,7 @@ class Nodes:
             overall_verdict=overall, sub_claim_results=results,
             evidence_gaps=gaps, as_of_date=state.request.cutoff_date,
             cutoff_was_defaulted=state.request.cutoff_was_defaulted, boundary_disclaimer=BOUNDARY_DISCLAIMER,
+            cutoff_source=state.request.cutoff_source, requested_cutoff=state.request.requested_cutoff,
         )
         return {"final": final}
 
@@ -712,8 +734,7 @@ class Nodes:
                  f"{n_sup} supporting and {n_chal} challenging evidence items."]
         if audit.numeric_check and audit.numeric_check.computed is not None:
             nc = audit.numeric_check
-            parts.append(f"Numeric check: {nc.metric_name or 'value'} computed = {nc.computed} "
-                         f"({'matches' if nc.matches else 'does not match'} the sub-claim).")
+            parts.append(f"Numeric check: {fmt_numeric_check(nc)}.")
         if audit.citation_check:
             parts.append(f"Citation check on {audit.citation_check.evidence_id}: "
                          f"{'entails' if audit.citation_check.entails else 'does not entail'} the sub-claim.")
@@ -749,6 +770,8 @@ class Nodes:
             summary=_with_note(state, explain.stop_summary(status, state.refusal_reason, question)),
             as_of_date=state.request.cutoff_date if state.request else None,
             cutoff_was_defaulted=state.request.cutoff_was_defaulted if state.request else False,
+            cutoff_source=state.request.cutoff_source if state.request else "user",
+            requested_cutoff=state.request.requested_cutoff if state.request else None,
             boundary_disclaimer=BOUNDARY_DISCLAIMER,
         )
         self.rec.event("finalize", f"status={final.status.value} reason={final.refusal_reason or '-'}")

@@ -213,3 +213,19 @@ def test_stored_record_round_trip_still_skips_the_decomposer(tmp_path):
     out = _extract(REVENUE.text, stored, None)
     assert out.sub_claims[0].sub_claim_type is SubClaimType.HISTORICAL_GROWTH
     assert out.miss is None
+
+
+def test_direction_agreement_beats_word_overlap():
+    """'Meta's free cash flow went down': the line that says FCF is going down wins over a line that repeats
+    'free cash flow' but is about margins, even when only the second one is in the claims catalog."""
+    from finsight.agents.claim_extraction.select import choose_line
+    from finsight.contracts.schemas import SubClaim, SubClaimType
+
+    wanted = "So, free cash flow is going down because Meta doesn't have enough money to pay for this CapEx."
+    other = ("So, CapEx going up a little bit, revenue staying the same, equals a stock that's going to have even "
+             "lower margins, more of a drag on the free cash flow, even more negative free cash flow.")
+    post = {"video_id": "v1", "upload_date": "2026-04-30", "transcript": f"Meta is spending a lot. {other} {wanted}"}
+    stored = [(SubClaim(sub_claim_id="t272", text=other, sub_claim_type=SubClaimType.HISTORICAL_GROWTH,
+                        company_ticker="META"), "v1")]
+    choice = choose_line("Meta's free cash flow went down last quarter.", stored, [post], ticker="META")
+    assert choice.quotes and choice.quotes[0] == wanted

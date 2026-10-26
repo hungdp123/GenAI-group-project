@@ -75,8 +75,11 @@ How to read the claim:
 - A phrase about the whole company with no measure ("financially strong", "a very strong financial position"):
   report operating_margin, free_cash_flow and current_ratio, and skip leverage.
 
-Which period (in this order): the period in the user's prompt (if given), then the one in the claim, then: a margin
-or ratio stated in the present with a number ("is 34%") = latest_quarter; otherwise none_named.
+Which period (in this order): the period in the user's prompt (only if a user_prompt block is given), then the one in
+the claim, then one named in the preceding_sentences block (the speaker's own words just before the claim, e.g.
+"Nvidia just reported its second quarter"), then: a margin or ratio stated in the present with a number ("is 34%")
+= latest_quarter; otherwise none_named. Never take the period from the user_period_hint block: choose none_named and
+the agent fills the gap itself (a stated amount, then that hint, then the latest fiscal year).
 Period objects:
   {"type": "none_named"}                          nothing named: latest fiscal year, 12 months shown as context
   {"type": "latest_quarter"}                      "last quarter", "this quarter", "recently", "quarterly"
@@ -202,6 +205,10 @@ def build_prompt(context: dict, plan: Plan) -> str:
         parts.append(data_block("auditor_feedback", context["feedback"]))
     if context.get("period_field"):
         parts.append(data_block("extracted_period", str(context["period_field"])))
+    if context.get("preceding"):
+        parts.append(data_block("preceding_sentences", context["preceding"]))
+    if context.get("user_text"):
+        parts.append(data_block("user_period_hint", context["user_text"]))
     parts.append(f"Company: {context['company']} ({context['ticker']}). Cut-off: {context['cutoff']}.\n"
                  f"Scope of this sub-claim: {context.get('scope') or 'every measure the line states'}"
                  + ("\nThe extracted_period block is how claim extraction read the period; use it only if the "

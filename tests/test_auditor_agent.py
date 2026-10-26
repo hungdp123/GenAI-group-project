@@ -426,3 +426,42 @@ def test_level_direction_uses_comparison_value_when_the_text_has_no_prior_figure
     assert audit(sc, [down]).verdict is Verdict.SUPPORTED
     up = item.model_copy(update={"comparison_value": 0.5e9, "comparison_period": "quarter ended 2025-06-30"})
     assert audit(sc, [up]).verdict is Verdict.CONTRADICTED
+
+
+def test_wrong_stated_amount_marks_the_item_challenging():
+    """A level claim with a wrong dollar amount: the item that disproves it counts as challenging, not supporting."""
+    fcf = ("free_cash_flow", 9.461053e9,
+           "Free cash flow was $9,461m in the year ended 2025-12-31 vs $6,922m in the year ended 2024-12-31.",
+           "year ended 2025-12-31", date(2026, 1, 23))
+    wrong = audit(*_fin("META", "Meta", "Meta generates $12 billion in free cash flow", *fcf,
+                        stance=Stance.NEUTRAL, kind=PCF))
+    assert wrong.passed and wrong.verdict is Verdict.CONTRADICTED
+    assert wrong.evidence_stances["XBRL-META-free_cash_flow"] is Stance.CHALLENGING
+    assert wrong.numeric_check.stated == 12e9 and not wrong.numeric_check.matches
+    right = audit(*_fin("META", "Meta", "Meta generates $9.5 billion in free cash flow", *fcf,
+                        stance=Stance.NEUTRAL, kind=PCF))
+    assert right.evidence_stances["XBRL-META-free_cash_flow"] is Stance.SUPPORTING
+
+
+def test_a_line_naming_two_margins_accepts_both():
+    """'operating margins and net income margins': both metrics are on topic, and both declines support it."""
+    sc, [op] = _fin("META", "Meta", "You can see the decline in operating margins and net income margins.",
+                    "operating_margin", 0.111,
+                    "Operating margin was 11.1% in the year ended 2025-12-31 vs 12.7% in the year ended 2024-12-31.",
+                    "year ended 2025-12-31", date(2026, 2, 20), stance=Stance.NEUTRAL, kind=PCF)
+    net = op.model_copy(update={
+        "evidence_id": "net", "metric_name": "net_margin", "computed_value": 0.069,
+        "content": "Net margin was 6.9% in the year ended 2025-12-31 vs 9.2% in the year ended 2024-12-31."})
+    r = audit(sc, [op, net])
+    assert r.passed and r.verdict is Verdict.SUPPORTED
+    assert set(r.evidence_stances.values()) == {Stance.SUPPORTING}
+
+
+def test_free_cash_flow_is_on_topic_when_margins_are_named_first():
+    """'even lower margins, more of a drag on the free cash flow': every measure named is on topic."""
+    sc, [item] = _fin("META", "Meta", "CapEx going up, revenue staying the same, equals even lower margins, more "
+                      "of a drag on the free cash flow.", "free_cash_flow", 13.229e9,
+                      "Free cash flow was $13,229m in the quarter ended 2026-03-31 vs $11,085m in the quarter "
+                      "ended 2025-03-31.", "quarter ended 2026-03-31", date(2026, 4, 29), stance=Stance.NEUTRAL)
+    r = audit(sc, [item])
+    assert r.passed and not any("does not measure" in x for x in r.failure_reasons)

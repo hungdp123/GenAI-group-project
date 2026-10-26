@@ -232,6 +232,7 @@ class Point:
     growth_pct: bool = False           # the words state a growth percentage (adds a growth item for levels)
     streak: tuple | None = None
     history: str | None = None         # "first time since 2004": longer than the window, noted only
+    period_source: str = ""            # where `period` came from (shown with the evidence)
 
 
 @dataclass
@@ -373,8 +374,18 @@ def _named_self(text: str, ticker: str) -> bool:
     return any(kind == "self" for _, kind in _company_marks(text, ticker))
 
 
+def context_period(context: str | None) -> tuple | None:
+    """The period named in the sentences before the line, nearest sentence first ("Nvidia just reported its
+    second quarter. ... Revenue was $96.2 billion")."""
+    for sentence in reversed(re.split(r"(?<=[.!?])\s+", context or "")):
+        found = named_period(sentence)
+        if found is not None:
+            return found
+    return None
+
+
 def read_claim(line: str, ticker: str, prompt: str | None = None, period_field: str | None = None,
-               family: str | None = None) -> Reading:
+               family: str | None = None, context: str | None = None) -> Reading:
     """The points to report for one post line. prompt: what the user typed; family: Claim extraction's
     `measure` for an expanded row ("profitability", ...), which keeps only that family."""
     prompt = _clean_prompt(prompt)
@@ -405,13 +416,23 @@ def read_claim(line: str, ticker: str, prompt: str | None = None, period_field: 
 
     line_period = named_period(line)
     field_period = named_period(period_field or "", is_field=True)
+    near_period = context_period(context)
     seen = set()
     for p in points:
-        period = prompt_period or p.period or line_period or field_period
+        # The speaker's own words first (the line, then the sentences before it). Gaps left after this are
+        # filled by the agent: a stated amount, then the user's prompt, then the latest fiscal year.
+        for period, source in ((prompt_period, "the user's prompt"), (p.period, "the line"),
+                               (line_period, "the line"), (field_period, "claim extraction's period field"),
+                               (near_period, "the sentences before the line")):
+            if period is not None:
+                break
+        else:
+            period, source = None, ""
         if period is None and p.measure in LEVEL_MEASURES and p.measure != "free_cash_flow" \
                 and (_has(_PRESENT, p.words) or _has(_PRESENT, prompt)):
             period = ("latest", "quarter")              # "operating margins are 34%": the latest reported quarter
-        p.period = period
+            source = "a margin or ratio stated in the present tense"
+        p.period, p.period_source = period, source
         key = (p.measure, period)
         if key in seen:
             continue

@@ -66,7 +66,7 @@ from finsight.llm.usage import record_tool_call
 
 from . import planner
 from .claim_reader import (GROWTH_MEASURES, LEVEL_MEASURES, LEVERAGE, SEGMENT_NOTE, Point, Reading,
-                           minimum_percent, read_claim)
+                           minimum_percent, named_period, read_claim)
 from .concepts import CONCEPTS, TAG_TO_CONCEPT, kind, unit
 from .schema import FinancialEvidence
 from .store import DEFAULT_DATA_DIR, FactStore, _iso, _read_csv
@@ -77,6 +77,20 @@ try:   # the report shows the spoken company name ("Alphabet"), from Claim extra
     from finsight.agents.claim_extraction.thesaurus import display_name as _thesaurus_name
 except ImportError:   # pragma: no cover - thesaurus not in this checkout
     _thesaurus_name = None
+
+_AMOUNT = re.compile(r"\$?\s*(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(billion|bn|million|mn)\b", re.I)
+_SCALE = {"billion": 1e9, "bn": 1e9, "million": 1e6, "mn": 1e6}
+
+
+def _stated_amounts(text: str) -> list[tuple[float, float]]:
+    """Dollar amounts with a scale word, as (dollars, half a unit of the last stated digit)."""
+    out = []
+    for m in _AMOUNT.finditer(text or ""):
+        raw, scale = m.group(1).replace(",", ""), _SCALE[m.group(2).lower()]
+        decimals = len(raw.split(".")[1]) if "." in raw else 0
+        out.append((float(raw) * scale, 0.5 * 10 ** -decimals * scale))
+    return out
+
 
 # DECISION: the window is the latest 10-K plus the latest four quarters filed by the cut-off
 # (knowledge_layer.md section 4). A claimed period outside it gets no evidence.
@@ -238,6 +252,12 @@ def resolve_period(store: FactStore, ticker: str, spec: tuple | None, cutoff: da
     best = min(known, key=lambda e: abs((e - target).days), default=None)
     if best is not None and abs((best - target).days) <= 10:
         return PeriodRef(span, [best.isoformat()], label, named=True)
+    if what == "cal_q" and spec[1] is None and fy_ends:
+        # "Its second quarter" with no year: a company reporting results means its own fiscal quarter
+        # (Nvidia's Q2 ends in late July, not on 30 June). Same answer for calendar-year companies.
+        fiscal = resolve_period(store, ticker, ("fiscal_q", None, spec[2]), cutoff)
+        if fiscal.ends:
+            return fiscal
     if cutoff and target > ref:
         why = f"the {label} had not ended by the cut-off {ref}"
     elif not known or target > known[-1]:
@@ -411,7 +431,8 @@ class XbrlFinancialAgent:
             return self._nothing(sub_claim, f"{ticker} is not in the SEC data.")
         prompt = user_prompt(sub_claim)                         # optional: only when `text` is not one claim
         allowed = scope(sub_claim)
-        reading = self._scoped(read_claim(text, ticker, prompt, period_field(sub_claim)), allowed)
+        reading = self._scoped(read_claim(text, ticker, prompt, period_field(sub_claim),
+                                          context=getattr(sub_claim, "context", None)), allowed)
         if os.getenv("FINSIGHT_FINANCIAL_PLANNER", "llm").lower() != "rules":
             try:
                 items, notes, plan = self._plan(sub_claim, cutoff_date, feedback, prompt, reading, allowed)
@@ -461,7 +482,8 @@ class XbrlFinancialAgent:
         context = {"line": sub_claim.text, "prompt": prompt, "feedback": feedback, "ticker": ticker,
                    "company": company_display_name(ticker), "cutoff": cutoff or "latest data",
                    "scope": scope_text(sub_claim, allowed), "parent_span": getattr(sub_claim, "parent_span", None),
-                   "period_field": period_field(sub_claim)}
+                   "period_field": period_field(sub_claim), "preceding": getattr(sub_claim, "context", None),
+                   "user_text": getattr(sub_claim, "user_text", None)}
         items, notes = [], []
         segment_only = any(SEGMENT_NOTE in n for n in reading.notes)
         rule_measures = {p.measure for p in reading.points}
@@ -528,14 +550,61 @@ class XbrlFinancialAgent:
         label = _LABELS.get(point.measure, point.measure)
         if point.measure == LEVERAGE:
             return [], [f"{label}: {LEVERAGE_REASON}"]
-        period = self._resolve(sub_claim, cutoff, point.period)
+        spec, source, note = self._choose_period(sub_claim, cutoff, point)
+        period = self._resolve(sub_claim, cutoff, spec)
         if period.reason:
             return [], [f"{label}: {period.reason}"]
-        if point.measure in GROWTH_MEASURES:
-            return self._growth(sub_claim, cutoff, point, period)
-        return self._levels(sub_claim, cutoff, point, period)
+        items, notes = (self._growth if point.measure in GROWTH_MEASURES else self._levels)(
+            sub_claim, cutoff, point, period)
+        items = [item.model_copy(update={"period_source": source}) for item in items]
+        return items, ([f"{label}: {note}"] if note else []) + notes
+
+    def _choose_period(self, sub_claim: SubClaim, cutoff: date, point: Point) -> tuple[tuple | None, str, str | None]:
+        """(period spec, where it came from, a note when a clue filled a gap).
+
+        Order: the speaker's words (the line, then the sentences before it; set by read_claim or the planner),
+        then a stated amount that fits only the quarter, then the period in the user's prompt, then the rule book
+        default (latest fiscal year). The user's prompt only fills a gap: it never overrides the speaker."""
+        if point.period is not None:
+            return point.period, point.period_source or "the line (read by the planner)", None
+        spec, note = self._period_from_amount(sub_claim, cutoff, point)
+        if spec is not None:
+            return spec, "the stated amount", note
+        hinted = named_period(getattr(sub_claim, "user_text", None) or "")
+        if hinted is not None:
+            return hinted, "the user's prompt", ("the post names no period, so the period in the user's prompt "
+                                                 "is used")
+        return None, "the default (latest fiscal year; no period named)", None
 
     # -------------------------------------------------------------- the period to report
+    def _period_from_amount(self, sub_claim: SubClaim, cutoff: date, point: Point) -> tuple[tuple | None, str | None]:
+        """No period named, but a dollar amount stated: if it is the latest quarter's figure and not the latest
+        fiscal year's, the speaker meant the quarter ("revenue of $96.2 billion, up 106%"). Otherwise keep the rule
+        book default (latest fiscal year)."""
+        amounts = _stated_amounts(point.words) or _stated_amounts(sub_claim.text)
+        if len(amounts) != 1:
+            return None, None
+        stated, half_unit = amounts[0]
+        ticker = sub_claim.company_ticker
+
+        def latest(span: str) -> float | None:
+            if point.measure in GROWTH_MEASURES:
+                ev = get_financial_fact(self.store, ticker, point.measure, span, "latest", cutoff)
+            elif point.measure == "free_cash_flow":
+                ev = compute_metric(self.store, ticker, "free_cash_flow", span, "latest", cutoff)
+            else:
+                return None
+            return ev.value if ev.value is not None else None
+
+        def close(value: float | None) -> bool:
+            return value is not None and abs(value - stated) <= max(half_unit, 0.02 * abs(stated))
+
+        quarter, year = latest("quarter"), latest("annual")
+        if close(quarter) and not close(year):
+            return ("latest", "quarter"), (f"no period named; the stated ${stated / 1e9:,.1f}B is the latest "
+                                           "quarter's figure, not the fiscal year's, so the quarter is used")
+        return None, None
+
     def _resolve(self, sub_claim: SubClaim, cutoff: date, spec: tuple | None) -> PeriodRef:
         """The period(s) to report: the rule book's period rules, the window, and the
         "latest quarter announced but not filed yet" check."""
