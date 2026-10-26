@@ -16,6 +16,9 @@ openai_api_key: "YOUR_OPENAI_API_KEY"
 # $env:FINSIGHT_IMPL_NARRATIVE = "finsight.agents.narrative.stub:NarrativeAgent"
 # $env:FINSIGHT_IMPL_RETRIEVER = "finsight.agents.narrative.retriever_stub:NarrativeRetriever"
 # $env:FINSIGHT_NARRATIVE_BACKEND = "bm25"
+# End-to-end registry defaults: C1 full_v1 chunk indexes + BM25.
+# FINSIGHT_NARRATIVE_CORPUS_ROOT and FINSIGHT_NARRATIVE_BACKEND override them.
+# Standalone RAG retains its separate defaults; see Workflow C.
 # $env:FINSIGHT_NARRATIVE_ANALYSIS = "evidence"
 # $env:FINSIGHT_NARRATIVE_ANALYSIS_MAX_TOKENS = "1500"
 # $env:FINSIGHT_NARRATIVE_STANCE_METHOD = "none"

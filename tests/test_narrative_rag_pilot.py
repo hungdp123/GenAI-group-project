@@ -252,13 +252,43 @@ def test_runner_captures_fresh_pipeline_without_sending_gold(tmp_path, monkeypat
     failed_report = json.loads((options.output_dir / "report.json").read_text(encoding="utf-8"))
     assert failed_report["status"] == "STOPPED_PROVIDER_ERROR"
     assert not (options.output_dir / "cases/AAPL-SUP-02/result.json").exists()
+
+    # Explicit retry archives the failed attempt, then processes only failed/missing work.
+    failed_folder = options.output_dir / "cases/AAPL-SUP-01"
+    failed_bytes = (failed_folder / "result.json").read_bytes()
+    options.retry_generation_errors = True
+    monkeypatch.setattr(verdict_baseline, "_complete_ollama", fake_local)
+    recovered = run(options)
+    assert recovered["status"] == "COMPLETE" and len(calls) == 5
+    archives = list(failed_folder.glob("attempts/*/result.json"))
+    assert len(archives) == 1 and archives[0].read_bytes() == failed_bytes
+    second_bytes = (options.output_dir / "cases/AAPL-SUP-02/result.json").read_bytes()
+    run(options)
+    assert len(calls) == 5  # Successful cases are never regenerated, even with retry enabled.
+    assert (options.output_dir / "cases/AAPL-SUP-02/result.json").read_bytes() == second_bytes
+
+    # A budget failure must stop at the first case, rather than marking the remaining batch failed.
+    def exhausted_budget(**kwargs):
+        calls.append(kwargs)
+        raise RuntimeError("SpendLimitExceeded: Spent $2.02 (limit $2.00)")
+
+    options.output_dir = tmp_path / "budget-failure"
+    monkeypatch.setattr(verdict_baseline, "_complete_ollama", exhausted_budget)
+    with pytest.raises(ValueError, match="Spending limit reached"):
+        run(options)
+    assert len(calls) == 6
+    budget_report = json.loads((options.output_dir / "report.json").read_text(encoding="utf-8"))
+    assert budget_report["status"] == "STOPPED_SPEND_LIMIT" and budget_report["case_count"] == 1
+    assert not (options.output_dir / "cases/AAPL-SUP-02/result.json").exists()
+
     # Retrieval-only must never invoke a local or online completion, even with no real provider selected.
     options.output_dir = tmp_path / "retrieval-only"
+    options.retry_generation_errors = False
     options.retrieval_only = True
     options.ollama_model = None
     monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "mock")
     retrieval_report = run(options)
-    assert len(calls) == 3
+    assert len(calls) == 6
     assert retrieval_report["status"] == "COMPLETE" and retrieval_report["retrieval_only"]
     assert retrieval_report["input_tokens"] == retrieval_report["output_tokens"] == 0
     assert not list(options.output_dir.glob("cases/*/llm_input.json"))

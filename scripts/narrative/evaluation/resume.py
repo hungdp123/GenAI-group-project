@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+from uuid import uuid4
 
 
 # Audited predecessors: this update changes capture/resume bookkeeping, not RAG behavior.
@@ -28,6 +29,56 @@ DATASET_PATH_MIGRATIONS = {
     ("run_rag_pilot.py", "72dc3d5ce0cdb99d35bb92db97687c81d8046dfc1919de08ec632d09e20d519e",
      "4792cbf0cb876a941c5a478d3bde801262fbeadd92770a6c880b531bf8bb85de"),
 }
+
+# Exact runner-only recovery changes: explicit failed-attempt archiving/retry and
+# stopping at the spend guard. Retrieval, prompts and generation settings are unchanged.
+RECOVERY_CODE_MIGRATIONS = {
+    ("run_rag_comparison.py", "3f4436d2d8d21d4f9e8d2e4b4c6704e86d6943130a4d44809eda6c6385c08b0b",
+     "f5897f0eb6cbd60efa264f0b7996d99f8993e475047c22c1797ba83dbf11e021"),
+    ("run_rag_pilot.py", "4792cbf0cb876a941c5a478d3bde801262fbeadd92770a6c880b531bf8bb85de",
+     "34d91cfa254c69000e4ae2be188a2ca94c83d4881ac347cfb0c382063000f815"),
+}
+
+# CLI defaults only. Effective model/provider settings must still match the run;
+# historical API generation now requires --shared-llm explicitly.
+LOCAL_DEFAULT_CODE_MIGRATIONS = {
+    ("run_rag_comparison.py", "f5897f0eb6cbd60efa264f0b7996d99f8993e475047c22c1797ba83dbf11e021",
+     "dd91b756b076d57a9b5ad820abc205cf6e5e5746e8f10b111e9901949445fe9a"),
+}
+
+# The source-span validator fix admits blank-only source segments omitted by the
+# existing generation protocol. Previously accepted samples and judge prompts are unchanged.
+EVALUATOR_INPUT_MIGRATIONS = {
+    ("1c9676ac356c40e0c169f5de257aee954a56571ae7b35cdd161abcea677c19b0",
+     "ef6e65e087ba0df9820ca5d6738eda7dde096681bc0349762f286cef46a7b3cc"),
+    # Local-default CLI selection only; explicit shared/local settings are unchanged.
+    ("ef6e65e087ba0df9820ca5d6738eda7dde096681bc0349762f286cef46a7b3cc",
+     "b1055cbc5505a60219d6ff397f1aabc739e3c557eb45c3af3aebb7be5acf8229"),
+}
+
+
+def evaluator_compatible(previous: dict, current: dict) -> bool:
+    if previous == current:
+        return True
+    reachable = {previous.get("code_sha256")}
+    for _ in EVALUATOR_INPUT_MIGRATIONS:
+        reachable.update(new for old, new in EVALUATOR_INPUT_MIGRATIONS if old in reachable)
+    return (
+        current.get("code_sha256") in reachable
+        and {k: v for k, v in previous.items() if k != "code_sha256"}
+        == {k: v for k, v in current.items() if k != "code_sha256"}
+    )
+
+
+def _migrated(name: str, previous: str, current: str) -> bool:
+    reachable = {previous}
+    migrations = (OUTPUT_PATH_MIGRATIONS | DATASET_PATH_MIGRATIONS | RECOVERY_CODE_MIGRATIONS
+                  | LOCAL_DEFAULT_CODE_MIGRATIONS)
+    for _ in migrations:
+        reachable.update(new for module, old, new in
+                         migrations
+                         if module == name and old in reachable)
+    return current in reachable
 
 
 def _dataset_path(value: str) -> str:
@@ -65,8 +116,7 @@ def matrix_compatible(previous: dict, current: dict) -> bool:
         and _prefix(previous["selected_case_ids"], current["selected_case_ids"])
         and previous["case_count_per_configuration"] == len(previous["selected_case_ids"])
         and (previous["runner_sha256"] in {current["runner_sha256"], PREVIOUS_MATRIX_SHA}
-             or ("run_rag_comparison.py", previous["runner_sha256"], current["runner_sha256"])
-             in DATASET_PATH_MIGRATIONS)
+             or _migrated("run_rag_comparison.py", previous["runner_sha256"], current["runner_sha256"]))
     )
 
 
@@ -85,9 +135,26 @@ def capture_compatible(previous: dict, current: dict, saved_cases: list, selecte
         return False
     return all(old_code[k] == new_code[k] or (
         Path(k).name == "run_rag_pilot.py" and old_code[k] == PREVIOUS_CAPTURE_SHA
-    ) or (Path(k).name, old_code[k], new_code[k]) in (
-        OUTPUT_PATH_MIGRATIONS | DATASET_PATH_MIGRATIONS
-    ) for k in old_code)
+    ) or _migrated(Path(k).name, old_code[k], new_code[k]) for k in old_code)
+
+
+def archive_generation_error(folder: Path) -> Path:
+    """Copy failed attempt artifacts before clearing only the active attempt files."""
+    result = json.loads((folder / "result.json").read_text(encoding="utf-8"))
+    if result.get("status") != "GENERATION_ERROR":
+        raise ValueError("Only an explicit GENERATION_ERROR can be retried")
+    destination = folder / "attempts" / uuid4().hex
+    destination.mkdir(parents=True)
+    names = ("result.json", "retrieval.json", "llm_input.json", "llm_response.json")
+    for name in (*names, "preflight.json"):
+        source = folder / name
+        if source.is_file():
+            shutil.copy2(source, destination / name)
+    # All copies succeeded first. An interrupted clear retains the archived originals;
+    # the runner refuses orphaned LLM captures rather than issuing an unnoticed duplicate.
+    for name in names:
+        (folder / name).unlink(missing_ok=True)
+    return destination
 
 
 def archive_state(output: Path, previous: dict) -> None:

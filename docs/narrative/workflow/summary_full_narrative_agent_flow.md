@@ -107,7 +107,7 @@ flowchart LR
     RAG --> CheckRAG["Step 5: validate outputs and assess generated evidence quality"]
 ```
 
-Compare retrieval first using all 126 claims and C1-C4 x BM25/dense/hybrid/R4, without LLM generation. Validate and score the saved rankings, review the results, then run the Workflow C RAG pipeline for selected configurations and evaluate those outputs. Technical/citation checks and usage are available; semantic summary review is separate and RAGAS is not implemented.
+Compare retrieval first using all 126 claims and C1-C4 x BM25/dense/hybrid/R4, without LLM generation. Validate and score the saved rankings, review the results, then run the Workflow C RAG pipeline for selected configurations. Use the offline scorer for technical checks and the separate `evaluate_ragas` script for evidence/summary quality. Both evaluation CLIs now default to local Ollama (`qwen3-vl:4b-instruct`); API use requires explicit opt-in. Workflow D includes one-claim and full-batch commands. No model runs were started for this update.
 
 [Workflow D details: inputs, five steps, commands and current results](workflow_d_evaluation.md).
 
@@ -262,7 +262,45 @@ The final reports are `comparison.md`, `comparison.json` and the comparison/per-
 | Check | Current status / next step |
 |---|---|
 | Retrieval provenance | Completed configurations pass checks against their selected indexes and source mappings; see Section 6.1 |
-| LLM facts and cited summaries | **Current 126-claim batch pending**. Choose configurations after retrieval comparison, then follow [Workflow D, Step 4](workflow_d_evaluation.md#step-4-run-rag-for-selected-configurations) |
+| LLM facts and cited summaries | Saved C1/BM25 and C4/BM25 batches cover all 126 claims, including recorded generation failures. See [Workflow D: selected-run performance](workflow_d_evaluation.md#selected-cases-retrieval-and-ragas-performance) |
 | Strict citation validation | Python checks selected IDs, source spans/quotes and output structure during RAG; a technical pass does not establish summary accuracy |
-| Summary evaluation | Review facts and summaries against supplied contexts and expected evidence; RAGAS is not implemented in the current comparison runner |
+| Summary evaluation | Separate `scripts/narrative/evaluation/evaluate_ragas.py` scores saved facts, summaries, selected evidence and citations, using local Ollama by default. See [Workflow D: full local RAGAS flow](workflow_d_evaluation.md#full-local-flow-generate-and-evaluate-with-ragas). No model evaluation was run for this update. |
 | Orchestrator connection | Separate interface/routing checks in [Workflow E](workflow_e_orchestrator_integration.md); the Auditor determines the claim verdict |
+
+### 6.3 Run RAG generation and RAGAS evaluation locally
+
+Run from the repository root in PowerShell, with Ollama running and `qwen3-vl:4b-instruct` installed. Inputs are the current `cases.csv`, parsed documents and matching C4 `full_v1` indexes/vectors. These commands use local Ollama for generation and judging; no OpenAI key is required.
+
+**1. Prepare dependencies and output folders.**
+
+```powershell
+python -m pip install -e ".[retrieval,ragas]"
+$ragRun = 'data/narrative/evaluation/test_claims_v1_result/rag_C4_r4_ollama_v1'
+$judgeRun = 'data/narrative/evaluation/test_claims_v1_result/ragas_C4_r4_ollama_v1'
+```
+
+**2. Generate evidence, facts and cited summaries for all 126 claims using C4/R4.**
+
+```powershell
+python -u -m scripts.narrative.evaluation.run_rag_comparison --all-cases --strategies C4 --backends r4 --build-version full_v1 --threads 2 --max-tokens 3000 --rerank-overflow truncate --output-dir $ragRun --resume
+```
+
+**3. Score saved retrieval results and technical validation, then run RAGAS.**
+
+```powershell
+python -u -m scripts.narrative.evaluation.evaluate_rag_comparison --run-dir $ragRun
+python -u -m scripts.narrative.evaluation.evaluate_ragas --run-dir $ragRun --all-cases --ollama-model qwen3-vl:4b-instruct --ollama-context 20000 --max-tokens 3000 --output-dir $judgeRun --resume
+```
+
+RAGAS reads the saved generation outputs; it does not repeat retrieval or generation. To evaluate an existing RAG run, set `$ragRun` to that folder and run Step 3.
+
+**4. Read the reports.**
+
+```powershell
+Get-Content -LiteralPath "$ragRun/comparison.md"
+Get-Content -LiteralPath "$judgeRun/ragas_report.md"
+```
+
+For a one-claim preview, replace `--all-cases` with `--limit 1` in both generation and judging commands. Use `--resume` only with the same inputs and settings.
+
+See [Workflow D for detailed performance](workflow_d_evaluation.md#selected-cases-retrieval-and-ragas-performance) and the [full local evaluation instructions](workflow_d_evaluation.md#full-local-flow-generate-and-evaluate-with-ragas). The existing C1/BM25 and C4/BM25 RAGAS results used OpenAI models; they are separate from this local C4/R4 run.

@@ -29,6 +29,11 @@ retrieval = [
     "qdrant-client>=1.12",
     "sentence-transformers>=3.0",
 ]
+ragas = [
+    "ragas==0.4.3",
+    # RAGAS 0.4.3 imports the legacy Vertex module removed in community 0.4.
+    "langchain-community==0.3.31",
+]
 
 [project.scripts]
 finsight = "finsight.cli:main"

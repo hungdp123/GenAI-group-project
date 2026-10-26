@@ -19,7 +19,7 @@ from unittest.mock import patch
 from scripts.narrative.evaluation.evaluate_rag_pilot import (
     case_identity, load_cases, load_reference, read_json, write_json,
 )
-from scripts.narrative.evaluation.resume import archive_state, capture_compatible
+from scripts.narrative.evaluation.resume import archive_generation_error, archive_state, capture_compatible
 
 
 def sha(path: Path) -> str:
@@ -40,6 +40,9 @@ def run(args: argparse.Namespace) -> dict:
     resume = getattr(args, "resume", False)
     prepare_only = getattr(args, "prepare_only", False)
     retrieval_only = getattr(args, "retrieval_only", False)
+    retry_errors = getattr(args, "retry_generation_errors", False)
+    if retry_errors and (not resume or retrieval_only):
+        raise ValueError("--retry-generation-errors requires --resume and a full RAG run")
     if output.exists() and any(output.iterdir()) and not resume:
         raise ValueError("Output directory is not empty; use a new run name")
     cases = load_cases(args.cases)
@@ -213,6 +216,10 @@ def run(args: argparse.Namespace) -> dict:
             captured.clear()
             started = time.perf_counter()
             reused = (current / "result.json").exists()
+            if reused and retry_errors and read_json(current / "result.json")["status"] == "GENERATION_ERROR":
+                archived = archive_generation_error(current)
+                print(f"Retrying {case['id']}; previous attempt preserved in {archived}", flush=True)
+                reused = False
             print(f"{'Reusing saved' if reused else 'Running'} {case['id']} ({args.backend})", flush=True)
             if reused:
                 if not resume or not (current / "retrieval.json").exists():
@@ -246,13 +253,16 @@ def run(args: argparse.Namespace) -> dict:
                       "ragas": "NOT_RUN"}
             write_json(output / "report.json", report)
             print(f"{case['id']}: {result['status']}", flush=True)
-            fatal = ("insufficient_quota", "credit_balance_exhausted", "MissingAPIKey",
+            fatal = ("SpendLimitExceeded", "insufficient_quota", "credit_balance_exhausted", "MissingAPIKey",
                      "AuthenticationError", "Could not reach Ollama", "APIConnectionError")
             if not reused and result["status"] == "GENERATION_ERROR" and any(
                     marker in result.get("generation_error", "") for marker in fatal):
-                report["status"] = "STOPPED_PROVIDER_ERROR"
+                budget_exhausted = "SpendLimitExceeded" in result.get("generation_error", "")
+                report["status"] = "STOPPED_SPEND_LIMIT" if budget_exhausted else "STOPPED_PROVIDER_ERROR"
                 write_json(output / "report.json", report)
                 raise ValueError(
+                    "Spending limit reached; saved the attempt and stopped. Resume with --retry-generation-errors."
+                    if budget_exhausted else
                     "Model provider is unavailable or rejected access/quota; saved the attempt and stopped"
                 )
     report["status"] = "COMPLETE" if all(r["status"] == "OK" for r in records) else "COMPLETE_WITH_ERRORS"
