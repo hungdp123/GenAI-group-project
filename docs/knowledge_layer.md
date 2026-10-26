@@ -14,7 +14,7 @@ The steps always run in this order:
 2. Initial screening reads that prompt only. It refuses advice, asks which influencer or company is missing, or stops an out-of-scope prompt. It does not call an agent.
 3. A prompt that passes goes to collect posts. That step reads a post already stored for that influencer and company. It does not start the orchestrator.
 4. If several posts state the same claim and the prompt names no video, show both lines. A named video uses that video. If the prompt asks whether that influencer has been consistent about that company, or asks for the accuracy of that influencer's claims about that company over time, do not ask which post. Check every stored post in the window. Each post keeps its own publication date as the cut-off. A date typed in the prompt does not replace a post date.
-5. Claim extraction reads that one post. It keeps the sentences about the named company, keeps each quote, and gives each claim one type. It writes no label. If the prompt stated a claim, a stored row is checked only when it shares the measure and any stated figure. "Grew 24%" matches a row that contains 24%, not a row that contains 17%. The match is semantic. If no stored row is that close, the transcripts of that influencer's videos about the company are searched. One close spoken sentence is shown and the user is asked to confirm it. Several are shown and the user is asked which one. Nothing close asks the user to restate the line or name the video. A confirmed sentence is then checked. If the prompt stated no claim, the checkable claims about that company are checked.
+5. Claim extraction reads that one post. Rules decide how a sentence splits and which company it is about. A model is used only when a figure's own sentence names neither a company nor a measure, and then only to fill those two labels. The model does not split a sentence and does not choose the route. Each kept quote gets one type. Extraction writes no label. If the prompt stated a claim, a stored row is checked only when it shares the measure and any stated figure. "Grew 24%" matches a row that contains 24%, not a row that contains 17%. The match is semantic. If no stored row is that close, the transcripts of that influencer's videos about the company are searched. One close spoken sentence is shown and the user is asked to confirm it. Several are shown and the user is asked which one. Nothing close asks the user to restate the line or name the video. A confirmed sentence is then checked. If the prompt stated no claim, the checkable claims about that company are checked.
 6. The orchestrator starts here. The YAML table chooses an agent for each claim. The choice is fixed by the claim's type. No model chooses or changes it. The financial agent and the narrative agent gather evidence. The auditor checks. One retry is allowed. The output advice screen rewrites any buy or sell wording and still releases the report. The report names the influencer, the post title, the post id, and the post date.
 
 Three rules apply everywhere:
@@ -140,6 +140,17 @@ A garbled number or a garbled ticker is Insufficient Evidence. It is not Contrad
 
 A figure that appears only on a chart, a slide, or an image is not in the stored text. The report says so. This project does not read the screen.
 
+**Rules first, then a model for wider context.** The split and the company are decided by rules, in the order below. The first matching rule finishes the sentence. A model does not invent a claim, does not split a sentence, and does not choose the agent. A model is called only for a bare figure: a number whose own sentence names neither a company nor a measure. It is shown the sentences around that line, eight before it and one after it, and it writes one company and one measure onto that existing row. If the rules already named a company or a measure, the model is not called. When two earlier labels disagree, a check may see the same surrounding lines and still return one company and one measure for the whole row. The mock provider is not used for either call. Its canned reply would write the wrong company.
+
+**One sentence, one or more claims.**
+
+1. A question, advice, a price remark, a guest line, a joke, or an "if" with would, could, or might and no figure is not stored.
+2. A forecast, a segment line, a versus line, or a comparison stays one claim. The company is the subject. A name after than, versus, or ahead of is not the subject.
+3. One company stating different measures becomes one claim per measure. "Record revenues of nearly 215 billion, record operating profits of 88.5 billion, and strong operating margins above 40%" is three claims: revenue, operating profit, and operating margin.
+4. Two or more covered companies become one claim per company when each clause names one company and has its own figure, and every figure can be paired. A later clause that does not repeat the measure keeps the measure already stated. "Alphabet's operating margins are 34% and AMD's are around 17%" is Alphabet at 34% and AMD at about 17%, both operating margin. The AMD quote stays "AMD's are around 17%." The full sentence is stored on the parent.
+5. If a figure cannot be paired, the sentence stays one claim. "65% EBITDA margin for Nvidia, 55% for Broadcom, AMD at 20% and Intel at 26%" stays one claim, because the Broadcom clause has no covered company.
+6. Anything else stays one claim on the subject.
+
 If the prompt stated a claim, match it to stored rows by meaning. The row must share the measure, and a stated figure must be in that row. "Revenue doubled" matches a kept sentence such as "revenues of 96.2 billion, up 106% year-over-year." "Grew 24%" does not match "search revenue increased by 17%." If no stored row is that close, search the transcripts of that influencer's videos about the company. One close spoken sentence is shown, and the user confirms it before it is checked. Several close sentences are shown, and the user picks one. If nothing is close, say the line is not in the stored videos and ask the user to restate it or name the video. Do not check a nearby sentence, and do not check the other claims. If the prompt stated no claim, check the kept claims about that company.
 
 The cap of 8 applies to the claims selected above. If that set would pass 8, keep claims in this order and drop the rest: comparative, continuation, demand attribution, historical growth, net income growth, then the four children of a company-wide strong or weak phrase, then business risk. The report lists every quote the cap left out.
@@ -148,9 +159,9 @@ For example, a kept summary "Revenue growth proves it is the biggest winner from
 
 Keep the post's words. Do not make a claim stronger, weaker, or add a claim from the model's own knowledge. Each claim stores the quote it came from in the post.
 
-This step runs when the corpus is built, once per post. It writes one record per kept sentence: post id, company, quote, type, and the expansion fields in section 8. It writes no label. A question reads that record and does not extract the post again. The record is a table of sentences. It is not the vector database. The vector database holds filing passages for the narrative agent. Until a post has this record, a question may extract it once. After the record exists, the question uses the record.
+This step runs when the corpus is built, once per post. It writes one record per kept claim: post id, company, quote, type, and the fields in section 8. A sentence that rule 3 or rule 4 splits is more than one record. The quote on each record is still the post's words. It writes no label. The table a question reads is `data/influencers/claims/claim_update_v3.jsonl`. A question does not extract the post again. The record is a table of claims. It is not the vector database. The vector database holds filing passages for the narrative agent. Until a post has this record, a question may extract it once. After the record exists, the question uses the record.
 
-The only sentences the system may add are the expansions in section 6. Each added claim stores the original phrase and the name of the rule that expanded it.
+The only claims the system may add beyond the post's own clauses are the expansions in section 6. Each added claim stores the original phrase and the name of the rule that expanded it. A company split is not one of those expansions. It stores each clause, and the full sentence on the parent.
 
 A continuation sentence in the post, such as "growth is just getting started," is a continuation claim in section 5. It is checked against what management said. The same sentence typed by the user, with no stored post, never reaches this step.
 
@@ -254,7 +265,7 @@ When the phrase names no measure, combine the four children into one label for t
 | claim_id | Id for this claim inside the request |
 | text | The claim, in the post's words |
 | source_span | The quote in the stored post |
-| parent_span | Set only when section 6 expanded a vague phrase. This is the quote the report shows. |
+| parent_span | The full sentence when a claim is one clause of it: a section 6 expansion, or a company split from section 4. Empty when the claim is the whole sentence. |
 | expansion_rule | Set only for an expanded child, for example `financially_strong` |
 | measure | The measure that child tests, such as profitability, cash generation, liquidity, or leverage. For a turnaround, the measure the post names. |
 | quote_time | A time in the stored post, such as 02:14. Empty when the post has no time. |

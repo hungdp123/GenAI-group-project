@@ -120,6 +120,10 @@ _LEAVE_TYPE = frozenset({
     "DEMAND_ATTRIBUTION", "CONTINUATION", "BUSINESS_RISK", "COMPARATIVE", "PERSONALIZED_ADVICE",
 })
 _NUMBER = re.compile(r"\d|billion|million", flags=re.IGNORECASE)
+_STATED_FIGURE = re.compile(
+    r"\d+(?:\.\d+)?\s*(?:%|percent\b)|\$?\s*\d+(?:\.\d+)?\s*(?:billion|million)\b",
+    flags=re.IGNORECASE,
+)
 _SEGMENT = re.compile(
     r"\b(segment|division|aws|azure|instagram|waymo|iphone|google cloud|youtube|data centers?)\b",
     flags=re.IGNORECASE,
@@ -342,13 +346,72 @@ def split_financial_measures(text: str) -> list[tuple[str, Kind]]:
     return [(", ".join(parts), _kind_for_piece(name, ", ".join(parts))) for name, parts in groups]
 
 
+def _blocked_sentence(text: str) -> bool:
+    """A forecast, price remark, segment line, or versus line stays one claim."""
+    return bool(
+        _FORWARD.search(text) or _FORECAST_LINE.search(text) or _PRICE_TALK.search(text)
+        or _SEGMENT.search(text) or _VERSUS.search(text)
+    )
+
+
+def split_company_measures(text: str) -> list[tuple[str, Kind, str]]:
+    """The two-company check. Each company with its own figure becomes one claim.
+
+    A clause that does not repeat the measure keeps the measure already stated.
+    A forecast, price remark, segment line, versus line, or comparison stays one
+    claim. Pairing that does not fit stays one claim.
+    """
+    if not text or _blocked_sentence(text) or _COMPARE.search(text):
+        return []
+    named = [ticker for ticker, _surface, _start in find_mentions(text) if ticker != "CMPX"]
+    if len(dict.fromkeys(named)) < 2:
+        return []
+    carried: str | None = None
+    found: list[tuple[str, str, str]] = []
+    dropped_figure = False
+    for raw in _CLAIM_SPLIT.split(text):
+        part = _LEAD_IN.sub("", raw).strip(" ,.;")
+        if not part:
+            continue
+        own = _piece_measure(part)
+        clause_measure = carried
+        if own:
+            collapsed = _collapse_measure(own, [carried] if carried else [])
+            if collapsed:
+                carried = collapsed
+                clause_measure = collapsed
+        companies = list(dict.fromkeys(
+            ticker for ticker, _surface, _start in find_mentions(part) if ticker != "CMPX"
+        ))
+        paired = len(companies) == 1 and bool(_STATED_FIGURE.search(part)) and bool(clause_measure)
+        if _STATED_FIGURE.search(part) and not paired:
+            dropped_figure = True
+            continue
+        if not paired:
+            continue
+        found.append((part, clause_measure, companies[0]))
+    if dropped_figure or len(found) < 2 or len({ticker for _quote, _measure, ticker in found}) < 2:
+        return []
+    return [
+        (quote, _kind_for_piece(measure, quote), ticker)
+        for quote, measure, ticker in found
+    ]
+
+
 def expand_stored_row(row: dict) -> list[dict]:
-    """Replace one stored sentence with one row per measure. An unsplit row is returned unchanged."""
+    """Replace one stored sentence with one row per measure, or one row per company.
+
+    An unsplit row is returned unchanged. The two-company check emits one row per
+    company instead of keeping that sentence whole.
+    """
     if row.get("expansion_rule") or str(row.get("sub_claim_type") or "") in _LEAVE_TYPE:
         return [row]
     text = str(row.get("text") or row.get("source_span") or "")
     pieces = split_financial_measures(text)
     if len(pieces) < 2:
+        company_pieces = split_company_measures(text)
+        if len(company_pieces) >= 2:
+            return _expand_company_pieces(row, text, company_pieces)
         return [row]
     from finsight.agents.claim_extraction.fields import company_source, parse_fields
 
@@ -374,7 +437,67 @@ def expand_stored_row(row: dict) -> list[dict]:
     return expanded
 
 
+def _expand_company_pieces(
+    row: dict, text: str, pieces: list[tuple[str, Kind, str]],
+) -> list[dict]:
+    from finsight.agents.claim_extraction.fields import company_source, parse_fields
+
+    base_id = str(row.get("sub_claim_id") or "c")
+    expanded = []
+    for quote, kind, ticker in pieces:
+        slug = kind.measure or kind.type.lower()
+        piece = dict(row)
+        piece.update({
+            "text": quote,
+            "source_span": quote,
+            "parent_span": text,
+            "company_ticker": ticker,
+            "sub_claim_type": kind.type,
+            "measure": kind.measure,
+            "sub_claim_id": f"{base_id}-{ticker}-{slug}",
+            "is_quantitative": bool(_NUMBER.search(quote)),
+            "quote_time": _quote_time(quote),
+            "fields": parse_fields(quote, company=ticker).as_dict(),
+            "company_source": company_source(quote, ticker),
+        })
+        if "judge_company" in piece:
+            piece["judge_company"] = ticker
+        expanded.append(piece)
+    return expanded
+
+
+def apply_company_splits(rows: list[dict]) -> tuple[list[dict], int]:
+    """Replace each two-company sentence with one row per company. Other rows stay."""
+    expanded: list[dict] = []
+    splits = 0
+    for row in rows:
+        if row.get("expansion_rule") or str(row.get("sub_claim_type") or "") in _LEAVE_TYPE:
+            expanded.append(row)
+            continue
+        text = str(row.get("text") or row.get("source_span") or "")
+        pieces = split_company_measures(text)
+        if len(pieces) < 2:
+            expanded.append(row)
+            continue
+        expanded.extend(_expand_company_pieces(row, text, pieces))
+        splits += 1
+    return expanded, splits
+
+
 def _rows_for(sentence: str, video_id: str, influencer: str, title: str, upload_date: str) -> list[dict]:
+    company_pieces = split_company_measures(sentence)
+    if len(company_pieces) >= 2:
+        rows = []
+        for quote, kind, ticker in company_pieces:
+            if _ADVICE_OR_PRICE.search(quote):
+                continue
+            made = _materialize(quote, kind, ticker, video_id, influencer, title, upload_date)
+            for item in made:
+                if item.get("text") != sentence:
+                    item["parent_span"] = sentence
+            rows.extend(made)
+        if len({row["company_ticker"] for row in rows}) >= 2:
+            return rows
     measured = split_financial_measures(sentence)
     if len(measured) >= 2:
         rows = []

@@ -17,8 +17,10 @@ from finsight.agents.claim_extraction.build import (
     _ADVICE_OR_PRICE,
     _IF_MODAL,
     _classify,
+    apply_company_splits,
     claims_catalog_path,
     claims_path,
+    split_company_measures,
 )
 from finsight.agents.claim_extraction.fields import (
     ClaimFields,
@@ -235,10 +237,8 @@ def _from_transcripts(posts_dir: Path, seen: set[tuple[str | None, str]]) -> lis
             if key in seen:
                 continue
             seen.add(key)
-            counts[video_id] = counts.get(video_id, 0) + 1
             kind = _classify(sentence)
-            ticker = company or "UNK"
-            added.append({
+            base = {
                 "video_id": video_id,
                 "influencer": post.get("influencer") or post.get("channel") or "",
                 "title": post.get("title") or "",
@@ -251,11 +251,33 @@ def _from_transcripts(posts_dir: Path, seen: set[tuple[str | None, str]]) -> lis
                 "quote_time": None,
                 "sub_claim_type": kind.type if kind else "OTHER",
                 "measure": kind.measure if kind else None,
-                "sub_claim_id": f"{video_id}-{ticker}-t{counts[video_id]}",
                 "fields": parsed.as_dict(),
                 "company_source": company_source(sentence, company) if company else "unresolved",
                 "extractor": "rules",
-            })
+            }
+            pieces = split_company_measures(sentence)
+            if len(pieces) >= 2:
+                for quote, piece_kind, ticker in pieces:
+                    counts[video_id] = counts.get(video_id, 0) + 1
+                    piece_fields = parse_fields(quote, company=ticker)
+                    added.append({
+                        **base,
+                        "company_ticker": ticker,
+                        "text": quote,
+                        "source_span": quote,
+                        "parent_span": sentence,
+                        "is_quantitative": bool(piece_fields.values),
+                        "sub_claim_type": piece_kind.type,
+                        "measure": piece_kind.measure,
+                        "sub_claim_id": f"{video_id}-{ticker}-t{counts[video_id]}",
+                        "fields": piece_fields.as_dict(),
+                        "company_source": company_source(quote, ticker),
+                    })
+                continue
+            counts[video_id] = counts.get(video_id, 0) + 1
+            ticker = company or "UNK"
+            base["sub_claim_id"] = f"{video_id}-{ticker}-t{counts[video_id]}"
+            added.append(base)
     return added
 
 
@@ -1141,6 +1163,22 @@ def judge_catalog_labels(posts_dir: Path, completer: Callable[[str], str] | None
     return destination
 
 
+def split_catalog_companies(posts_dir: Path) -> Path:
+    """Rewrite the catalog so a two-company sentence is stored as one row per company.
+
+    A backup is written once, beside the catalog, and is not overwritten on a second run.
+    """
+    catalog = claims_catalog_path(posts_dir)
+    rows = [json.loads(line) for line in catalog.read_text(encoding="utf-8").splitlines() if line.strip()]
+    backup = catalog.with_name(catalog.stem + ".pre_company_split.jsonl")
+    if not backup.exists():
+        backup.write_text(catalog.read_text(encoding="utf-8"), encoding="utf-8")
+    expanded, splits = apply_company_splits(rows)
+    _write_rows(catalog, expanded)
+    print(f"split {splits} sentences; {len(rows)} rows -> {len(expanded)}", flush=True)
+    return catalog
+
+
 def _write_rows(path: Path, rows: list[dict]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
@@ -1174,6 +1212,8 @@ if __name__ == "__main__":
                 flush=True,
             )
         written = claims_catalog_path(settings.posts_dir)
+    elif "--split-companies" in sys.argv:
+        written = split_catalog_companies(settings.posts_dir)
     elif "--measures" in sys.argv:
         written = apply_figure_measures(settings.posts_dir, measure_completer(settings.llm_provider))
     else:
