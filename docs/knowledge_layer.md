@@ -1,6 +1,6 @@
 # FinSight knowledge layer
 
-Update as of: 19 Oct 2026
+Update as of: 26 Oct 2026
 
 This is the complete rule book. The shorter version that will be called by FinSight itself is `finsight/knowledge/knowledge_layer.yaml`. 
 
@@ -15,7 +15,7 @@ The steps always run in this order:
 3. A prompt that passes goes to collect posts. That step reads a post already stored for that influencer and company. It does not start the orchestrator.
 4. If several posts state the same claim and the prompt names no video, show both lines. A named video uses that video. If the prompt asks whether that influencer has been consistent about that company, or asks for the accuracy of that influencer's claims about that company over time, do not ask which post. Check every stored post in the window. Each post keeps its own publication date as the cut-off. A date typed in the prompt does not replace a post date.
 5. Claim extraction reads that one post. It keeps the sentences about the named company, keeps each quote, and gives each claim one type. It writes no label. If the prompt stated a claim, a stored row is checked only when it shares the measure and any stated figure. "Grew 24%" matches a row that contains 24%, not a row that contains 17%. The match is semantic. If no stored row is that close, the transcripts of that influencer's videos about the company are searched. One close spoken sentence is shown and the user is asked to confirm it. Several are shown and the user is asked which one. Nothing close asks the user to restate the line or name the video. A confirmed sentence is then checked. If the prompt stated no claim, the checkable claims about that company are checked.
-6. The orchestrator starts here. The YAML table chooses an agent for each claim. The financial agent and the narrative agent gather evidence. The auditor checks. One retry is allowed. The output advice screen rewrites any buy or sell wording and still releases the report. The report names the influencer, the post title, the post id, and the post date.
+6. The orchestrator starts here. The YAML table chooses an agent for each claim. The choice is fixed by the claim's type. No model chooses or changes it. The financial agent and the narrative agent gather evidence. The auditor checks. One retry is allowed. The output advice screen rewrites any buy or sell wording and still releases the report. The report names the influencer, the post title, the post id, and the post date.
 
 Three rules apply everywhere:
 
@@ -187,6 +187,8 @@ If the same type, measure, and period appears twice, keep one claim. Keep the ea
 
 A debt amount is not leverage. "Debt is over $100 billion" goes to the narrative agent, which quotes the figure from a stored filing. Debt tags differ across companies, so the financial agent does not add them up. The narrative agent does not calculate debt ÷ equity. That ratio stays a leverage claim.
 
+A result against analyst estimates is not historical growth. "Earnings per share came in lower than expected" and "Revenue beat estimates" compare with estimates, which are not stored. They are not forward-looking either. They go to the narrative agent, which can quote what the company said about the result. "Earnings report" and "earnings call" name the event, not profit. "In this earnings report, daily active users reached 3.6 billion" names no measure from section 11, so it goes to the narrative agent. The same holds for a cost or charge, such as "$2.4 billion in legal costs".
+
 Operating-income growth, operating-cash-flow growth, and diluted earnings-per-share growth are historical growth. The financial agent calculates them from the consolidated figures. Gross-profit growth, a run rate, net income with gains removed, and a segment margin are not in section 11. They are not sent to the financial agent. The narrative agent searches the stored documents.
 
 A sentence that fits none of the rows will be checked against the documents stored for that company, then determined whether Out of Scope or not. For example:
@@ -348,7 +350,7 @@ Use total revenue and total profit, not a segment. A segment growth rate present
 
 A debt amount, such as "debt is over $100 billion", is not one of these calculations. The narrative agent quotes that figure from a stored filing passage.
 
-Adjusted EBITDA, buybacks, dividends, a cash balance, homes sold, and attendance are not in the table above, so they are not calculated. Gross-profit growth, a run rate, net income with gains removed, and a segment margin are not in the table either. The financial agent is not asked to invent those figures. They are checked under section 5, by searching the stored documents. The label is Insufficient Evidence only when those documents do not state the claim. A segment figure presented as the whole company stays Insufficient Evidence.
+Adjusted EBITDA, buybacks, dividends, a cash balance, homes sold, attendance, user counts, a cost or charge, and analyst estimates are not in the table above, so they are not calculated. Gross-profit growth, a run rate, net income with gains removed, and a segment margin are not in the table either. The financial agent is not asked to invent those figures. They are checked under section 5, by searching the stored documents. The label is Insufficient Evidence only when those documents do not state the claim. A segment figure presented as the whole company stays Insufficient Evidence.
 
 ## 12. The four labels
 
@@ -378,6 +380,8 @@ Words such as "proves," "certainly," or "guaranteed" cannot sit on a Partially S
 If the auditor's check in section 10 fails, retry one time. The second attempt does not call the other agent. A wrong number is rewritten from the figure already calculated. The narrative agent is called again only when a passage is missing.
 
 Skip the second look when another pass cannot help: a comparative claim, a price inside a post, a missing filing tag, a period after the cut-off, a history longer than the corpus window, or a ratio section 11 cannot define. A claim that is not in the type table still gets its search. It is out of scope only after that search finds nothing.
+
+The orchestrator applies this skip in two ways. A comparative claim never gets a second look. A claim sent only to the financial agent that came back with no figure gets no second look either. That covers a missing filing tag, a period after the cut-off, and a ratio section 11 cannot define.
 
 | What went wrong | What the second look does |
 |---|---|
