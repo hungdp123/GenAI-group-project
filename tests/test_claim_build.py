@@ -114,3 +114,22 @@ def test_a_claim_with_no_formula_stays_off_the_financial_agent():
     assert all(row["sub_claim_type"] not in financial for row in rows)
     assert specific_type("NET_INCOME_GROWTH", "gross profit has been in decline", None) == "OTHER"
     assert specific_type("OTHER", "operating income shot up 124%", None) == "HISTORICAL_GROWTH"
+
+
+def test_estimates_and_earnings_reports_stay_off_the_financial_agent():
+    rows = _rows(
+        "Meta said what was not accounted for in the earnings per share estimates were "
+        "$2.4 billion in costs related to legal proceedings. "
+        "In this earnings report, Meta's daily active users reached 3.6 billion. "
+        "Meta's earnings per share came in lower than expected due to one-time taxes."
+    )
+    financial = {"HISTORICAL_GROWTH", "NET_INCOME_GROWTH", "PROFITABILITY", "CASH_GENERATION", "LIQUIDITY", "LEVERAGE"}
+    assert rows
+    assert all(row["sub_claim_type"] not in financial for row in rows)
+    # Rows stored before this rule are re-typed when the orchestrator loads them.
+    assert specific_type("NET_INCOME_GROWTH", "In this earnings report, daily active users reached 3.6 billion",
+                         None) == "OTHER"
+    assert specific_type("OTHER", "the earnings per share estimates missed $2.4 billion in legal costs",
+                         None) == "OTHER"
+    assert specific_type("OTHER", "earnings per share grew 20%", None) == "HISTORICAL_GROWTH"
+    assert _rows("Meta's earnings grew 30% last year.")[0]["sub_claim_type"] == "NET_INCOME_GROWTH"

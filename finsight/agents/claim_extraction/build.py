@@ -86,9 +86,18 @@ _FREE_CASH = re.compile(r"\bfree cash flow\b|\bfcf\b", flags=re.IGNORECASE)
 _LEVERAGE = re.compile(r"\b(leverage|debt[- ]to[- ]equity|debt/equity)\b", flags=re.IGNORECASE)
 _DEBT_AMOUNT = re.compile(r"\b(debt|indebted|balance sheet)\b", flags=re.IGNORECASE)
 _REVENUE_WORD = re.compile(r"\b(revenues?|sales|top[- ]line)\b", flags=re.IGNORECASE)
-_NET_INCOME_WORD = re.compile(r"\b(net income|earnings|profits?|bottom line)\b", flags=re.IGNORECASE)
+# "Earnings report" or "earnings call" names the event, not profit.
+_EARNINGS = r"earnings(?!\s+(?:reports?|calls?|releases?|season|results|dates?|updates?|announcements?)\b)"
+_NET_INCOME_WORD = re.compile(rf"\b(net income|{_EARNINGS}|profits?|bottom line)\b", flags=re.IGNORECASE)
 _GROWTH_MEASURE = re.compile(
-    r"\b(revenues?|sales|earnings|profits?|net income|top line)\b",
+    rf"\b(revenues?|sales|{_EARNINGS}|profits?|net income|top line)\b",
+    flags=re.IGNORECASE,
+)
+# A result against analyst estimates. The estimates are not stored, so this is not a past change.
+_VS_ESTIMATES = re.compile(
+    r"\b(than|vs\.?|versus|beat|beats|missed|misses|topped|ahead of|short of)\s+(?:\w+\s+){0,2}"
+    r"(expected|expectations?|estimates?|consensus)\b"
+    r"|\b(analysts?|street|eps|earnings per share|consensus)\s+(estimates?|expectations?)\b",
     flags=re.IGNORECASE,
 )
 _DIRECTION = re.compile(
@@ -451,6 +460,8 @@ def _classify(text: str) -> Kind | None:
     for pattern, rule in _WIDE:
         if pattern.search(text) and not _NAMED_MEASURE.search(text):
             return Kind("PROFITABILITY", expansion=rule)
+    if _VS_ESTIMATES.search(text):
+        return Kind("OTHER")
     if _FORWARD.search(text):
         return Kind("CONTINUATION", measure="guidance" if re.search(r"\bguid", text, flags=re.IGNORECASE) else None)
     if _COMPARE.search(text):
@@ -511,7 +522,8 @@ def _ocf_growth(text: str) -> bool:
 
 def _no_financial_formula(text: str) -> bool:
     """A figure the financial agent cannot calculate. Routing stays with the narrative agent."""
-    if _RUN_RATE.search(text) or _EXCLUDING_GAINS.search(text) or _SERVICES_MARGIN.search(text):
+    if (_RUN_RATE.search(text) or _EXCLUDING_GAINS.search(text) or _SERVICES_MARGIN.search(text)
+            or _VS_ESTIMATES.search(text)):
         return True
     return bool(_GROSS_PROFIT.search(text) and not _MARGIN.search(text))
 
@@ -540,6 +552,11 @@ def specific_type(stored: str, text: str, measure: str | None) -> str:
         return _TYPE_BY_MEASURE[measure]
     if stored not in _LEAVE_TYPE:
         if _no_financial_formula(text):
+            return "OTHER"
+        # A growth row built before "earnings report" stopped counting as a measure names none.
+        if (stored in ("HISTORICAL_GROWTH", "NET_INCOME_GROWTH") and measure is None
+                and not _GROWTH_MEASURE.search(text) and not _OPERATING_INCOME.search(text)
+                and not _EPS.search(text) and not _ocf_growth(text)):
             return "OTHER"
         # A margin row stays a margin row. The growth line is added beside it.
         if stored != "PROFITABILITY" and (_operating_income_growth(text) or _eps_growth(text) or _ocf_growth(text)):
