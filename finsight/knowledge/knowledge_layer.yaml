@@ -6,6 +6,8 @@
 # Posts are from 2026-04-01 through 2026-09-30. This file does not list them.
 # This file is only the routing extract. Routing is deterministic: the orchestrator sends each claim to
 # exactly the `collectors` listed for its type. No LLM chooses or overrides the route.
+# Extraction is deterministic first. The sentence rules are in docs/knowledge_layer.md section 4.
+# A model labels only a bare figure whose sentence names neither a company nor a measure. It does not split.
 #
 #   collectors:            subset of [financial, narrative], called on the first attempt
 #   retry_collectors:      extra collectors added when the orchestrator re-plans a sub-claim for its retry
