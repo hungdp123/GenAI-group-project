@@ -275,6 +275,15 @@ def _sign_claim(text: str) -> int:
     return 0
 
 
+_FIGURE = re.compile(r"\d+(?:\.\d+)?\s*(?:%|percent|billion|million|trillion|bn\b|x\b)", re.I)
+
+
+def _states_checkable(text: str) -> bool:
+    """A figure, bound, sign, multiple or direction a filing can confirm. "Very high margins" states none."""
+    return bool(_FIGURE.search(text) or _money(text) or _threshold(text) or _sign_claim(text)
+                or _multiple(text) or _direction(text))
+
+
 def _check_threshold(th: _Threshold, metric: str, value: float, item: EvidenceItem) -> bool | None:
     """Does the computed figure sit on the right side of the bound? None when the figure is the wrong kind."""
     if th.kind == "pct":
@@ -450,6 +459,8 @@ class AuditorAgent:
             computed = any(e.computed_value is not None and e.source_tier is SourceTier.TIER_1 for e in supporting)
             if sub_claim.sub_claim_type.value in COMPUTED_TYPES and not computed:
                 return Verdict.PARTIALLY_SUPPORTED      # quoted from text, no calculation behind it
+            if sub_claim.sub_claim_type.value in COMPUTED_TYPES and not _states_checkable(sub_claim.text):
+                return Verdict.INSUFFICIENT_EVIDENCE    # a level word with no bound: the record cannot confirm it
             return Verdict.SUPPORTED
         if challenging:
             return Verdict.CONTRADICTED
