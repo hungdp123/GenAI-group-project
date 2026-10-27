@@ -335,7 +335,10 @@ def followup_query(claim: str, passages: Iterable[str], document_types: Iterable
     when the first hits are filings, and the filing when they are releases.
     """
 
-    pending = [part for part in split_claim_parts(claim) if not any(passage_states_figures(part, text) for text in passages)]
+    pending = [
+        part for part in split_claim_parts(claim)
+        if not any(passage_states_figures(part, text) for text in passages)
+    ]
     pending = [part for part in pending if figure_phrases(part)]
     if not pending:
         return None
