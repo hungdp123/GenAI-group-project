@@ -49,13 +49,26 @@ def _with_growth(claim: SubClaim) -> list[SubClaim]:
     return claims
 
 
+# A judged measure that names a series the financial agent computes. Other judged measures (profit, users,
+# price, ...) are not trusted here: "profit" also labels earnings-report sentences that must stay OTHER.
+_JUDGED_SERIES = frozenset({"revenue"})
+
+
+def _stored_measure(row: dict) -> str | None:
+    """The row's measure. The block catalog keeps the judged one in label_new / inherited_measure."""
+    if row.get("measure"):
+        return row["measure"]
+    judged = (row.get("label_new") or {}).get("measure") or row.get("inherited_measure")
+    return judged if judged in _JUDGED_SERIES else None
+
+
 def _stored_type(row: dict) -> SubClaimType:
     """Read a stored type. An older merged row is split from its measure or its words."""
     from finsight.agents.claim_extraction.build import specific_type
 
     stored = SubClaimType(row["sub_claim_type"])
     text = str(row.get("text") or row.get("source_span") or "")
-    return SubClaimType(specific_type(stored.value, text, row.get("measure")))
+    return SubClaimType(specific_type(stored.value, text, _stored_measure(row)))
 
 
 def iter_claim_records(path: Path):

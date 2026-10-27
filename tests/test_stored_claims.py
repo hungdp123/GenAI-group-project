@@ -36,6 +36,24 @@ def test_a_stored_record_is_used_and_the_decomposer_is_not_called(tmp_path):
     assert out.status is None
 
 
+def test_a_judged_revenue_measure_keeps_a_growth_row_on_the_financial_agent(tmp_path):
+    path = tmp_path / "claims.jsonl"
+    rows = [
+        {"text": "Google grew by 24% year-over-year.", "label_new": {"measure": "revenue"}},
+        {"text": "22% is massive.", "inherited_measure": "revenue"},
+        # A judged profit measure is not trusted: an earnings-report sentence stays OTHER.
+        {"text": "Nvidia absolutely crushed this earnings report.", "label_new": {"measure": "profit"}},
+    ]
+    path.write_text("".join(json.dumps({
+        "video_id": "abc", "company_ticker": "GOOGL", "sub_claim_id": f"c{i}",
+        "sub_claim_type": "HISTORICAL_GROWTH", "measure": None, **row,
+    }) + "\n" for i, row in enumerate(rows)), encoding="utf-8")
+    stored = load_stored_claims(path, "abc", "GOOGL")
+    assert [c.sub_claim_type for c in stored] == [
+        SubClaimType.HISTORICAL_GROWTH, SubClaimType.HISTORICAL_GROWTH, SubClaimType.OTHER,
+    ]
+
+
 def test_the_cap_of_8_lists_the_quotes_it_leaves_out():
     claims = [
         SubClaim(sub_claim_id=f"c{i}", text=f"point {i}", sub_claim_type=SubClaimType.BUSINESS_RISK)
