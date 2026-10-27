@@ -25,8 +25,10 @@ from pydantic import BaseModel, ConfigDict, Field
 #      Set when section 6 expands a vague phrase. The report shows that expansion.
 # 0.6: AuditResult.evidence_stances (the Auditor's own stance per evidence item; optional).
 # 0.7: EvidenceItem.comparison_value + comparison_period (the financial agent's second number; optional).
+# 0.8: ClaimRequest/FinalAssessment.cutoff_source + requested_cutoff (where the evidence cut-off came from).
+# 0.9: SubClaim.context + user_text (period clues); EvidenceItem.period_source (where its period came from).
 
-SCHEMA_VERSION = "0.7"
+SCHEMA_VERSION = "0.9"
 
 
 class _Strict(BaseModel):
@@ -116,6 +118,7 @@ class AssessmentStatus(str, Enum):
 
 
 CollectorName = Literal["financial", "narrative"]
+CutoffSource = Literal["user", "post_date", "corpus_default"]
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +132,10 @@ class ClaimRequest(_Strict):
     company_ticker: str | None = None
     cutoff_date: date
     cutoff_was_defaulted: bool = False
+    # Where cutoff_date came from: "user" (typed), "post_date" (the day the stored post was published),
+    # "corpus_default" (nothing better was known). requested_cutoff keeps the user's own date, if any.
+    cutoff_source: CutoffSource = "user"
+    requested_cutoff: date | None = None
 
 
 class SubClaim(_Strict):
@@ -146,6 +153,11 @@ class SubClaim(_Strict):
         default=None, description="The measure this child tests, for example profitability or leverage.")
     quote_time: str | None = Field(
         default=None, description="A time from the stored post, such as 02:14. Empty when the post has none.")
+    # Period clues for a line that names no period. The line itself always wins; these only fill the gap.
+    context: str | None = Field(
+        default=None, description="The 1-2 sentences before this line in the post (often where the period is set).")
+    user_text: str | None = Field(
+        default=None, description="What the user typed about the claim. A period hint only; never the claim checked.")
 
 
 class EvidenceItem(_Strict):
@@ -172,6 +184,9 @@ class EvidenceItem(_Strict):
                     "the basis for a direction. Growth metric: the amount for the period behind the rate.")
     comparison_period: str | None = Field(
         default=None, description="The period comparison_value is for, e.g. quarter ended 2025-06-30.")
+    period_source: str | None = Field(
+        default=None, description="Where the period came from: the line, the preceding sentences, the stated "
+                                  "amount, the user's prompt, or the default (latest fiscal year).")
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +279,8 @@ class FinalAssessment(_Strict):
     as_of_date: date | None = None
     # DECISION: added so a defaulted cut-off is stated in the output, not only the log.
     cutoff_was_defaulted: bool = False
+    cutoff_source: CutoffSource = "user"
+    requested_cutoff: date | None = None
     boundary_disclaimer: str
     refusal_reason: str | None = None
     clarification_question: str | None = Field(

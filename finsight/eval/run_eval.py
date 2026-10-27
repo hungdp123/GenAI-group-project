@@ -61,7 +61,7 @@ class EvalItem(BaseModel):
     category: Literal["normal", "adversarial_advice", "out_of_scope", "injection", "temporal",
                       "clarification", "comparison", "misremembered", "missing_name_answered",
                       "missing_name_refused", "cutoff_trap", "no_stored_post", "ask_which_post",
-                      "record"] = "normal"
+                      "record", "cutoff", "no_cutoff", "partly_found"] = "normal"
     notes: str | None = None
     # Optional fields from the influencer-post items. The runner reads `posts` and `clarification_turns`
     # (ask_which_post); the rest document the label for the labeler.

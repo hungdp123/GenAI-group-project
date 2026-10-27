@@ -114,3 +114,92 @@ def test_a_claim_with_no_formula_stays_off_the_financial_agent():
     assert all(row["sub_claim_type"] not in financial for row in rows)
     assert specific_type("NET_INCOME_GROWTH", "gross profit has been in decline", None) == "OTHER"
     assert specific_type("OTHER", "operating income shot up 124%", None) == "HISTORICAL_GROWTH"
+
+
+def test_two_companies_with_one_measure_become_two_claims():
+    text = "For context, Alphabet's operating margins are 34% and AMD's are around 17%."
+    rows = _rows(text)
+    by_ticker = {row["company_ticker"]: row for row in rows}
+    assert set(by_ticker) == {"GOOGL", "AMD"}
+    assert by_ticker["GOOGL"]["text"] == "Alphabet's operating margins are 34%"
+    assert by_ticker["GOOGL"]["sub_claim_type"] == "PROFITABILITY"
+    assert by_ticker["GOOGL"]["measure"] == "operating_margin"
+    assert by_ticker["AMD"]["text"] == "AMD's are around 17%"
+    assert by_ticker["AMD"]["sub_claim_type"] == "PROFITABILITY"
+    assert by_ticker["AMD"]["measure"] == "operating_margin"
+    assert by_ticker["AMD"]["parent_span"] == text
+
+    pieces = expand_stored_row({
+        "video_id": "f_BmT1yaSQY",
+        "company_ticker": "GOOGL",
+        "sub_claim_id": "f_BmT1yaSQY-GOOGL-t12",
+        "sub_claim_type": "PROFITABILITY",
+        "text": text,
+    })
+    assert [(piece["company_ticker"], piece["measure"], piece["text"]) for piece in pieces] == [
+        ("GOOGL", "operating_margin", "Alphabet's operating margins are 34%"),
+        ("AMD", "operating_margin", "AMD's are around 17%"),
+    ]
+
+
+def test_a_comparison_of_two_companies_stays_one_claim():
+    rows = _rows("NVIDIA is ahead of Google on revenue growth.")
+    assert len(rows) == 1
+    assert rows[0]["company_ticker"] == "NVDA"
+    assert rows[0]["sub_claim_type"] == "COMPARATIVE"
+
+
+def test_a_stored_catalog_sentence_is_replaced_by_one_row_per_company():
+    from finsight.agents.claim_extraction.build import apply_company_splits
+
+    text = "For context, Alphabet's operating margins are 34% and AMD's are around 17%."
+    rows, splits = apply_company_splits([{
+        "video_id": "f_BmT1yaSQY",
+        "company_ticker": "GOOGL",
+        "judge_company": "GOOGL",
+        "sub_claim_id": "f_BmT1yaSQY-GOOGL-t12",
+        "sub_claim_type": "PROFITABILITY",
+        "text": text,
+    }])
+    assert splits == 1
+    assert [row["company_ticker"] for row in rows] == ["GOOGL", "AMD"]
+    assert rows[1]["judge_company"] == "AMD"
+    assert rows[1]["parent_span"] == text
+    ebitda = (
+        "So, you got a 65% EBITDA margin there for Nvidia, 55% for Broadcom, "
+        "more than twice what we see with AMD at 20% and Intel at 26%."
+    )
+    whole, skipped = apply_company_splits([{
+        "sub_claim_id": "ebitda",
+        "sub_claim_type": "PROFITABILITY",
+        "text": ebitda,
+    }])
+    assert skipped == 0
+    assert len(whole) == 1
+    assert whole[0]["text"] == ebitda
+    kept, unchanged = apply_company_splits([{
+        "sub_claim_id": "cmp",
+        "sub_claim_type": "COMPARATIVE",
+        "text": "NVIDIA is ahead of Google on revenue growth.",
+    }])
+    assert unchanged == 0
+    assert len(kept) == 1
+
+
+def test_estimates_and_earnings_reports_stay_off_the_financial_agent():
+    rows = _rows(
+        "Meta said what was not accounted for in the earnings per share estimates were "
+        "$2.4 billion in costs related to legal proceedings. "
+        "In this earnings report, Meta's daily active users reached 3.6 billion. "
+        "Meta's earnings per share came in lower than expected due to one-time taxes."
+    )
+    financial = {"HISTORICAL_GROWTH", "NET_INCOME_GROWTH", "PROFITABILITY", "CASH_GENERATION", "LIQUIDITY", "LEVERAGE"}
+    assert rows
+    assert all(row["sub_claim_type"] not in financial for row in rows)
+    # Rows stored before this rule are re-typed when the orchestrator loads them.
+    assert specific_type("NET_INCOME_GROWTH", "In this earnings report, daily active users reached 3.6 billion",
+                         None) == "OTHER"
+    assert specific_type("OTHER", "the earnings per share estimates missed $2.4 billion in legal costs",
+                         None) == "OTHER"
+    assert specific_type("OTHER", "earnings per share grew 20%", None) == "HISTORICAL_GROWTH"
+    assert _rows("Meta's earnings grew 30% last year.")[0]["sub_claim_type"] == "NET_INCOME_GROWTH"

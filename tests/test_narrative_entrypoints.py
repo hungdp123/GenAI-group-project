@@ -1,6 +1,7 @@
 """Real registry entry points with temporary indexes and no model requests."""
 
 from datetime import date
+from importlib.util import find_spec
 import json
 from types import SimpleNamespace
 
@@ -138,7 +139,42 @@ def test_demo_paths_remain_loadable_and_separate_from_real_entries():
 
     assert callable(run_basic_narrative_rag)
     assert WORKFLOW_MODULES["extract_pdf_charts_and_promote"].endswith("pdf_chart_processing")
-    assert WORKFLOW_MODULES["generate_92_claim_answers"].endswith("run_basic_rag_batch")
+    for module in WORKFLOW_MODULES.values():
+        assert find_spec(module) is not None, f"Workflow module does not exist: {module}"
+
+
+def test_collector_selects_separate_indexes_and_records_chunking(corpus_root, tmp_path, monkeypatch):
+    from finsight.agents.narrative.rag.collect_evidence import NarrativeEvidenceAgent
+
+    alternate = tmp_path / "c4" / "META" / "index.json"
+    alternate.parent.mkdir(parents=True)
+    payload = json.loads((corpus_root / "META/indexes/index.json").read_text(encoding="utf-8"))
+    payload["chunking"] = {"strategy": "adaptive", "effective_token_limit": 256}
+    for chunk in payload["chunks"]:
+        chunk["chunk_id"] = "c4-" + chunk["chunk_id"]
+    alternate.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("FINSIGHT_NARRATIVE_INDEX_TEMPLATE", str(tmp_path / "c4/{ticker}/index.json"))
+    monkeypatch.setenv("FINSIGHT_NARRATIVE_QDRANT_TEMPLATE", str(tmp_path / "vectors/{ticker}/qdrant"))
+    agent = NarrativeEvidenceAgent(corpus_root=corpus_root, backend="bm25")
+    claim = SubClaim(sub_claim_id="sc1", text="Daily active people June 2024", company_ticker="META",
+                     sub_claim_type=SubClaimType.OTHER)
+    items = agent.gather(claim, CUTOFF)
+    assert items and all(i.evidence_id.startswith("c4-") for i in items)
+    assert all(i.company == "META" and i.publication_date <= CUTOFF for i in items)
+    assert agent.last_search["index"]["path"] == str(alternate.resolve())
+    assert agent.last_search["index"]["chunking"]["strategy"] == "adaptive"
+    assert agent.last_search["index"]["qdrant_dir"] == str((tmp_path / "vectors/META/qdrant").resolve())
+
+
+def test_explicit_missing_chunk_index_does_not_fall_back_to_canonical(corpus_root, tmp_path, monkeypatch):
+    from finsight.agents.narrative.rag.collect_evidence import NarrativeEvidenceAgent
+
+    monkeypatch.setenv("FINSIGHT_NARRATIVE_INDEX_TEMPLATE", str(tmp_path / "absent/{ticker}/index.json"))
+    agent = NarrativeEvidenceAgent(corpus_root=corpus_root, backend="bm25")
+    claim = SubClaim(sub_claim_id="sc1", text="Daily active people", company_ticker="META",
+                     sub_claim_type=SubClaimType.OTHER)
+    with pytest.raises(FileNotFoundError, match="Configured narrative index is missing"):
+        agent.gather(claim, CUTOFF)
 
 
 def test_registry_matches_new_main_slots_and_preserves_other_agents():
@@ -172,12 +208,12 @@ def preparation_model(monkeypatch):
         passages = json.loads(prompt.split('<data name="source_passages">\n', 1)[1].split("\n</data>", 1)[0])
         passage = passages[0]
         result = {
-            "selected_evidence_ids": [passage["evidence_id"]],
-            "facts": [{"evidence_id": passage["evidence_id"], "quote": passage["content"]}],
+            "facts": [{"evidence_id": passage["evidence_id"],
+                       "source_span_id": passage["source_spans"][0]["source_span_id"]}],
             "summary": [
                 {
                     "text": "The source reports the daily active people figure and period.",
-                    "evidence_ids": [passage["evidence_id"]],
+                    "fact_indices": [0],
                 }
             ],
         }
@@ -278,6 +314,7 @@ def test_invented_quote_is_not_accepted(corpus_root, preparation_model, monkeypa
     def invented(**kwargs):
         response = original(**kwargs)
         data = json.loads(response.text)
+        data["facts"][0].pop("source_span_id")
         data["facts"][0]["quote"] = "This quote was never in the source."
         response.text = json.dumps(data)
         return response

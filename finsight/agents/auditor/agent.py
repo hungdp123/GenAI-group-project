@@ -292,6 +292,15 @@ def _sign_claim(text: str) -> int:
     return 0
 
 
+_FIGURE = re.compile(r"\d+(?:\.\d+)?\s*(?:%|percent|billion|million|trillion|bn\b|x\b)", re.I)
+
+
+def _states_checkable(text: str) -> bool:
+    """A figure, bound, sign, multiple or direction a filing can confirm. "Very high margins" states none."""
+    return bool(_FIGURE.search(text) or _money(text) or _threshold(text) or _sign_claim(text)
+                or _multiple(text) or _direction(text))
+
+
 def _check_threshold(th: _Threshold, metric: str, value: float, item: EvidenceItem) -> bool | None:
     """Does the computed figure sit on the right side of the bound? None when the figure is the wrong kind."""
     if th.kind == "pct":
@@ -308,35 +317,43 @@ def _check_threshold(th: _Threshold, metric: str, value: float, item: EvidenceIt
 # -- concepts ------------------------------------------------------------------------------------
 
 def _expected_concepts(sub_claim: SubClaim) -> set[str] | None:
-    """Metric concepts the sub-claim is about, or None when the wording does not say."""
+    """Metric concepts the sub-claim is about, or None when the wording does not say.
+
+    A line can name several measures ("lower margins, more of a drag on the free cash flow"), so every measure
+    named is expected, not only the first one found."""
     text = sub_claim.text.lower()
-    if re.search(r"\bgross margin", text):
-        return {"gross_margin"}
-    if re.search(r"\boperating margin", text):
-        return {"operating_margin"}
-    if re.search(r"\b(net|profit) margin", text):
-        return {"net_margin"}
-    if re.search(r"\bmargin", text) or re.search(r"\bprofitab", text):
-        return {"gross_margin", "operating_margin", "net_margin"}
+    named: set[str] = set()
+    margins: set[str] = set()
+    if re.search(r"\bgross (profit )?margin", text):
+        margins.add("gross_margin")
+    if re.search(r"\boperating (profit |income )?margin", text):
+        margins.add("operating_margin")
+    if re.search(r"\b(net|profit|net income|net profit) margin", text):
+        margins.add("net_margin")
+    if not margins and (re.search(r"\bmargin", text) or re.search(r"\bprofitab", text)):
+        margins = {"gross_margin", "operating_margin", "net_margin"}
+    named |= margins
     if re.search(r"\bfree cash flow|\bfcf\b", text):
-        return {"free_cash_flow", "fcf_margin"}
-    if re.search(r"\bcash flow|\bcash generation", text):
-        return {"operating_cash_flow", "free_cash_flow", "fcf_margin"}
+        named |= {"free_cash_flow", "fcf_margin"}
+    elif re.search(r"\bcash flow|\bcash generation", text):
+        named |= {"operating_cash_flow", "free_cash_flow", "fcf_margin"}
     if re.search(r"\bgross (profit|income)", text):
-        return {"gross_profit"}
+        named.add("gross_profit")
     if re.search(r"\bcurrent ratio", text):
-        return {"current_ratio"}
+        named.add("current_ratio")
     if re.search(r"\bcash ratio", text):
-        return {"cash_ratio"}
+        named.add("cash_ratio")
     if sub_claim.sub_claim_type.value in ("HISTORICAL_GROWTH", "NET_INCOME_GROWTH"):
         if re.search(r"\beps\b|earnings per share", text):
-            return {"diluted_eps"}
+            named.add("diluted_eps")
         if re.search(r"operating (income|profit)", text):
-            return {"operating_income"}
-        if re.search(r"net income|\bearnings\b|\bprofits?\b|bottom line", text):
-            return {"net_income"}
-        return {"revenue"}
-    return None
+            named.add("operating_income")
+        rest = re.sub(r"\b(gross|operating) (profit|income)s?\b", " ", text)   # "gross profit" is not net income
+        if re.search(r"net income|\bearnings\b|\bprofits?\b|bottom line", rest):
+            named.add("net_income")
+        if re.search(r"\brevenues?\b|\bsales\b|\btop line", text) or not named:
+            named.add("revenue")
+    return named or None
 
 
 def _concept(metric_name: str) -> str:
@@ -419,7 +436,12 @@ class AuditorAgent:
                 continue
             self._hygiene(sub_claim, item, run)     # 2. only usable items are checked
             if numeric:
+                checks_before = len(run.numeric_ok)
                 self._numeric(sub_claim, item, run)
+                # The stated number disagrees with this item's computed figure: the item is
+                # counter-evidence, whatever direction check put it on the supporting side.
+                if not all(run.numeric_ok[checks_before:]):
+                    stances[-1] = Stance.CHALLENGING
             elif stance is Stance.SUPPORTING:
                 run.citation_checks.append(CitationCheck(evidence_id=item.evidence_id, entails=True))
         judged = {item.evidence_id: st for item, st in zip(evidence, stances)}
@@ -465,6 +487,8 @@ class AuditorAgent:
             computed = any(e.computed_value is not None and e.source_tier is SourceTier.TIER_1 for e in supporting)
             if sub_claim.sub_claim_type.value in COMPUTED_TYPES and not computed:
                 return Verdict.PARTIALLY_SUPPORTED      # quoted from text, no calculation behind it
+            if sub_claim.sub_claim_type.value in COMPUTED_TYPES and not _states_checkable(sub_claim.text):
+                return Verdict.INSUFFICIENT_EVIDENCE    # a level word with no bound: the record cannot confirm it
             return Verdict.SUPPORTED
         if challenging:
             return Verdict.CONTRADICTED
@@ -588,6 +612,8 @@ class AuditorAgent:
         if len(stated_money) == 1 and content_money:
             tol = max(_money_half_unit(sub_claim.text), 1e-9 * abs(content_money[0]))   # rounding to stated precision
             matches.append(abs(stated_money[0] - content_money[0]) <= tol)
+            if stated_frac is None:
+                stated_frac = stated_money[0]       # the claimed dollar amount, shown next to the computed one
         if not matches:
             return
         ok = all(matches)

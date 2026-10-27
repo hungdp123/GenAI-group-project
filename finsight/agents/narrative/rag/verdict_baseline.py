@@ -711,7 +711,7 @@ def main() -> None:
     selected_model = args.ollama_model or get_settings().llm_model
     model_slug = re.sub(r"[^A-Za-z0-9._-]+", "-", selected_model).strip("-._") or "model"
     run_stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    output_path = args.output or Path("data/narrative/experiments/narrative_basic_rag") / (
+    output_path = args.output or Path("data/narrative/experiments/standalone_rag") / (
         f"{args.ticker.strip().upper()}-{model_slug}-{run_stamp}.json"
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)

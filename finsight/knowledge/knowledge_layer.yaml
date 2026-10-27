@@ -4,7 +4,10 @@
 # Corpus: the companies and influencer channels in docs/knowledge_layer.md section 1.
 # Influencers: Joseph Carlson, Mark Roussin, Alex Reffett, Meet Kevin.
 # Posts are from 2026-04-01 through 2026-09-30. This file does not list them.
-# This file is only the routing extract.
+# This file is only the routing extract. Routing is deterministic: the orchestrator sends each claim to
+# exactly the `collectors` listed for its type. No LLM chooses or overrides the route.
+# Extraction is deterministic first. The sentence rules are in docs/knowledge_layer.md section 4.
+# A model labels only a bare figure whose sentence names neither a company nor a measure. It does not split.
 #
 #   collectors:            subset of [financial, narrative], called on the first attempt
 #   retry_collectors:      extra collectors added when the orchestrator re-plans a sub-claim for its retry
@@ -18,7 +21,9 @@
 # Decided 5 Oct 2026. See docs/decision_rationale.md.
 #   D16  BUSINESS_RISK and claims not in the table: Tier 1 can Support. A Tier 2 remark can at most Partially Support.
 #   D22  retry_collectors are empty. A retry does not call the other specialist.
-version: "0.6"
+# Updated 26 Oct 2026: the route comes only from this table (no LLM router). A result against analyst
+# estimates and an "earnings report" sentence with no measure are typed OTHER.
+version: "0.7"
 
 rules:
   - sub_claim_type: HISTORICAL_GROWTH
@@ -26,14 +31,14 @@ rules:
     retry_collectors: []
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1]
-    note: "Past change in consolidated revenue, operating income, operating cash flow, or diluted earnings per share. The words pick the series. Supported only when the Tier 1 record matches value, direction, and period. Use the consolidated figure, not a segment. A wrong number is rewritten from that record. Do not add the narrative agent."
+    note: "Past change in consolidated revenue, operating income, operating cash flow, or diluted earnings per share. The words pick the series. Supported only when the Tier 1 record matches value, direction, and period. Use the consolidated figure, not a segment. A wrong number is rewritten from that record. An EPS result against analyst estimates (\"lower than expected\", \"beat estimates\") is not this type. Do not add the narrative agent."
 
   - sub_claim_type: NET_INCOME_GROWTH
     collectors: [financial]
     retry_collectors: []
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1]
-    note: "Past change in reported accounting profit. Supported only when the Tier 1 record matches value, direction, and period. A figure that removes gains is not this type. Do not add the narrative agent."
+    note: "Past change in reported accounting profit. Supported only when the Tier 1 record matches value, direction, and period. A figure that removes gains is not this type. \"Earnings report\" or \"earnings call\" names the event, not profit. Do not add the narrative agent."
 
   - sub_claim_type: PROFITABILITY
     collectors: [financial]
@@ -82,7 +87,7 @@ rules:
     retry_collectors: []
     highest_verdict: PARTIALLY_SUPPORTED
     tier_requirement: [TIER_2]
-    note: "A user's forward-looking claim, such as growth just getting started. Tier 2 only. Never above PARTIALLY_SUPPORTED. Past numbers are not a retry collector."
+    note: "A user's forward-looking claim, such as growth just getting started. Tier 2 only. Never above PARTIALLY_SUPPORTED. Past numbers are not a retry collector. \"Lower than expected\" compares a past result with analyst estimates; it is not forward-looking."
 
   - sub_claim_type: COMPARATIVE
     collectors: []
@@ -114,4 +119,4 @@ fallback:
   highest_verdict: SUPPORTED
   tier_requirement: [TIER_1, TIER_2]
   counter_evidence_only: true
-  note: "Not labeled out of scope up front. Search the stored documents. Supported only when a Tier 1 passage states the claim. A Tier 2 remark is at most Partially Supported. Nothing in Tier 1 or Tier 2 means INSUFFICIENT_EVIDENCE. Do not invent a formula. Gross-profit growth, a run rate, net income excluding gains, and a segment margin stay here."
+  note: "Not labeled out of scope up front. Search the stored documents. Supported only when a Tier 1 passage states the claim. A Tier 2 remark is at most Partially Supported. Nothing in Tier 1 or Tier 2 means INSUFFICIENT_EVIDENCE. Do not invent a formula. Gross-profit growth, a run rate, net income excluding gains, a segment margin, a cost or charge, user counts, and a result against analyst estimates stay here."

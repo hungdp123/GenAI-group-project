@@ -23,17 +23,55 @@ from finsight.contracts.schemas import AssessmentStatus, EvidenceItem, FinalAsse
 WIDTH = 96
 
 
+def fmt_figure(x: float) -> str:
+    """A check figure for people: growth and margins are fractions (0.14 -> 14.0%), amounts are dollars."""
+    if abs(x) < 10:
+        return f"{x:.1%}"
+    for size, unit in ((1e12, "T"), (1e9, "B"), (1e6, "M")):
+        if abs(x) >= size:
+            return f"${x / size:,.2f}{unit}"
+    return f"${x:,.0f}"
+
+
+def fmt_numeric_check(nc) -> str:
+    """'claimed $12.00B vs computed $9.46B (-21.2%), MISMATCH' or 'computed 14.0%, ok'."""
+    verdict = "ok" if nc.matches else "MISMATCH"
+    computed = fmt_figure(nc.computed)
+    if nc.stated is None:
+        return f"{nc.metric_name or 'value'} computed {computed}, {verdict}"
+    gap = ""
+    if abs(nc.stated) >= 10 and nc.stated:
+        gap = f" ({(nc.computed - nc.stated) / abs(nc.stated):+.1%})"
+    return f"{nc.metric_name or 'value'} claimed {fmt_figure(nc.stated)} vs computed {computed}{gap}, {verdict}"
+
+
 def _wrap(text: str, indent: str = "", first: str | None = None) -> list[str]:
     first = indent if first is None else first
     return textwrap.wrap(text, WIDTH, initial_indent=first, subsequent_indent=indent,
                          break_long_words=False, break_on_hyphens=False) or [first.rstrip()]
 
 
+def cutoff_note(fa: FinalAssessment) -> str:
+    """Why the evidence stops on as_of_date, in one plain sentence ('' when the user's own date was used)."""
+    if fa.cutoff_source == "post_date":
+        if fa.requested_cutoff is None:
+            return ("no cut-off date was given, so the claim is judged only on information public on the day "
+                    "the post was published")
+        return (f"the day the post was published; your date ({friendly_date(fa.requested_cutoff)}) was used to "
+                "choose which posts were eligible")
+    if fa.cutoff_source == "corpus_default" or fa.cutoff_was_defaulted:
+        if fa.checked_post:
+            return ("no cut-off date was given and the post has no publication date, so the latest available "
+                    "data was used; some of it may be newer than the claim")
+        return "no date was given, so the latest available data was used"
+    return ""
+
+
 def _as_of(fa: FinalAssessment) -> str:
     if not fa.as_of_date:
         return "-"
-    note = " (no date was given, so the latest available data was used)" if fa.cutoff_was_defaulted else ""
-    return f"{friendly_date(fa.as_of_date)}{note}"
+    note = cutoff_note(fa)
+    return f"{friendly_date(fa.as_of_date)}" + (f" ({note})" if note else "")
 
 
 def _evidence(e: EvidenceItem) -> list[str]:
@@ -130,13 +168,14 @@ def _unit_evidence(results: tuple[SubClaimResult, ...], *, show_evidence: bool) 
 def _cite(e: EvidenceItem) -> str:
     tier = e.source_tier.value.replace("TIER_", "T")
     span = f" [{e.citation_span}]" if e.citation_span else ""
-    return f"[{tier} {e.doc_type} {e.publication_date}] {e.content}{span} <{e.url or e.evidence_id}>"
+    period = f" (period from {e.period_source})" if e.period_source else ""
+    return f"[{tier} {e.doc_type} {e.publication_date}] {e.content}{period}{span} <{e.url or e.evidence_id}>"
 
 
 def render_technical(fa: FinalAssessment, *, show_evidence: bool = True) -> str:
     """Developer view: sub-claim types, tiers, retries, audit rationale, caps."""
-    as_of = f"{fa.as_of_date}" + (" (defaulted to the corpus as-of date: no cut-off was given)"
-                                  if fa.cutoff_was_defaulted else "")
+    as_of = f"{fa.as_of_date}" + (f" (cut-off source: {fa.cutoff_source}; {cutoff_note(fa)})"
+                                  if cutoff_note(fa) else "")
     lines = [f"FinSight assessment {fa.request_id}", f"Status: {fa.status.value}    As of: {as_of}"]
     if fa.refusal_reason:
         lines.append(f"Reason: {fa.refusal_reason}")
@@ -144,6 +183,8 @@ def render_technical(fa: FinalAssessment, *, show_evidence: bool = True) -> str:
         lines.append(f"Question: {fa.clarification_question}")
     if fa.overall_verdict:
         lines.append(f"Overall verdict: {fa.overall_verdict.value}")
+    if fa.checked_post:
+        lines += _wrap(f"Post: {fa.checked_post}", indent="      ")
     if fa.sub_claim_results:
         lines += ["", f"{'ID':<4} {'TYPE':<28} {'VERDICT':<22} {'TIER':<7} {'RETRY':<5} SUB-CLAIM"]
         for r in fa.sub_claim_results:

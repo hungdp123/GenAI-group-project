@@ -6,6 +6,7 @@ state update as it happens. It only reads; it never changes the run.
 
 from __future__ import annotations
 
+import re
 import textwrap
 from collections.abc import Callable
 from typing import Any
@@ -67,7 +68,8 @@ class StageReporter:
 
     def _intake(self, u: dict) -> list[str]:
         r = u["request"]
-        src = "defaulted to corpus as-of date" if r.cutoff_was_defaulted else "from input"
+        src = ("no cut-off given: posts up to the corpus as-of date; a stored post's date becomes the evidence "
+               "cut-off" if r.cutoff_was_defaulted else "from input")
         return [f"request {r.request_id}, cut-off {r.cutoff_date} ({src})", *self._stopped(u)]
 
     def _advice_gate_input(self, u: dict) -> list[str]:
@@ -93,10 +95,14 @@ class StageReporter:
         request = u.get("request")
         if request is None:
             return []
-        return [f"stored post loaded, cut-off {request.cutoff_date}"]
+        why = {"post_date": "the post date", "corpus_default": "corpus as-of date; the post has no date",
+               "user": "your date"}[request.cutoff_source]
+        return [f"stored post loaded, evidence cut-off {request.cutoff_date} ({why})"]
 
     def _extract_claims(self, u: dict) -> list[str]:
         lines = [f"{c.sub_claim_id:<4} {c.sub_claim_type.value:<28} {c.text}" for c in u.get("sub_claims", [])]
+        label = u.get("checked_post") or ""
+        lines += [f"note: {m.group(0).strip()}" for m in re.finditer(r"You said .+? is what was checked\.", label)]
         return lines + self._stopped(u)
 
     def _plan(self, u: dict) -> list[str]:
@@ -119,7 +125,9 @@ class StageReporter:
             if not items:
                 lines.append(f"{sid:<4} no evidence")
             for e in items:
-                lines.append(f"{sid:<4} {_tier(e.source_tier)} {e.stance.value:<11} {e.content[:70]}")
+                # No stance here: collectors report figures and passages; the Auditor judges them.
+                period = f"  [period from {e.period_source}]" if getattr(e, "period_source", None) else ""
+                lines.append(f"{sid:<4} {_tier(e.source_tier)} {e.content[:110]}{period}")
         for sid, why in u.get("insufficient_reasons", {}).items():
             if "failed" in why:
                 lines.append(f"{sid:<4} {why}")
@@ -133,14 +141,20 @@ class StageReporter:
             state = "pass" if a.passed else "FAIL"
             extra = f" ({'; '.join(a.failure_reasons)})" if a.failure_reasons else ""
             if a.numeric_check and a.numeric_check.computed is not None:
-                extra += f" numeric {a.numeric_check.computed} {'ok' if a.numeric_check.matches else 'MISMATCH'}"
+                from finsight.agents.orchestrator.render import fmt_numeric_check
+                extra += f" numeric {fmt_numeric_check(a.numeric_check)}"
             lines.append(f"{sid:<4} {state}, proposes {a.verdict.value}{extra}")
         return lines
 
     def _retry_or_accept(self, u: dict) -> list[str]:
         retry = u.get("pending_sub_claim_ids", [])
         self._active = set(retry)
+        gave_up = [f"{sid:<4} GAVE UP -> INSUFFICIENT_EVIDENCE: {why}"
+                   for sid, why in u.get("insufficient_reasons", {}).items()
+                   if "(still failing after" in why or "(no second look" in why or "the cap of" in why]
         if not retry:
+            if gave_up:
+                return [*gave_up, "no more retries -> continue"]
             return ["all sub-claims accepted (audit passed, source tier enough) -> continue"]
         return [f"{sid:<4} RETRY with collectors {'+'.join(u['routing_plan'][sid].collectors)}; "
                 f"feedback: {u['feedback'].get(sid, '')}" for sid in retry]

@@ -1,4 +1,4 @@
-"""Cited-passage Basic RAG retrieval with selectable BM25, dense, or hybrid search.
+"""Cited-passage retrieval with BM25, dense, hybrid, or R4 cross-encoder search.
 
 Run ``python -m finsight.agents.narrative.retrieval.retriever --help`` for the passage CLI.
 The instance is scoped to its configured ticker; callers must supply the company
@@ -21,12 +21,19 @@ from finsight.contracts.schemas import EvidenceItem, SourceTier, Stance
 from finsight.llm.usage import record_tool_call
 
 if TYPE_CHECKING:
-    from finsight.agents.narrative.retrieval.retrieval_experiments import EmbeddingBackend
+    from finsight.agents.narrative.retrieval.retrieval_experiments import EmbeddingBackend, RerankerBackend
 
 
-BACKENDS = ("bm25", "dense", "hybrid", "auto")
+BACKENDS = ("bm25", "dense", "hybrid", "hybrid_cross_encoder", "r4", "auto")
 _VECTOR_LOCK_GUARD = threading.Lock()
 _VECTOR_LOCKS: dict[str, threading.RLock] = {}
+
+
+def normalize_backend(backend: str) -> str:
+    selected = backend.strip().lower()
+    if selected not in BACKENDS:
+        raise ValueError(f"Unknown retrieval backend {backend!r}; choose from {', '.join(BACKENDS)}")
+    return "hybrid_cross_encoder" if selected == "r4" else selected
 
 
 class CorpusRetriever:
@@ -42,15 +49,16 @@ class CorpusRetriever:
         corpus_root: Path | str | None = None,
         candidate_k: int | None = None,
         embedding_backend: EmbeddingBackend | None = None,
+        reranker_backend: RerankerBackend | None = None,
+        reranker_model: str | None = None,
+        rerank_overflow: str | None = None,
     ) -> None:
         ticker = company_ticker if company_ticker is not None else os.getenv("FINSIGHT_NARRATIVE_TICKER", "NVDA")
         self.company_ticker = ticker.strip().upper()
         if not re.fullmatch(r"[A-Z0-9][A-Z0-9.-]{0,14}", self.company_ticker):
             raise ValueError("Company ticker must contain only letters, numbers, dots, or hyphens")
         selected = backend if backend is not None else os.getenv("FINSIGHT_NARRATIVE_BACKEND", "bm25")
-        self.backend = selected.strip().lower()
-        if self.backend not in BACKENDS:
-            raise ValueError(f"Unknown retrieval backend {selected!r}; choose from {', '.join(BACKENDS)}")
+        self.backend = normalize_backend(selected)
         self.candidate_k = candidate_k if candidate_k is not None else int(
             os.getenv("FINSIGHT_NARRATIVE_CANDIDATE_K", "50")
         )
@@ -67,7 +75,14 @@ class CorpusRetriever:
         self.qdrant_dir = Path(configured_qdrant) if configured_qdrant else inferred_qdrant
         self._payload: dict | None = None
         self._embedding_backend = embedding_backend
+        self._reranker_backend = reranker_backend
+        self.reranker_model = reranker_model or os.getenv(
+            "FINSIGHT_NARRATIVE_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+        self.rerank_overflow = rerank_overflow or os.getenv("FINSIGHT_NARRATIVE_RERANK_OVERFLOW", "error")
+        if self.rerank_overflow not in {"error", "truncate"}:
+            raise ValueError("rerank_overflow must be error or truncate")
         self.last_backend: str | None = None
+        self.last_reranking: dict | None = None
 
     def _index(self) -> dict:
         if self._payload is None:
@@ -90,6 +105,7 @@ class CorpusRetriever:
         """
         record_tool_call()
         self.last_backend = None
+        self.last_reranking = None
         if top_k < 1 or not query.strip():
             return []
         if not self._explicit_index and not self.index_path.is_file():
@@ -105,6 +121,8 @@ class CorpusRetriever:
             matches = search_index(payload, query, top_k, cutoff_date, self.company_ticker)
         else:
             matches = self._vector_matches(payload, query, top_k, cutoff_date)
+            if self.last_backend == "hybrid_cross_encoder":
+                matches = self._rerank_matches(query, matches, top_k)
         return [
             EvidenceItem(
                 evidence_id=item["chunk_id"],
@@ -158,7 +176,8 @@ class CorpusRetriever:
                     cutoff_date=cutoff_date, company_ticker=self.company_ticker,
                 )
             return hybrid_search(
-                payload, vectors, self._embedding_backend, query, top_k=top_k,
+                payload, vectors, self._embedding_backend, query,
+                top_k=max(top_k, self.candidate_k) if self.last_backend == "hybrid_cross_encoder" else top_k,
                 cutoff_date=cutoff_date, company_ticker=self.company_ticker, candidate_k=self.candidate_k,
             )["hybrid"]
         finally:
@@ -166,15 +185,61 @@ class CorpusRetriever:
             # Cache the model, but let other calls/instances reopen the database.
             vectors.client.close()
 
+    def _rerank_matches(self, query: str, candidates: list[dict], top_k: int) -> list[dict]:
+        """R4: rerank the wider hybrid pool, then apply final K; no extra source-tier policy."""
+        from finsight.agents.narrative.retrieval.retrieval_experiments import (
+            SentenceTransformersReranker, rerank_candidates,
+        )
+
+        if not candidates:
+            return []
+        if self._reranker_backend is None:
+            self._reranker_backend = SentenceTransformersReranker(self.reranker_model)
+        model = getattr(self._reranker_backend, "model", None)
+        tokenizer = getattr(model, "tokenizer", None)
+        limit = (getattr(model, "max_seq_length", None) or getattr(model, "max_length", None)
+                 or getattr(tokenizer, "model_max_length", None))
+        counts = []
+        if tokenizer is not None and limit is not None:
+            token_ids = tokenizer(
+                [query] * len(candidates), [c["text"] for c in candidates],
+                truncation=False, add_special_tokens=True,
+            )["input_ids"]
+            counts = [len(ids) for ids in token_ids]
+        elif self.rerank_overflow == "error":
+            raise RuntimeError("Cannot verify cross-encoder token limit; use a tokenizer-aware reranker")
+        over = sum(count > int(limit) for count in counts) if limit is not None else None
+        self.last_reranking = {
+            "method": "R4", "source_priority": "P0", "candidate_count": len(candidates),
+            "candidate_ids": [c["chunk_id"] for c in candidates],
+            "model": self._reranker_backend.model_name, "overflow_policy": self.rerank_overflow,
+            "pair_token_limit": int(limit) if limit is not None else None,
+            "maximum_pair_tokens": max(counts, default=None), "over_limit_pairs": over,
+        }
+        if over and self.rerank_overflow == "error":
+            raise ValueError(
+                f"{over} cross-encoder pairs exceed {limit} tokens. "
+                "Use --rerank-overflow truncate (or FINSIGHT_NARRATIVE_RERANK_OVERFLOW=truncate) "
+                "to explicitly permit model truncation. Source passages remain intact."
+            )
+        ranked = rerank_candidates(query, candidates, self._reranker_backend)[:top_k]
+        self.last_reranking["ranking"] = [
+            {"rank": n, "evidence_id": c["chunk_id"], "cross_encoder_score": c["retrieval_score"]}
+            for n, c in enumerate(ranked, 1)
+        ]
+        return ranked
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ticker", required=True, help="Company to retrieve for (never inferred from query text)")
     parser.add_argument("--query", required=True)
     parser.add_argument("--cutoff", required=True, type=date.fromisoformat)
-    parser.add_argument("--backend", choices=BACKENDS, default=None)
+    parser.add_argument("--backend", type=str.lower, choices=BACKENDS, default=None)
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--candidate-k", type=int, default=None)
+    parser.add_argument("--reranker-model")
+    parser.add_argument("--rerank-overflow", choices=("error", "truncate"))
     parser.add_argument("--corpus-root", type=Path)
     parser.add_argument("--index", type=Path)
     parser.add_argument("--qdrant-dir", type=Path)
@@ -184,6 +249,7 @@ def main() -> None:
         retriever = CorpusRetriever(
             index_path=args.index, company_ticker=args.ticker, qdrant_dir=args.qdrant_dir,
             backend=args.backend, corpus_root=args.corpus_root, candidate_k=args.candidate_k,
+            reranker_model=args.reranker_model, rerank_overflow=args.rerank_overflow,
         )
         items = retriever.retrieve(args.query, args.top_k, args.cutoff)
     except (OSError, ValueError, RuntimeError) as exc:
@@ -194,6 +260,7 @@ def main() -> None:
         "query": args.query, "requested_backend": retriever.backend, "backend_used": retriever.last_backend,
         "top_k": args.top_k, "candidate_k": max(args.top_k, retriever.candidate_k),
         "corpus_fingerprint": retriever._payload.get("corpus_fingerprint") if retriever._payload is not None else None,
+        "reranking": retriever.last_reranking,
         "evidence": [item.model_dump(mode="json") for item in items],
         "citation_gaps": [{"evidence_id": item.evidence_id,
                            "missing_fields": [name for name in ("url", "citation_span") if not getattr(item, name)]}

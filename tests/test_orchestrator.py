@@ -555,3 +555,47 @@ class _InjectingNarrative(StubNarrativeAgent):
 def test_injection_in_retrieved_text_does_not_change_verdicts(monkeypatch, tmp_path):
     out = _demo(monkeypatch, tmp_path, registry=demo_registry(narrative=_InjectingNarrative()))
     assert _by_type(out.assessment)[SubClaimType.DEMAND_ATTRIBUTION].verdict is Verdict.PARTIALLY_SUPPORTED
+
+
+# -- where the cut-off came from ----------------------------------------------------------
+
+
+def test_no_cutoff_judges_at_the_post_date_and_says_so():
+    from finsight.agents.orchestrator.render import render_assessment
+
+    fa = execute("Joseph Carlson said Company X's revenue growth is driven by AI demand.").assessment
+    assert fa.as_of_date == date(2025, 7, 31)
+    assert fa.cutoff_source == "post_date" and fa.requested_cutoff is None
+    assert "no cut-off date was given" in render_assessment(fa)
+
+
+def test_a_later_typed_cutoff_is_kept_and_named():
+    from finsight.agents.orchestrator.render import render_assessment
+
+    fa = execute("Joseph Carlson said Company X's revenue growth is driven by AI demand.",
+                 date(2025, 12, 31)).assessment
+    assert fa.as_of_date == date(2025, 7, 31) and fa.cutoff_source == "post_date"
+    assert fa.requested_cutoff == date(2025, 12, 31)
+    assert "31 Dec 2025" in render_assessment(fa)
+
+
+def test_undated_post_without_cutoff_warns_about_newer_data():
+    from finsight.agents.orchestrator.render import cutoff_note
+    from finsight.contracts.schemas import AssessmentStatus, FinalAssessment
+
+    fa = FinalAssessment(request_id="r", status=AssessmentStatus.COMPLETED, as_of_date=date(2026, 10, 21),
+                         cutoff_was_defaulted=True, cutoff_source="corpus_default", checked_post="a post",
+                         boundary_disclaimer="-")
+    assert "may be newer than the claim" in cutoff_note(fa)
+    assert "may be newer" not in cutoff_note(fa.model_copy(update={"checked_post": None}))
+
+
+def test_both_cutoff_routes_filter_posts_and_judge_at_the_post_date():
+    """A date typed in the text and a --cutoff flag do the same thing: they choose the eligible posts, and the
+    SEC evidence stops at the matched post's date."""
+    claim = "Joseph Carlson said Company X's revenue growth is driven by AI demand."
+    typed = execute(f"{claim} Cut-off: 31 Dec 2025").assessment
+    flag = execute(claim, date(2025, 12, 31)).assessment
+    for fa in (typed, flag):
+        assert fa.as_of_date == date(2025, 7, 31) and fa.cutoff_source == "post_date"
+        assert fa.requested_cutoff == date(2025, 12, 31)

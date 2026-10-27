@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FinSight</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <p class="brand__name">FinSight</p>
+      </div>
+    </div>
+    <p class="topbar__lede">Run a claim, then read each step and the citation behind the verdict.</p>
+    <div class="topbar__meta">
+      <label class="switch"><input type="checkbox" id="technical" /> Technical details</label>
+      <div id="modeChip" class="mode-chip">Loading…</div>
+    </div>
+  </header>
+
+  <div class="stage">
+    <aside class="deck">
+      <section class="card">
+        <h2>Check a claim</h2>
+        <p class="card__hint" id="cutoffHint">Enter a cut-off to choose which posts are eligible. Leave it blank and a stored post is checked as of the day it was published. If that post has no date, the check uses the latest filing in the corpus.</p>
+        <label class="field">
+          <span>Claim</span>
+          <textarea id="claim" rows="5" placeholder="Joseph Carlson said Nvidia reported revenues of 96.2 billion, up 106% year-over-year."></textarea>
+        </label>
+        <label class="field">
+          <span>Cut-off</span>
+          <input id="cutoff" type="date" />
+        </label>
+        <label class="paid" id="paidRow" hidden>
+          <input type="checkbox" id="confirmPaid" />
+          <span>This machine is in paid mode. I confirm this run can spend course credit.</span>
+        </label>
+        <div class="run-row">
+          <button type="button" class="run-btn" id="runBtn">Run check</button>
+          <button type="button" class="ghost-btn" id="clearBtn">Clear</button>
+        </div>
+        <p class="ops__note" id="formStatus">Paste a claim. ⌘/Ctrl + Enter runs it.</p>
+        <p class="cli-label">Terminal equivalent</p>
+        <pre class="cli" id="cliPreview"></pre>
+      </section>
+    </aside>
+
+    <main class="preview" id="preview">
+      <section class="card card--soft empty" id="empty">
+        <p class="scope-h">Waiting for a check</p>
+        <h2>Steps, verdict, and citations show up here.</h2>
+        <p class="coverage-brief">The run prints each pipeline stage as it happens, then the verdict for every sub-claim with the filing or passage it cites. Gates, retries, and cut-off violations stay in the trace underneath.</p>
+      </section>
+      <div id="result"></div>
+      <div id="steps"></div>
+      <div id="trace"></div>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

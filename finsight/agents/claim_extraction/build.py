@@ -86,9 +86,18 @@ _FREE_CASH = re.compile(r"\bfree cash flow\b|\bfcf\b", flags=re.IGNORECASE)
 _LEVERAGE = re.compile(r"\b(leverage|debt[- ]to[- ]equity|debt/equity)\b", flags=re.IGNORECASE)
 _DEBT_AMOUNT = re.compile(r"\b(debt|indebted|balance sheet)\b", flags=re.IGNORECASE)
 _REVENUE_WORD = re.compile(r"\b(revenues?|sales|top[- ]line)\b", flags=re.IGNORECASE)
-_NET_INCOME_WORD = re.compile(r"\b(net income|earnings|profits?|bottom line)\b", flags=re.IGNORECASE)
+# "Earnings report" or "earnings call" names the event, not profit.
+_EARNINGS = r"earnings(?!\s+(?:reports?|calls?|releases?|season|results|dates?|updates?|announcements?)\b)"
+_NET_INCOME_WORD = re.compile(rf"\b(net income|{_EARNINGS}|profits?|bottom line)\b", flags=re.IGNORECASE)
 _GROWTH_MEASURE = re.compile(
-    r"\b(revenues?|sales|earnings|profits?|net income|top line)\b",
+    rf"\b(revenues?|sales|{_EARNINGS}|profits?|net income|top line)\b",
+    flags=re.IGNORECASE,
+)
+# A result against analyst estimates. The estimates are not stored, so this is not a past change.
+_VS_ESTIMATES = re.compile(
+    r"\b(than|vs\.?|versus|beat|beats|missed|misses|topped|ahead of|short of)\s+(?:\w+\s+){0,2}"
+    r"(expected|expectations?|estimates?|consensus)\b"
+    r"|\b(analysts?|street|eps|earnings per share|consensus)\s+(estimates?|expectations?)\b",
     flags=re.IGNORECASE,
 )
 _DIRECTION = re.compile(
@@ -111,6 +120,10 @@ _LEAVE_TYPE = frozenset({
     "DEMAND_ATTRIBUTION", "CONTINUATION", "BUSINESS_RISK", "COMPARATIVE", "PERSONALIZED_ADVICE",
 })
 _NUMBER = re.compile(r"\d|billion|million", flags=re.IGNORECASE)
+_STATED_FIGURE = re.compile(
+    r"\d+(?:\.\d+)?\s*(?:%|percent\b)|\$?\s*\d+(?:\.\d+)?\s*(?:billion|million)\b",
+    flags=re.IGNORECASE,
+)
 _SEGMENT = re.compile(
     r"\b(segment|division|aws|azure|instagram|waymo|iphone|google cloud|youtube|data centers?)\b",
     flags=re.IGNORECASE,
@@ -333,13 +346,72 @@ def split_financial_measures(text: str) -> list[tuple[str, Kind]]:
     return [(", ".join(parts), _kind_for_piece(name, ", ".join(parts))) for name, parts in groups]
 
 
+def _blocked_sentence(text: str) -> bool:
+    """A forecast, price remark, segment line, or versus line stays one claim."""
+    return bool(
+        _FORWARD.search(text) or _FORECAST_LINE.search(text) or _PRICE_TALK.search(text)
+        or _SEGMENT.search(text) or _VERSUS.search(text)
+    )
+
+
+def split_company_measures(text: str) -> list[tuple[str, Kind, str]]:
+    """The two-company check. Each company with its own figure becomes one claim.
+
+    A clause that does not repeat the measure keeps the measure already stated.
+    A forecast, price remark, segment line, versus line, or comparison stays one
+    claim. Pairing that does not fit stays one claim.
+    """
+    if not text or _blocked_sentence(text) or _COMPARE.search(text):
+        return []
+    named = [ticker for ticker, _surface, _start in find_mentions(text) if ticker != "CMPX"]
+    if len(dict.fromkeys(named)) < 2:
+        return []
+    carried: str | None = None
+    found: list[tuple[str, str, str]] = []
+    dropped_figure = False
+    for raw in _CLAIM_SPLIT.split(text):
+        part = _LEAD_IN.sub("", raw).strip(" ,.;")
+        if not part:
+            continue
+        own = _piece_measure(part)
+        clause_measure = carried
+        if own:
+            collapsed = _collapse_measure(own, [carried] if carried else [])
+            if collapsed:
+                carried = collapsed
+                clause_measure = collapsed
+        companies = list(dict.fromkeys(
+            ticker for ticker, _surface, _start in find_mentions(part) if ticker != "CMPX"
+        ))
+        paired = len(companies) == 1 and bool(_STATED_FIGURE.search(part)) and bool(clause_measure)
+        if _STATED_FIGURE.search(part) and not paired:
+            dropped_figure = True
+            continue
+        if not paired:
+            continue
+        found.append((part, clause_measure, companies[0]))
+    if dropped_figure or len(found) < 2 or len({ticker for _quote, _measure, ticker in found}) < 2:
+        return []
+    return [
+        (quote, _kind_for_piece(measure, quote), ticker)
+        for quote, measure, ticker in found
+    ]
+
+
 def expand_stored_row(row: dict) -> list[dict]:
-    """Replace one stored sentence with one row per measure. An unsplit row is returned unchanged."""
+    """Replace one stored sentence with one row per measure, or one row per company.
+
+    An unsplit row is returned unchanged. The two-company check emits one row per
+    company instead of keeping that sentence whole.
+    """
     if row.get("expansion_rule") or str(row.get("sub_claim_type") or "") in _LEAVE_TYPE:
         return [row]
     text = str(row.get("text") or row.get("source_span") or "")
     pieces = split_financial_measures(text)
     if len(pieces) < 2:
+        company_pieces = split_company_measures(text)
+        if len(company_pieces) >= 2:
+            return _expand_company_pieces(row, text, company_pieces)
         return [row]
     from finsight.agents.claim_extraction.fields import company_source, parse_fields
 
@@ -365,7 +437,67 @@ def expand_stored_row(row: dict) -> list[dict]:
     return expanded
 
 
+def _expand_company_pieces(
+    row: dict, text: str, pieces: list[tuple[str, Kind, str]],
+) -> list[dict]:
+    from finsight.agents.claim_extraction.fields import company_source, parse_fields
+
+    base_id = str(row.get("sub_claim_id") or "c")
+    expanded = []
+    for quote, kind, ticker in pieces:
+        slug = kind.measure or kind.type.lower()
+        piece = dict(row)
+        piece.update({
+            "text": quote,
+            "source_span": quote,
+            "parent_span": text,
+            "company_ticker": ticker,
+            "sub_claim_type": kind.type,
+            "measure": kind.measure,
+            "sub_claim_id": f"{base_id}-{ticker}-{slug}",
+            "is_quantitative": bool(_NUMBER.search(quote)),
+            "quote_time": _quote_time(quote),
+            "fields": parse_fields(quote, company=ticker).as_dict(),
+            "company_source": company_source(quote, ticker),
+        })
+        if "judge_company" in piece:
+            piece["judge_company"] = ticker
+        expanded.append(piece)
+    return expanded
+
+
+def apply_company_splits(rows: list[dict]) -> tuple[list[dict], int]:
+    """Replace each two-company sentence with one row per company. Other rows stay."""
+    expanded: list[dict] = []
+    splits = 0
+    for row in rows:
+        if row.get("expansion_rule") or str(row.get("sub_claim_type") or "") in _LEAVE_TYPE:
+            expanded.append(row)
+            continue
+        text = str(row.get("text") or row.get("source_span") or "")
+        pieces = split_company_measures(text)
+        if len(pieces) < 2:
+            expanded.append(row)
+            continue
+        expanded.extend(_expand_company_pieces(row, text, pieces))
+        splits += 1
+    return expanded, splits
+
+
 def _rows_for(sentence: str, video_id: str, influencer: str, title: str, upload_date: str) -> list[dict]:
+    company_pieces = split_company_measures(sentence)
+    if len(company_pieces) >= 2:
+        rows = []
+        for quote, kind, ticker in company_pieces:
+            if _ADVICE_OR_PRICE.search(quote):
+                continue
+            made = _materialize(quote, kind, ticker, video_id, influencer, title, upload_date)
+            for item in made:
+                if item.get("text") != sentence:
+                    item["parent_span"] = sentence
+            rows.extend(made)
+        if len({row["company_ticker"] for row in rows}) >= 2:
+            return rows
     measured = split_financial_measures(sentence)
     if len(measured) >= 2:
         rows = []
@@ -451,6 +583,8 @@ def _classify(text: str) -> Kind | None:
     for pattern, rule in _WIDE:
         if pattern.search(text) and not _NAMED_MEASURE.search(text):
             return Kind("PROFITABILITY", expansion=rule)
+    if _VS_ESTIMATES.search(text):
+        return Kind("OTHER")
     if _FORWARD.search(text):
         return Kind("CONTINUATION", measure="guidance" if re.search(r"\bguid", text, flags=re.IGNORECASE) else None)
     if _COMPARE.search(text):
@@ -511,7 +645,8 @@ def _ocf_growth(text: str) -> bool:
 
 def _no_financial_formula(text: str) -> bool:
     """A figure the financial agent cannot calculate. Routing stays with the narrative agent."""
-    if _RUN_RATE.search(text) or _EXCLUDING_GAINS.search(text) or _SERVICES_MARGIN.search(text):
+    if (_RUN_RATE.search(text) or _EXCLUDING_GAINS.search(text) or _SERVICES_MARGIN.search(text)
+            or _VS_ESTIMATES.search(text)):
         return True
     return bool(_GROSS_PROFIT.search(text) and not _MARGIN.search(text))
 
@@ -540,6 +675,11 @@ def specific_type(stored: str, text: str, measure: str | None) -> str:
         return _TYPE_BY_MEASURE[measure]
     if stored not in _LEAVE_TYPE:
         if _no_financial_formula(text):
+            return "OTHER"
+        # A growth row built before "earnings report" stopped counting as a measure names none.
+        if (stored in ("HISTORICAL_GROWTH", "NET_INCOME_GROWTH") and measure is None
+                and not _GROWTH_MEASURE.search(text) and not _OPERATING_INCOME.search(text)
+                and not _EPS.search(text) and not _ocf_growth(text)):
             return "OTHER"
         # A margin row stays a margin row. The growth line is added beside it.
         if stored != "PROFITABILITY" and (_operating_income_growth(text) or _eps_growth(text) or _ocf_growth(text)):

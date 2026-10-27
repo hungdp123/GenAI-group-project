@@ -317,9 +317,13 @@ def _best_hit(
     ticker: str | None,
 ) -> tuple[str, str] | None:
     stored = _ranked(focus, claims, ticker=ticker)
-    if stored:
-        return stored[0][1].text, stored[0][2]
     spoken = _transcript_hits(focus, posts, None, ticker)
+    if stored:
+        # A stored claim wins ties, but not over a spoken line that agrees with the prompt more closely
+        # (the catalog may not hold every sentence: "free cash flow is going down because ...").
+        if spoken and agreement(focus, spoken[0].text, ticker) > agreement(focus, stored[0][1].text, ticker):
+            return spoken[0].text, spoken[0].video_id
+        return stored[0][1].text, stored[0][2]
     if not spoken:
         spoken = _transcript_hits(focus, posts, None, ticker, strict_figure=False)
     if spoken:
@@ -592,16 +596,39 @@ def _lexical_hits(
     return unique[:8]
 
 
+def agreement(focus: str, text: str, ticker: str | None = None) -> float:
+    """How closely a line's fields agree with the prompt, beyond passing fields_match.
+
+    Same direction stated (+2), same period stated (+1), each figure in common (+1), and -0.5 for each measure
+    the line is about that the prompt is not. Word overlap (BM25) only breaks ties: a line that repeats
+    "free cash flow" but is about margins must not beat "free cash flow is going down" for "went down"."""
+    candidate = parse_fields(text, company=ticker)
+    best = None
+    for part in _parts(focus) or [focus]:
+        prompt = parse_fields(part, company=ticker)
+        score = 0.0
+        if prompt.direction and candidate.direction == prompt.direction:
+            score += 2
+        if prompt.period and candidate.period and prompt.period.lower() == candidate.period.lower():
+            score += 1
+        score += sum(1 for value in prompt.values if value in candidate.values)
+        if prompt.metrics:
+            score -= 0.5 * len(candidate.metrics - prompt.metrics)
+        best = score if best is None else max(best, score)
+    return best or 0.0
+
+
 def _order_by_bm25(
     focus: str, matched: list[tuple[SubClaim, str]], *, cluster: bool = True,
 ) -> list[tuple[float, SubClaim, str]]:
     if not matched:
         return []
     scores = bm25_scores(focus, [claim.text for claim, _video_id in matched])
-    scored = sorted(zip(scores, matched), key=lambda item: item[0], reverse=True)
-    best = scored[0][0]
-    kept = [item for item in scored if not cluster or _near_best(best, item[0])]
-    return [(score, claim, video_id) for score, (claim, video_id) in kept[:8]]
+    agrees = [agreement(focus, claim.text, claim.company_ticker) for claim, _video_id in matched]
+    scored = sorted(zip(agrees, scores, matched), key=lambda item: (item[0], item[1]), reverse=True)
+    top_agree, best = scored[0][0], scored[0][1]
+    kept = [item for item in scored if not cluster or (item[0] == top_agree and _near_best(best, item[1]))]
+    return [(score, claim, video_id) for _agree, score, (claim, video_id) in kept[:8]]
 
 
 def _near_best(best: float, score: float) -> bool:
@@ -637,15 +664,13 @@ def _transcript_hits(
     if not passed:
         return []
     scores = bm25_scores(focus, [sentence for sentence, _vid, _when in passed])
-    found = [
-        _Hit(score, sentence, vid, when)
-        for score, (sentence, vid, when) in sorted(
-            zip(scores, passed), key=lambda item: item[0], reverse=True,
-        )
-    ]
-    best = found[0].score
+    agrees = [agreement(focus, sentence, ticker) for sentence, _vid, _when in passed]
+    ranked = sorted(zip(agrees, scores, passed), key=lambda item: (item[0], item[1]), reverse=True)
+    found = [_Hit(score, sentence, vid, when) for _agree, score, (sentence, vid, when) in ranked]
+    top_agree, best = ranked[0][0], found[0].score
     stated_value = any(prompt.values for prompt in prompts)
-    kept = found if stated_value else [item for item in found if _near_best(best, item.score)]
+    kept = found if stated_value else [item for (agree, _s, _p), item in zip(ranked, found)
+                                       if agree == top_agree and _near_best(best, item.score)]
     unique: list[_Hit] = []
     seen: set[str] = set()
     for item in kept:

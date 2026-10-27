@@ -11,7 +11,7 @@ from finsight.eval.run_eval import load_dataset, main, run_eval, validate_datase
 def test_datasets_load_and_validate():
     dev = load_dataset("dev")
     assert load_dataset("heldout")
-    assert {i.category for i in dev} >= {"normal", "adversarial_advice", "out_of_scope", "injection", "temporal"}
+    assert {i.category for i in dev} >= {"normal", "adversarial_advice", "out_of_scope", "injection", "cutoff"}
     assert validate_datasets() == []
 
 

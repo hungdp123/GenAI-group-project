@@ -28,10 +28,10 @@ from finsight.agents.claim_extraction.extract import (
 )
 from finsight.agents.claim_extraction.prepare import post_limits
 from finsight.agents.claim_extraction.select import MATCH_NOTE, choose_line, miss_text, stated_claim
-from finsight.agents.orchestrator import explain, pending, posts, router, routing
+from finsight.agents.orchestrator import clues, explain, pending, posts, router, routing
 from finsight.agents.orchestrator.aggregation import highest_tier, overall_verdict
 from finsight.agents.orchestrator.expansion import report_units
-from finsight.agents.orchestrator.render import render_assessment
+from finsight.agents.orchestrator.render import fmt_numeric_check, render_assessment
 from finsight.config import BOUNDARY_DISCLAIMER, AgentRegistry, Settings
 from finsight.contracts.schemas import (
     AdviceDecision,
@@ -45,6 +45,7 @@ from finsight.contracts.schemas import (
     FinSightState,
     RetryRecord,
     Stance,
+    SubClaimType,
     TemporalViolation,
     ClaimRequest,
     Verdict,
@@ -98,6 +99,21 @@ def _without_advice(final: FinalAssessment) -> FinalAssessment:
     summary = without_advice(final.summary or "")
     summary = f"{note} {summary}".strip()
     return final.model_copy(update={"summary": summary, "sub_claim_results": results})
+
+
+# Knowledge layer section 13: request-wide caps on second looks and on extra narrative searches.
+MAX_SECOND_LOOKS = 8
+MAX_EXTRA_SEARCHES = 4
+
+
+def _no_second_look(sub_claim: SubClaim, collectors: list[str], evidence: list[EvidenceItem]) -> str | None:
+    """Why another pass cannot help (knowledge layer section 13), or None when a second look is allowed."""
+    if sub_claim.sub_claim_type is SubClaimType.COMPARATIVE:
+        return "a comparative claim"
+    if collectors == ["financial"] and not evidence:
+        return ("the financial agent returned no figure: a missing filing tag, a period after the cut-off, "
+                "or a ratio section 11 does not define")
+    return None
 
 
 def _said_and_verified(state: FinSightState, results: list[SubClaimResult], text: str, overall: Verdict | None):
@@ -158,7 +174,9 @@ class Nodes:
             pending.remember_cutoff(settings.logs_dir, claim)
         cutoff, defaulted = routing.resolve_cutoff(state.cutoff_input, claim, settings.corpus_as_of_date)
         request = ClaimRequest(request_id=new_request_id(), raw_claim=claim, company_ticker=state.company_hint,
-                                cutoff_date=cutoff, cutoff_was_defaulted=defaulted)
+                                cutoff_date=cutoff, cutoff_was_defaulted=defaulted,
+                                cutoff_source="corpus_default" if defaulted else "user",
+                                requested_cutoff=None if defaulted else cutoff)
         self.rec.start(request.request_id, state.raw_input, cutoff)
         self.rec.event("intake", f"cutoff={cutoff} defaulted={defaulted}")
         update: dict[str, Any] = {
@@ -321,12 +339,18 @@ class Nodes:
         )
         uploaded = posts.post_date(chosen)
         fields: dict[str, Any] = {"raw_claim": transcript or str(chosen.get("transcript") or "").strip()}
-        # A cut-off the user typed stays the review date. Otherwise the post date is the cut-off.
-        if uploaded is not None and (state.cutoff_input is not None or not state.cutoff_from_prompt):
+        # The user's date (--cutoff or typed in the text) only chose which posts were eligible. The SEC evidence
+        # stops at the matched post's date: the claim is judged on what was public when it was said.
+        if uploaded is not None:
             fields["cutoff_date"] = uploaded
             fields["cutoff_was_defaulted"] = False
+            fields["cutoff_source"] = "post_date"
             if self.rec.log is not None:
                 self.rec.log.cutoff_date = uploaded
+        elif uploaded is None and req.cutoff_source == "corpus_default":
+            # No date from the user and none on the post: evidence runs to the corpus date, which may be
+            # after the claim was made. Said in the output, not only the log.
+            self.rec.event("collect_posts", "post has no publication date; evidence cut-off stays the corpus date")
         request = req.model_copy(update=fields)
         when = uploaded.strftime("%d %b %Y").lstrip("0") if uploaded else "an unknown date"
         label = (
@@ -380,7 +404,18 @@ class Nodes:
             )
         for note in extracted.notes:
             self.rec.event("extract_claims", note)
-        update: dict[str, Any] = {"sub_claims": extracted.sub_claims}
+        sub_claims = extracted.sub_claims
+        conflicts: list[str] = []
+        if state.from_stored_post:
+            # Period clues ride along with each line; the line itself is still the claim that is checked.
+            sub_claims = clues.with_clues(sub_claims, req.raw_claim, focus)
+            conflicts = clues.prompt_conflicts(focus, sub_claims, req.company_ticker)
+            for claim in sub_claims:
+                if claim.context:
+                    self.rec.event("extract_claims", f"{claim.sub_claim_id} context: {claim.context[:200]}")
+            for note in conflicts:
+                self.rec.event("extract_claims", f"prompt vs post: {note}")
+        update: dict[str, Any] = {"sub_claims": sub_claims}
         if extracted.insufficient_reasons:
             update["insufficient_reasons"] = extracted.insufficient_reasons
         label = state.checked_post or ""
@@ -391,6 +426,8 @@ class Nodes:
         if extracted.dropped_by_cap:
             quoted = "; ".join(f'"{quote}"' for quote in extracted.dropped_by_cap)
             label = f"{label} Not checked, past the cap of 8: {quoted}.".strip()
+        if conflicts:
+            label = f"{label} {' '.join(conflicts)}".strip()
         if label != (state.checked_post or ""):
             update["checked_post"] = label
         if extracted.status is not None:
@@ -402,7 +439,7 @@ class Nodes:
     # -- 5. plan ------------------------------------------------------------
 
     def plan(self, state: FinSightState) -> dict[str, Any]:
-        """The LLM router picks financial / narrative / both per sub-claim; caps and tiers stay from the rule."""
+        """Route each sub-claim by its knowledge-layer rule. No LLM is called."""
         plan, pending, insufficient = {}, [], dict(state.insufficient_reasons)
         cutoff = state.request.cutoff_date if state.request else None
 
@@ -423,8 +460,7 @@ class Nodes:
             entry = routing.plan_entry(sub_claim, rule)
             if decision is not None:
                 entry = entry.model_copy(update={"collectors": list(decision.collectors)})
-                self.rec.event("plan", f"{sub_claim.sub_claim_id}: {decision.target} ({decision.source}) - "
-                                       f"{decision.reason}")
+                self.rec.event("plan", f"{sub_claim.sub_claim_id}: {decision.target} - {decision.reason}")
             elif error is not None:
                 # DECISION: a failed router call keeps the knowledge-layer route instead of dropping the sub-claim.
                 self.rec.event("plan", f"{sub_claim.sub_claim_id}: router failed ({error}); "
@@ -435,8 +471,6 @@ class Nodes:
                 continue
             if entry.collectors:
                 pending.append(sub_claim.sub_claim_id)
-            elif decision is not None and decision.source == "llm":
-                insufficient[sub_claim.sub_claim_id] = f"No evidence agent can check this: {decision.reason}"
             else:
                 insufficient[sub_claim.sub_claim_id] = (
                     rule.note or f"No evidence collector for {sub_claim.sub_claim_type.value}.")
@@ -535,12 +569,17 @@ class Nodes:
         Yes -> accept. No -> the orchestrator re-plans the sub-claim (adds the rule's retry_collectors)
         and re-gathers it with feedback, at most `max_retries` times. Still failing -> the sub-claim
         becomes INSUFFICIENT_EVIDENCE and the rest of the answer is kept.
+
+        Knowledge layer section 13: no second look when another pass cannot help (a comparative claim,
+        or a financial claim with no figure), and at most 8 second looks and 4 extra searches per request.
         """
         max_retries = self.ctx.settings.max_retries
         retry, feedback, plan = [], dict(state.feedback), dict(state.routing_plan)
         retries_used, insufficient = dict(state.retries_used), dict(state.insufficient_reasons)
         shortfalls = dict(state.tier_shortfalls)
         sub_claims = {c.sub_claim_id: c for c in state.sub_claims}
+        looks = sum(retries_used.values())
+        searches = sum(n for cid, n in retries_used.items() if "narrative" in plan[cid].collectors)
         for sub_claim_id in state.pending_sub_claim_ids:
             audit = state.audits.get(sub_claim_id)
             if sub_claim_id in insufficient or audit is None:
@@ -558,10 +597,24 @@ class Nodes:
                 hint = audit.feedback_for_retry or "; ".join(audit.failure_reasons)
 
             used = retries_used.get(sub_claim_id, 0)
-            if used < max_retries:
+            replanned = routing.replan_entry(plan[sub_claim_id], rule)
+            searches_again = "narrative" in replanned.collectors
+            stop = None
+            if used >= max_retries:
+                stop = f"still failing after {used} retr{'y' if used == 1 else 'ies'}"
+            elif skip := _no_second_look(sub_claims[sub_claim_id], plan[sub_claim_id].collectors,
+                                         state.evidence.get(sub_claim_id, [])):
+                stop = f"no second look: {skip}"
+            elif looks >= MAX_SECOND_LOOKS:
+                stop = f"the run stopped because the cap of {MAX_SECOND_LOOKS} second looks was hit"
+            elif searches_again and searches >= MAX_EXTRA_SEARCHES:
+                stop = f"the run stopped because the cap of {MAX_EXTRA_SEARCHES} extra searches was hit"
+            if stop is None:
+                looks += 1
+                searches += searches_again
                 retries_used[sub_claim_id] = used + 1
                 feedback[sub_claim_id] = hint
-                plan[sub_claim_id] = routing.replan_entry(plan[sub_claim_id], rule)
+                plan[sub_claim_id] = replanned
                 if plan[sub_claim_id].collectors != state.routing_plan[sub_claim_id].collectors:
                     self.rec.plan(plan[sub_claim_id])
                     self.rec.event("retry_or_accept", f"{sub_claim_id}: re-planned collectors -> "
@@ -569,7 +622,7 @@ class Nodes:
                 retry.append(sub_claim_id)
                 self.rec.retry(RetryRecord(sub_claim_id=sub_claim_id, attempt=used + 1, feedback=f"{problem} | {hint}"))
             else:
-                insufficient[sub_claim_id] = f"{problem} (still failing after {used} retr{'y' if used == 1 else 'ies'})"
+                insufficient[sub_claim_id] = f"{problem} ({stop})"
                 if audit.passed:
                     shortfalls[sub_claim_id] = insufficient[sub_claim_id]
                 self.rec.retry(RetryRecord(sub_claim_id=sub_claim_id, attempt=used, feedback=problem, exhausted=True))
@@ -665,6 +718,7 @@ class Nodes:
             overall_verdict=overall, sub_claim_results=results,
             evidence_gaps=gaps, as_of_date=state.request.cutoff_date,
             cutoff_was_defaulted=state.request.cutoff_was_defaulted, boundary_disclaimer=BOUNDARY_DISCLAIMER,
+            cutoff_source=state.request.cutoff_source, requested_cutoff=state.request.requested_cutoff,
         )
         return {"final": final}
 
@@ -680,8 +734,7 @@ class Nodes:
                  f"{n_sup} supporting and {n_chal} challenging evidence items."]
         if audit.numeric_check and audit.numeric_check.computed is not None:
             nc = audit.numeric_check
-            parts.append(f"Numeric check: {nc.metric_name or 'value'} computed = {nc.computed} "
-                         f"({'matches' if nc.matches else 'does not match'} the sub-claim).")
+            parts.append(f"Numeric check: {fmt_numeric_check(nc)}.")
         if audit.citation_check:
             parts.append(f"Citation check on {audit.citation_check.evidence_id}: "
                          f"{'entails' if audit.citation_check.entails else 'does not entail'} the sub-claim.")
@@ -717,6 +770,8 @@ class Nodes:
             summary=_with_note(state, explain.stop_summary(status, state.refusal_reason, question)),
             as_of_date=state.request.cutoff_date if state.request else None,
             cutoff_was_defaulted=state.request.cutoff_was_defaulted if state.request else False,
+            cutoff_source=state.request.cutoff_source if state.request else "user",
+            requested_cutoff=state.request.requested_cutoff if state.request else None,
             boundary_disclaimer=BOUNDARY_DISCLAIMER,
         )
         self.rec.event("finalize", f"status={final.status.value} reason={final.refusal_reason or '-'}")

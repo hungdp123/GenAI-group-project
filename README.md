@@ -74,8 +74,8 @@ and you get the `finsight` command. Re-activate the virtual environment in every
 
 Narrative uses an LLM to select relevant source passages, extract exact facts and
 write a cited evidence summary, without stance labels or a claim verdict. See
-[the Narrative handoff](docs/narrative/workflow/orchestrator_narrative_handoff.md#llm-evidence-preparation-without-stance-or-verdict)
-and [Week 2 Section 10](docs/narrative/workflow/summary_week_2.md#10-current-narrative-rag-output-cited-evidence-without-stance-or-verdict)
+[Workflow E: orchestrator connection](docs/narrative/workflow/workflow_e_orchestrator_integration.md#orchestrator-handoff)
+and [Workflow C: RAG output](docs/narrative/workflow/workflow_c_rag.md#rag-output)
 for commands, required data, provider settings and output fields. Configuration
 examples are in [config.example.yaml](config.example.yaml). BM25/dense/hybrid
 search and LLM evidence processing are separate steps. The auditor/policy handoff
@@ -105,6 +105,7 @@ Expected with the stubs: 4 sub-claims.
 | `finsight run "<claim>" --technical` | Developer view: sub-claim types, tiers, retries, audit rationale (the reader view is the default) |
 | `finsight run "<claim>" --company CMPX` | Answer a "which company?" clarification |
 | `finsight trace <request_id> [--json]` | Print the decision log of a past run (`logs/<request_id>.json`) |
+| `finsight ui [--port 8765] [--open]` | Local testing page: run a claim, watch each stage, and read the evidence and citations |
 | `finsight eval --system {direct,rag,finsight,all} --split dev` | Run the evaluation (see below) |
 | `finsight eval --validate` | Check both dataset files for mistakes |
 | `finsight eval --freeze` | Lock the heldout split (once, when labels are final) |
@@ -219,6 +220,22 @@ Files that conflict most often, and how to avoid it:
   rebuilds them instead of the files themselves.
 - Every document needs a **publication date**. The orchestrator drops evidence published after
   the cut-off and logs it as a violation.
+
+## Testing UI
+
+```bash
+finsight ui
+```
+
+Opens http://127.0.0.1:8765 on this machine. Paste a claim and an optional cut-off, then run it.
+The page shows each pipeline stage as it finishes, then every sub-claim with the evidence and citation
+behind the verdict. The trace under that is the decision log: gates, routing, agent calls, audits,
+retries, and any evidence dropped for being published after the cut-off. Leave the cut-off blank and a
+stored post is checked as of the day it was published. If that post has no date, the latest filing in
+the corpus is used.
+
+In paid LLM mode the page asks you to confirm before a run, because a check can spend course credit.
+Mock mode does not. The page does not change the LLM mode.
 
 ## Calling FinSight from the UI (Irine)
 

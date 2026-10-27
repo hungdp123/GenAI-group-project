@@ -98,6 +98,18 @@ def test_stated_number_contradicted_by_computed_number():
     assert not r.numeric_check.matches
 
 
+def test_a_level_word_with_no_bound_is_not_supported():
+    """ "Very high margins" names no figure, bound or direction, so a computed margin cannot confirm it."""
+    claim = SubClaim(sub_claim_id="sc1", text="Company X has high margins, very, very high margins.",
+                     sub_claim_type=SubClaimType.PROFITABILITY, company_ticker="CMPX", is_quantitative=False)
+    margin = _ev(claim, evidence_id="XBRL-OPM", metric_name="operating_margin", computed_value=0.604,
+                 content="Operating margin was 60.4% in FY2026 vs 62.4% in FY2025.")
+    assert _audit(claim, [margin]).verdict is Verdict.INSUFFICIENT_EVIDENCE
+    stated = claim.model_copy(update={"text": "Company X's operating margin is above 50%."})
+    assert _audit(stated, [_ev(stated, **margin.model_dump(include={"evidence_id", "metric_name", "computed_value",
+                                                                    "content"}))]).verdict is Verdict.SUPPORTED
+
+
 def test_wrong_metric():
     """Segment revenue used for a total-revenue sub-claim."""
     r = _audit(GROWTH, [_ev(metric_name="data_center_segment_revenue_growth", computed_value=0.31,

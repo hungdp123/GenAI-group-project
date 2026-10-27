@@ -10,12 +10,15 @@ openai_api_key: "YOUR_OPENAI_API_KEY"
 # Narrative orchestrator: LLM evidence preparation, without stance or verdict.
 # Commands below are PowerShell ENVIRONMENT settings, not YAML fields.
 # Requires company indexes and a real model/key (private config.yaml) or Ollama.
-# Copy commands without the leading '# '. Detailed schema: Week 2 summary Section 10.
+# Copy commands without the leading '# '. Output schema: docs/narrative/workflow/workflow_c_rag.md (RAG output).
 #
 # $env:FINSIGHT_CORPUS_PROFILE = "canonical"
 # $env:FINSIGHT_IMPL_NARRATIVE = "finsight.agents.narrative.stub:NarrativeAgent"
 # $env:FINSIGHT_IMPL_RETRIEVER = "finsight.agents.narrative.retriever_stub:NarrativeRetriever"
 # $env:FINSIGHT_NARRATIVE_BACKEND = "bm25"
+# End-to-end registry defaults: C1 full_v1 chunk indexes + BM25.
+# FINSIGHT_NARRATIVE_CORPUS_ROOT and FINSIGHT_NARRATIVE_BACKEND override them.
+# Standalone RAG retains its separate defaults; see Workflow C.
 # $env:FINSIGHT_NARRATIVE_ANALYSIS = "evidence"
 # $env:FINSIGHT_NARRATIVE_ANALYSIS_MAX_TOKENS = "1500"
 # $env:FINSIGHT_NARRATIVE_STANCE_METHOD = "none"
@@ -35,3 +38,23 @@ openai_api_key: "YOUR_OPENAI_API_KEY"
 # or --retrieval-only for the basic_rag / collect_evidence commands.
 # Internal EvidenceItem.stance remains an unassessed NEUTRAL contract placeholder;
 # the auditor/policy handoff still needs updating before verdicts are meaningful.
+
+# Optional R4 runtime retrieval (hybrid + cross-encoder, no source-tier priority):
+# $env:FINSIGHT_NARRATIVE_BACKEND = "r4"
+# $env:FINSIGHT_NARRATIVE_CANDIDATE_K = "50"
+# $env:FINSIGHT_NARRATIVE_TOP_K = "3"
+# $env:FINSIGHT_NARRATIVE_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+# $env:FINSIGHT_NARRATIVE_RERANK_OVERFLOW = "truncate"
+# Default overflow policy is error. Explicit truncate permits and records model
+# input truncation; source passages stay complete. Requires the retrieval extra
+# and matching company Qdrant vectors. See docs/narrative/workflow/workflow_c_rag.md, Step 1.
+
+# Optional separate chunk-index selection for the Narrative collector/wrapper:
+# FINSIGHT_NARRATIVE_INDEX_TEMPLATE=path/to/C4/{ticker}/2025-07-31/index.json
+# FINSIGHT_NARRATIVE_QDRANT_TEMPLATE=path/to/companies/{ticker}/qdrant
+# These are environment variables, not YAML keys; see docs/narrative/workflow/workflow_c_rag.md, Step 1.
+# Restore/build the matching artifacts first. R4 alone does not select C4.
+# Full runtime build alternative (after building, without the benchmark cutoff):
+# clear FINSIGHT_NARRATIVE_INDEX_TEMPLATE and FINSIGHT_NARRATIVE_QDRANT_TEMPLATE,
+# then set FINSIGHT_NARRATIVE_CORPUS_ROOT=data/narrative/processed/chunking_strategies/C4/full_v1.
+# For C1-C4 builds, see docs/narrative/workflow/workflow_b_processing_and_indexes.md.
