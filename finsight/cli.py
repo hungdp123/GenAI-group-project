@@ -2,6 +2,7 @@
 
     finsight run "claim text" --cutoff 2025-07-31     # print the assessment table
     finsight trace <request_id>                         # print the decision log
+    finsight ui                                         # local page to run a check and read each step
     finsight eval --system all --split dev              # run the evaluation
     finsight graph                                      # regenerate docs/orchestrator_graph.md
     finsight usage                                      # real-LLM spend so far vs the course credit
@@ -169,6 +170,21 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ui(args: argparse.Namespace) -> int:
+    """Local page for running a check and reading stages, evidence, and the decision log."""
+    from finsight.ui.server import serve
+
+    if args.host not in {"127.0.0.1", "localhost", "::1"}:
+        print(f"Listening on {args.host}. Anyone who can reach that address can start a check on this machine.")
+    if args.open:
+        import threading
+        import webbrowser
+
+        threading.Timer(0.4, lambda: webbrowser.open(f"http://{args.host}:{args.port}")).start()
+    serve(args.host, args.port)
+    return 0
+
+
 def _cmd_trace(args: argparse.Namespace) -> int:
     logs_dir = Path(args.logs_dir) if args.logs_dir else get_settings().logs_dir
     try:
@@ -252,6 +268,12 @@ def main(argv: list[str] | None = None) -> int:
     claims.add_argument("--post", help="video id to print after the table is written")
     claims.add_argument("--posts-dir", help="stored videos (default: data/influencers/youtube)")
     claims.set_defaults(func=_cmd_claims)
+
+    ui = sub.add_parser("ui", help="open the local testing page (steps, evidence, decision log)")
+    ui.add_argument("--host", default="127.0.0.1")
+    ui.add_argument("--port", type=int, default=8765)
+    ui.add_argument("--open", action="store_true", help="open the page in a browser")
+    ui.set_defaults(func=_cmd_ui)
 
     trace = sub.add_parser("trace", help="print the decision log for a request")
     trace.add_argument("request_id")

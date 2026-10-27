@@ -43,6 +43,7 @@ include = ["finsight*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.json", "*.jsonl"]
+"finsight.ui" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

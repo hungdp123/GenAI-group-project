@@ -41,6 +41,7 @@ def run_basic_narrative_rag(
     retrieval_only: bool = False,
     reranker_model: str | None = None,
     rerank_overflow: str | None = None,
+    part_search: bool = False,
 ) -> dict[str, Any]:
     """Return relevant source passages, exact facts and a cited evidence summary.
 
@@ -71,6 +72,7 @@ def run_basic_narrative_rag(
         stance_method="none",
         reranker_model=reranker_model,
         rerank_overflow=rerank_overflow,
+        part_search=part_search,
         index_template=str(experiment / "companies/{ticker}/index.json") if experiment is not None else None,
         qdrant_template=str(experiment / "companies/{ticker}/qdrant") if experiment is not None else None,
     )
@@ -147,11 +149,25 @@ def main() -> None:
         "--stance-method", choices=("none", "exact", "llm"), help="Deprecated and ignored: no classification"
     )
     parser.add_argument("--retrieval-only", action="store_true", help="Explicitly skip LLM evidence preparation")
+    parser.add_argument(
+        "--rerank",
+        action="store_true",
+        help="After BM25 and semantic retrieval, rerank the fused list before the top passages go to the LLM",
+    )
+    parser.add_argument(
+        "--part-search",
+        action="store_true",
+        help="Search each figured part of the claim, then once more if the figure is missing",
+    )
     parser.add_argument("--max-tokens", type=int, default=1500, help="Output limit for the evidence preparation call")
     parser.add_argument("--ollama-model", help="Local model for evidence selection, facts and cited summary")
     parser.add_argument("--ollama-host", default="http://localhost:11434")
     parser.add_argument("--ollama-context", type=int, default=8192)
     args = parser.parse_args()
+    if args.rerank:
+        args.backend = "r4"
+        if args.rerank_overflow is None:
+            args.rerank_overflow = "truncate"
     try:
         result = run_basic_narrative_rag(
             args.ticker,
@@ -170,6 +186,7 @@ def main() -> None:
             retrieval_only=args.retrieval_only,
             reranker_model=args.reranker_model,
             rerank_overflow=args.rerank_overflow,
+            part_search=args.part_search,
         )
     except Exception as exc:
         parser.exit(2, f"Narrative retrieval failed: {type(exc).__name__}: {exc}\n")

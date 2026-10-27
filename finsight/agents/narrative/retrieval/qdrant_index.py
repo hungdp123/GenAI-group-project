@@ -50,7 +50,7 @@ def build_qdrant_index(
     chunks = index_payload["chunks"]
     if not chunks:
         raise ValueError("Cannot build a vector index without chunks")
-    vectors = backend.encode_documents([chunk["text"] for chunk in chunks])
+    vectors = backend.encode_documents([chunk.get("search_text") or chunk["text"] for chunk in chunks])
     if len(vectors) != len(chunks):
         raise ValueError("Embedding count differs from chunk count")
     vectors = [list(map(float, vector)) for vector in vectors]
