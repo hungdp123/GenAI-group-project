@@ -99,10 +99,20 @@ def _source_spans(items: list[EvidenceItem]) -> tuple[list[dict], dict]:
     return passages, catalog
 
 
+def _json_text(raw: str) -> str:
+    """Accept a JSON object even when the model wraps it in a markdown fence."""
+
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+    return text
+
+
 def _resolve_spans(raw: str, items: list[EvidenceItem], catalog: dict) -> tuple[str, list[dict], list[str]]:
     """Resolve source/fact references; all public citations still face strict validation."""
     try:
-        value = json.loads(raw)
+        value = json.loads(_json_text(raw))
     except (TypeError, ValueError):
         return raw, [], []  # The existing validator reports malformed JSON.
     if not isinstance(value, dict) or not isinstance(value.get("facts"), list):
@@ -156,7 +166,7 @@ def _resolve_spans(raw: str, items: list[EvidenceItem], catalog: dict) -> tuple[
 def _validate(raw: str, items: list[EvidenceItem]) -> tuple[dict | None, list[str]]:
     """Validate structure and source citations, not semantic correctness."""
     try:
-        result = json.loads(raw)
+        result = json.loads(_json_text(raw))
     except (TypeError, ValueError):
         return None, ["Model output is not valid JSON"]
     if not isinstance(result, dict) or set(result) != {"selected_evidence_ids", "facts", "summary"}:

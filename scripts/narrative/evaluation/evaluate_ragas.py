@@ -345,7 +345,7 @@ def prepare(args) -> list[dict]:
             raise ValueError("Select a full RAG run, not the retrieval-only results")
         folders = [(e["strategy"] + "/" + e["backend"], root / e["folder"])
                    for e in matrix["configurations"]]
-        if any(e["strategy"] not in {"C1", "C2", "C3", "C4"} or
+        if any(e["strategy"] not in {"C1", "C2", "C3", "C4", "contextual"} or
                e["backend"] not in {"bm25", "dense", "hybrid", "r4"} for e in matrix["configurations"]):
             raise ValueError("Unknown saved matrix configuration")
     else:

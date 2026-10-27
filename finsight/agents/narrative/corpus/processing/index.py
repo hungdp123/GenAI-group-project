@@ -14,11 +14,37 @@ from finsight.agents.narrative.corpus.processing.chunk import NarrativeChunk
 
 
 INDEX_SCHEMA_VERSION = "1.0"
-_TOKEN = re.compile(r"[a-z0-9]+(?:'[a-z0-9]+)?")
+# A percent stays one token. "28%" must not match the page number 28 or the dollars in $28,786.
+_TOKEN = re.compile(r"\d+(?:\.\d+)?%|[a-z0-9]+(?:'[a-z0-9]+)?", re.IGNORECASE)
+_GROWTH_TEXT = re.compile(
+    r"y/y|year-over-year|percentage growth|%\s*change|\b(?:grew|grown|growth|increased|increase)\b",
+    re.IGNORECASE,
+)
+_SEGMENT_TAGS = (
+    "North America", "International", "Google Cloud", "Google Services", "Family of Apps",
+    "Reality Labs", "Data Center", "Consolidated", "Commercial", "Government", "AWS", "Azure",
+)
 
 
 def tokenize(text: str) -> list[str]:
-    return _TOKEN.findall(text.lower())
+    return [token.lower() for token in _TOKEN.findall(text)]
+
+
+def retrieval_tokens(text: str) -> list[str]:
+    """BM25 tokens plus metric and segment tags derived from the same text.
+
+    A row whose filing line says ``Y/Y % Change`` receives ``tag_metric_growth``.
+    A claim that says ``grew`` receives the same tag, so the row can match even
+    when the claim does not repeat the filing's column header.
+    """
+
+    tokens = tokenize(text)
+    if _GROWTH_TEXT.search(text):
+        tokens.append("tag_metric_growth")
+    for segment in _SEGMENT_TAGS:
+        if re.search(rf"\b{re.escape(segment)}\b", text, re.IGNORECASE):
+            tokens.append("tag_segment_" + re.sub(r"[^a-z0-9]+", "_", segment.lower()).strip("_"))
+    return tokens
 
 
 def build_index(
@@ -75,11 +101,11 @@ def search_index(
         if chunk["company_ticker"].upper() == company_ticker
         and date.fromisoformat(chunk["publication_date"]) <= cutoff_date
     ]
-    query_terms = list(dict.fromkeys(tokenize(query)))
+    query_terms = list(dict.fromkeys(retrieval_tokens(query)))
     if not candidates or not query_terms:
         return []
 
-    tokenized = [tokenize(chunk["text"]) for chunk in candidates]
+    tokenized = [retrieval_tokens(chunk.get("search_text") or chunk["text"]) for chunk in candidates]
     average_length = sum(len(tokens) for tokens in tokenized) / len(tokenized)
     document_frequency = {
         term: sum(term in set(tokens) for tokens in tokenized) for term in query_terms

@@ -16,6 +16,12 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
 
+from finsight.agents.narrative.corpus.processing.contextual import (
+    followup_query,
+    passage_matches_claim,
+    single_growth_claim,
+    split_claim_parts,
+)
 from finsight.agents.narrative.corpus.processing.index import load_index
 from finsight.agents.narrative.retrieval.retriever import BACKENDS, CorpusRetriever, normalize_backend
 from finsight.contracts.interfaces import Retriever
@@ -200,6 +206,7 @@ class NarrativeEvidenceAgent:
         qdrant_template: str | None = None,
         reranker_model: str | None = None,
         rerank_overflow: str | None = None,
+        part_search: bool = False,
     ) -> None:
         self.corpus_root = Path(corpus_root or os.getenv("FINSIGHT_NARRATIVE_CORPUS_ROOT", "data/narrative/processed"))
         self.index_template = index_template or os.getenv("FINSIGHT_NARRATIVE_INDEX_TEMPLATE")
@@ -229,6 +236,7 @@ class NarrativeEvidenceAgent:
         self.classifier = None
         self.retriever_factory = retriever_factory
         self.index_path_factory = index_path_factory
+        self.part_search = part_search
         self.last_search: dict | None = None
 
     def _record_search(
@@ -280,7 +288,14 @@ class NarrativeEvidenceAgent:
             self._record_search(sub_claim, cutoff_date, feedback, "advice")
             return []
         scoped = sub_claim.model_copy(update={"company_ticker": ticker})
-        support_query, counter_query = build_queries(scoped, feedback)
+        parts = split_claim_parts(scoped.text) if self.part_search else [scoped.text]
+        query_pairs = [
+            build_queries(scoped.model_copy(update={"text": part}), feedback) for part in parts
+        ]
+        support_query, counter_query = query_pairs[0]
+        if self.part_search and len(query_pairs) > 1:
+            support_query = " || ".join(pair[0] for pair in query_pairs)
+            counter_query = " || ".join(pair[1] for pair in query_pairs)
         path = (
             self.index_path_factory(ticker)
             if self.index_path_factory
@@ -326,9 +341,23 @@ class NarrativeEvidenceAgent:
                 rerank_overflow=self.rerank_overflow,
             )
         )
-        support = retriever.retrieve(support_query, self.top_k, cutoff_date)
+        support: list[EvidenceItem] = []
+        counter: list[EvidenceItem] = []
+        for part, (part_support, part_counter) in zip(parts, query_pairs):
+            pool = max(self.top_k, 10) if single_growth_claim(part) else self.top_k
+            support.extend(retriever.retrieve(part_support, pool, cutoff_date))
+            if not single_growth_claim(part):
+                counter.extend(retriever.retrieve(part_counter, self.top_k, cutoff_date))
+        if self.part_search:
+            follow = followup_query(
+                scoped.text,
+                [item.content for item in support + counter],
+                [item.doc_type for item in support + counter],
+            )
+            if follow:
+                support.extend(retriever.retrieve(follow, self.top_k, cutoff_date))
+                support_query = f"{support_query} || {follow}"
         support_reranking = getattr(retriever, "last_reranking", None)
-        counter = retriever.retrieve(counter_query, self.top_k, cutoff_date)
         counter_reranking = getattr(retriever, "last_reranking", None)
         items: list[EvidenceItem] = []
         seen: set[str] = set()
@@ -360,6 +389,9 @@ class NarrativeEvidenceAgent:
             # relevance/stance judgment was performed by this collector.
             items.append(original)
             seen.add(item.evidence_id)
+        matched = [item for item in items if passage_matches_claim(scoped.text, item.content)]
+        if matched:
+            items = matched[: self.top_k]
         self._record_search(
             sub_claim, cutoff_date, feedback, "ok", support_query, counter_query, support, counter,
             reranking={"support": support_reranking, "counter": counter_reranking}, index_info=index_info)

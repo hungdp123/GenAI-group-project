@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--limit", type=int, help="First N CSV claims; defaults to two for a preview")
     group.add_argument("--all-cases", action="store_true", help="Explicitly select every CSV row")
-    parser.add_argument("--strategies", nargs="+", choices=("C1", "C2", "C3", "C4"),
+    parser.add_argument("--strategies", nargs="+", choices=("C1", "C2", "C3", "C4", "contextual"),
                         default=["C1", "C2", "C3", "C4"])
     parser.add_argument("--backends", nargs="+", choices=("bm25", "dense", "hybrid", "r4"),
                         default=["bm25", "dense", "hybrid", "r4"])
