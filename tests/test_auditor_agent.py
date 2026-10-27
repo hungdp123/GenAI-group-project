@@ -428,6 +428,88 @@ def test_level_direction_uses_comparison_value_when_the_text_has_no_prior_figure
     assert audit(sc, [up]).verdict is Verdict.CONTRADICTED
 
 
+def test_llm_can_challenge_a_passage_that_shares_no_words_with_the_sub_claim():
+    set_mock_responder(lambda system, prompt: "CONTRADICTS")
+    claim = SubClaim(sub_claim_id="sc1", text="Company X's data center demand remains strong",
+                     sub_claim_type=SubClaimType.DEMAND_ATTRIBUTION, company_ticker="CMPX")
+    item = _text_item("sc1", "Management said customers are digesting prior purchases and orders were pushed out.")
+    r = AuditorAgent(use_llm=True).audit(claim, [item])
+    assert r.passed and r.evidence_stances["N1"] is Stance.CHALLENGING and r.verdict is Verdict.CONTRADICTED
+
+
+def test_llm_neutral_on_an_off_topic_passage_is_still_ignored():
+    set_mock_responder(lambda system, prompt: "NEUTRAL")
+    item = _text_item("sc1", "The company declared a quarterly dividend payable in September.")
+    r = AuditorAgent(use_llm=True).audit(DEMAND, [item])
+    assert not r.passed and r.evidence_stances["N1"] is Stance.NEUTRAL
+
+
+# -- 4. robustness fixes found on the dev set (negation, text bounds, period words, long history, extra metric) ----
+
+@pytest.mark.parametrize("text,metric,value,content,expected", [
+    # "did not fall" is a claim that it went up or stayed: a fall contradicts it
+    ("Meta's free cash flow is above zero and did not fall (FY2025 against FY2024)", "free_cash_flow", 46.1e9,
+     "Free cash flow was $46,109m in the year ended 2025-12-31 vs $54,072m in the year ended 2024-12-31.",
+     Verdict.CONTRADICTED),
+    ("Meta's free cash flow is above zero and did not fall (FY2025 against FY2024)", "free_cash_flow", 60.0e9,
+     "Free cash flow was $60,000m in the year ended 2025-12-31 vs $54,072m in the year ended 2024-12-31.",
+     Verdict.SUPPORTED),
+    ("Meta's current ratio is at least 1 and did not fall", "current_ratio", 2.598767,
+     "Current ratio was 2.60x as at 2025-12-31 vs 2.98x as at 2024-12-31.", Verdict.CONTRADICTED),
+    ("Meta's debt-to-equity did not rise", "debt_to_equity", 0.4,
+     "Debt-to-equity was 0.40x as at 2025-12-31 vs 0.30x as at 2024-12-31.", Verdict.CONTRADICTED),
+])
+def test_negated_direction_is_read_as_the_opposite_direction(text, metric, value, content, expected):
+    kind = SubClaimType.PROFITABILITY_CASH_LEVERAGE
+    assert _verdict(text, metric, value, content, kind).verdict is expected
+
+
+def test_text_passage_is_checked_against_a_bound_not_a_target():
+    claim = SubClaim(sub_claim_id="sc1", text="Company X's data center revenue grew over 100% last quarter",
+                     sub_claim_type=SubClaimType.OTHER, company_ticker="CMPX")
+    above = _text_item("sc1", "Data Center net revenue of $6.7 billion increased by 107%, compared to $3.2 billion.")
+    below = _text_item("sc1", "Data Center net revenue of $6.7 billion increased by 60%, compared to $4.2 billion.")
+    assert audit(claim, [above]).verdict is Verdict.SUPPORTED
+    assert audit(claim, [below]).verdict is Verdict.CONTRADICTED
+
+
+def test_period_words_do_not_count_against_passage_coverage():
+    claim = SubClaim(sub_claim_id="sc1", text="Company X's cloud sales grew 24% year over year in Q4 2025",
+                     sub_claim_type=SubClaimType.OTHER, company_ticker="CMPX")
+    item = _text_item("sc1", "Company X cloud segment sales increased 24% year-over-year to $35.6 billion.")
+    assert audit(claim, [item]).verdict is Verdict.SUPPORTED
+
+
+def test_claim_about_a_history_longer_than_the_corpus_is_insufficient_not_contradicted():
+    text = "Alphabet's free cash flow turned negative for the first time since 2004"
+    sub_claim, items = _fin("GOOGL", "Alphabet", text, "free_cash_flow", 73.266e9,
+                            "Free cash flow was $73,266m in the year ended 2025-12-31 vs $72,764m in 2024.",
+                            "year ended 2025-12-31", date(2026, 2, 5), kind=SubClaimType.PROFITABILITY_CASH_LEVERAGE)
+    r = audit(sub_claim, items)
+    assert r.passed and r.verdict is Verdict.INSUFFICIENT_EVIDENCE
+
+
+def test_extra_off_topic_metric_is_ignored_when_the_right_one_is_there():
+    sub_claim, items = _fin("META", "Meta", "Meta's operating margin did not fall (FY2025 against FY2024)",
+                            "operating_margin", 0.414,
+                            "Operating margin was 41.4% in the year ended 2025-12-31 "
+                            "vs 42.2% in the year ended 2024-12-31.",
+                            "year ended 2025-12-31", FILED, kind=SubClaimType.PROFITABILITY_CASH_LEVERAGE)
+    extra = items[0].model_copy(update={
+        "evidence_id": "XBRL-META-net_margin", "metric_name": "net_margin", "computed_value": 0.30,
+        "content": "Net margin was 30.1% in the year ended 2025-12-31 vs 37.9% in the year ended 2024-12-31."})
+    r = audit(sub_claim, [items[0], extra])
+    assert r.passed and r.verdict is Verdict.CONTRADICTED
+    assert r.evidence_stances["XBRL-META-net_margin"] is Stance.NEUTRAL
+
+
+def test_off_topic_metric_alone_is_still_a_defect():
+    sub_claim, items = _fin("META", "Meta", "Meta's operating margin did not fall", "net_margin", 0.30,
+                            "Net margin was 30.1% in the year ended 2025-12-31 vs 37.9% in the year ended 2024-12-31.",
+                            "year ended 2025-12-31", FILED, kind=SubClaimType.PROFITABILITY_CASH_LEVERAGE)
+    assert not audit(sub_claim, items).passed
+
+
 def test_wrong_stated_amount_marks_the_item_challenging():
     """A level claim with a wrong dollar amount: the item that disproves it counts as challenging, not supporting."""
     fcf = ("free_cash_flow", 9.461053e9,
@@ -465,3 +547,4 @@ def test_free_cash_flow_is_on_topic_when_margins_are_named_first():
                       "ended 2025-03-31.", "quarter ended 2026-03-31", date(2026, 4, 29), stance=Stance.NEUTRAL)
     r = audit(sc, [item])
     assert r.passed and not any("does not measure" in x for x in r.failure_reasons)
+

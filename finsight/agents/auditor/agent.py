@@ -76,6 +76,12 @@ TIER3_DOCS = {"news"}
 
 MARGINS = {"gross_margin", "operating_margin", "net_margin", "fcf_margin"}
 
+# "first time since 2004", "all-time high", "in 20 years": the corpus holds the latest 10-K and four quarters, so
+# a claim about a longer history cannot be verified (knowledge layer section 3). Not a defect of the evidence.
+_LONG_HISTORY = re.compile(
+    r"\bfirst time since\b|\bsince (?:19|20)\d{2}\b|\ball[- ]time\b|\bever\b|\brecord[- ](?:high|low)\b|"
+    r"\bin (?:over |more than )?\d+ years\b|\bin decades\b|\bdecades?\b", re.I)
+
 # -- wording -------------------------------------------------------------------------------------
 
 _UP = re.compile(r"\b(grew|grow\w*|increas\w*|ros[e]|rising|rise[sn]?|expand\w*|improv\w*|higher|accelerat\w*|"
@@ -162,8 +168,19 @@ def _money_half_unit(text: str) -> float:
     return 0.5 * 10 ** (-decimals) * _UNIT[unit]
 
 
+_NEGATOR = re.compile(r"\b(?:not|never|no|without|n't|didn't|doesn't|hasn't|haven't|wasn't|isn't)\s+(?:\w+\s+)?$", re.I)
+
+
 def _direction(text: str) -> str | None:
-    up, down = bool(_UP.search(text)), bool(_DOWN.search(text))
+    """"up", "down" or None. A negated direction word flips: "did not fall" is up, "did not rise" is down."""
+    up = down = False
+    for pattern, is_up in ((_UP, True), (_DOWN, False)):
+        for m in pattern.finditer(text):
+            negated = bool(_NEGATOR.search(text[max(0, m.start() - 20): m.start()]))
+            if is_up != negated:
+                up = True
+            else:
+                down = True
     return "up" if up and not down else "down" if down and not up else None
 
 
@@ -388,8 +405,14 @@ class AuditorAgent:
         if not evidence:
             return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
                                verdict=Verdict.INSUFFICIENT_EVIDENCE)
+        if _LONG_HISTORY.search(sub_claim.text):
+            return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
+                               verdict=Verdict.INSUFFICIENT_EVIDENCE)
         run = _Run()
         stances: list[Stance] = []
+        expected = _expected_concepts(sub_claim)
+        on_topic = expected is not None and any(
+            i.computed_value is not None and _concept(i.metric_name or "") in expected for i in evidence)
         has_main = any(not (i.metric_name or "").endswith("_context") for i in evidence)
         unusable: list[tuple[EvidenceItem, str]] = []
         for item in evidence:                       # 1. judge the stance (the collector's own label is ignored)
@@ -398,6 +421,11 @@ class AuditorAgent:
             if (item.metric_name or "").endswith("_context") and has_main:
                 stances.append(Stance.NEUTRAL)
                 unusable.append((item, "context only (team ruling, 18 Oct): it does not change the label"))
+                continue
+            if (numeric and on_topic and item.metric_name and not (item.metric_name or "").endswith("_context")
+                    and _concept(item.metric_name) not in expected):
+                stances.append(Stance.NEUTRAL)          # an extra metric next to the right one: ignore it, no retry
+                unusable.append((item, f"metric {item.metric_name} is not what the sub-claim is about"))
                 continue
             stance, why = self._numeric_stance(sub_claim, item) if numeric else self._text_stance(sub_claim, item)
             if stance is Stance.NEUTRAL and item.stance is Stance.CHALLENGING:
@@ -644,7 +672,11 @@ class AuditorAgent:
         text, passage = sub_claim.text, item.content
         if sub_claim.sub_claim_type.value == "CONTINUATION":
             return self._continuation_stance(sub_claim, item)
-        key = _stems(text, _alias_words(sub_claim.company_ticker))
+        # Words that only say WHEN ("Q4 2025") or HOW MUCH the bound is ("over 100%") are not the topic: leave them
+        # out of the key words, or a passage that states the claim in other words fails the coverage test.
+        threshold = _threshold(text)
+        topic_text = _THRESH_PCT.sub(" ", text) if threshold is not None and threshold.kind == "pct" else text
+        key = _stems(_PERIOD_NOISE.sub(" ", topic_text), _alias_words(sub_claim.company_ticker))
         distinctive = key - GENERIC_STEMS
         coverage = len(key & _stems(passage)) / len(key) if key else 0.0
         for cue in _NEGATED_ATTRIBUTION.finditer(passage):
@@ -658,7 +690,18 @@ class AuditorAgent:
         rules_ok, why = True, ""
         if sub_claim.sub_claim_type.value not in HEDGE_OK_TYPES and _HEDGE.search(passage):
             rules_ok, why = False, "hedged wording is not proof"
-        stated_pct = {p.value for p in _pcts(_PERIOD_NOISE.sub(" ", text))}
+        bound_ok = None
+        if threshold is not None and threshold.kind == "pct":     # "over 100%": the passage must be on that side
+            figures = [p.value / 100 * (-1 if p.negative else 1)
+                       for clause in re.split(r"\.(?!\d)|;|\bbut\b|\bwhile\b", passage)
+                       if _stems(clause) & distinctive for p in _pcts(clause)]
+            if figures:
+                bound_ok = any(f > threshold.bound if threshold.op == "gt" else f < threshold.bound for f in figures)
+                if not bound_ok and coverage >= MIN_COVERAGE:
+                    return Stance.CHALLENGING, "the figure in the passage is on the other side of the stated bound"
+            elif rules_ok:
+                rules_ok, why = False, "the passage has no figure for the bound in the sub-claim"
+        stated_pct = {p.value for p in _pcts(_PERIOD_NOISE.sub(" ", topic_text))}
         stated_usd = {float(m.group(2).replace(",", "")) for m in _MONEY_RE.finditer(text)}
         shown_pct = {p.value for p in _pcts(passage)}
         shown_usd = {float(m.group(2).replace(",", "")) for m in _MONEY_RE.finditer(passage)}
@@ -666,7 +709,8 @@ class AuditorAgent:
             rules_ok, why = False, "the number in the sub-claim is not in the passage"
         if rules_ok and coverage < MIN_COVERAGE:
             rules_ok, why = False, f"only {coverage:.0%} of the sub-claim's key words appear"
-        if self._llm_enabled() and coverage >= 0.3:         # only passages that are about the sub-claim
+        if self._llm_enabled():     # no word-overlap gate: a challenge often shares no words with the claim;
+            # an off-topic passage comes back NEUTRAL and is ignored, and the model can never create support.
             verdict = self._ask_llm(text, passage)
             if verdict == "CONTRADICTS":
                 return Stance.CHALLENGING, "the model judged the passage contradicts the sub-claim"
