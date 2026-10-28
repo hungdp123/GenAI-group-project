@@ -1,7 +1,7 @@
-"""Retrieve evidence, then use an LLM for relevance selection and cited summary.
+"""Retrieve evidence, then use an LLM for cited facts, summary and claim stance.
 
 The basic_rag command name is retained for compatibility. This is now a
-evidence-preparation entry point, without stance or verdict. Historical verdict
+evidence-preparation and stance entry point. Historical verdict
 experiments explicitly use rag.verdict_baseline.
 """
 
@@ -43,19 +43,19 @@ def run_basic_narrative_rag(
     rerank_overflow: str | None = None,
     part_search: bool = False,
 ) -> dict[str, Any]:
-    """Return relevant source passages, exact facts and a cited evidence summary.
+    """Return original passages, exact facts, cited summary and a reasoned claim stance.
 
     EvidenceItem internally requires stance=NEUTRAL; public JSON omits that
-    compatibility placeholder and marks the collection NOT_ASSESSED.
+    compatibility placeholder. The claim-level stance is separate from passage labels.
     """
     ticker = ticker.strip().upper()
     if not 1 <= top_k <= 25 or candidate_k < top_k:
         raise ValueError("Require 1 <= top_k <= 25 and candidate_k >= top_k")
     if stance_method not in {None, "none", "exact", "llm"}:
-        raise ValueError("Classification has been removed; stance_method must be none")
+        raise ValueError("stance_method must be none, exact or llm (legacy retrieval option)")
     if stance_method in {"exact", "llm"}:
         logging.getLogger(__name__).warning(
-            "Stance options are ignored: the LLM prepares evidence without stance or verdict"
+            "Legacy passage stance options are ignored; the LLM produces a separate claim stance"
         )
     sub_claim = SubClaim(
         sub_claim_id="basic-rag-claim", text=claim, company_ticker=ticker, sub_claim_type=SubClaimType.OTHER
@@ -84,6 +84,7 @@ def run_basic_narrative_rag(
         preparation = {
             "status": "OK" if items else "NO_EVIDENCE",
             "assessment_status": "NOT_ASSESSED",
+            "stance": None,
             "evidence_preparation_status": "SKIPPED_RETRIEVAL_ONLY",
             "facts": [],
             "summary": [],
@@ -146,7 +147,7 @@ def main() -> None:
     parser.add_argument("--experiment-dir", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
-        "--stance-method", choices=("none", "exact", "llm"), help="Deprecated and ignored: no classification"
+        "--stance-method", choices=("none", "exact", "llm"), help="Deprecated passage option; claim stance runs unless retrieval-only"
     )
     parser.add_argument("--retrieval-only", action="store_true", help="Explicitly skip LLM evidence preparation")
     parser.add_argument(
@@ -160,7 +161,7 @@ def main() -> None:
         help="Search each figured part of the claim, then once more if the figure is missing",
     )
     parser.add_argument("--max-tokens", type=int, default=1500, help="Output limit for the evidence preparation call")
-    parser.add_argument("--ollama-model", help="Local model for evidence selection, facts and cited summary")
+    parser.add_argument("--ollama-model", help="Local model for evidence selection, facts, summary and claim stance")
     parser.add_argument("--ollama-host", default="http://localhost:11434")
     parser.add_argument("--ollama-context", type=int, default=8192)
     args = parser.parse_args()

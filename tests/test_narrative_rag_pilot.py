@@ -116,6 +116,84 @@ def test_whitespace_diagnostic_does_not_accept_invalid_generation(tmp_path):
     assert report["new_llm_requests"] == report["new_retrieval_requests"] == 0
 
 
+def assessment(label, *, status="OK"):
+    result = {"status": status, "pipeline": "narrative_evidence_rag", "assessment_status": "ASSESSED",
+              "stance": label, "stance_reason": "Explanation linked to the source.",
+              "stance_reason_code": "ALL_MATERIAL_PARTS_SUPPORTED", "facts": [{"quote": "Source fact."}],
+              "supporting_fact_indices": [0], "contradicting_fact_indices": [], "missing_claim_parts": [],
+              "citation_validation": {"passed": True}}
+    if label == "CONTRADICTING":
+        result.update(stance_reason_code="DIRECT_CONTRADICTION", supporting_fact_indices=[], contradicting_fact_indices=[0])
+    elif label == "UNSUPPORTED":
+        result.update(stance_reason_code="PARTIAL_SUPPORT", missing_claim_parts=["The full claim is not established."])
+    if status == "NO_EVIDENCE":
+        result.update(stance_reason_code="NO_RELEVANT_EVIDENCE", facts=[], supporting_fact_indices=[],
+                      candidate_evidence=[], citation_validation={"passed": None})
+    return result
+
+
+def test_stance_scores_keep_failures_and_missing_labels_out_of_classification():
+    from scripts.narrative.evaluation.evaluate_rag_pilot import stance_record, summarize_stances
+
+    pairs = [("supported", assessment("SUPPORTED")), ("supported", assessment("UNSUPPORTED")),
+             ("unsupported", assessment("SUPPORTED")), ("contradicting", assessment("CONTRADICTING")),
+             ("unsupported", assessment("UNSUPPORTED", status="NO_EVIDENCE")),
+             ("contradicting", {"status": "GENERATION_ERROR", "assessment_status": "ERROR", "stance": None}),
+             ("supported", {"status": "OK"})]
+    rows = [{"retrieval_only": False, **stance_record({"type": kind}, result)} for kind, result in pairs]
+    scores = summarize_stances(rows)
+    assert scores["valid_assessments"] == 5 and scores["eligible_cases"] == 7
+    assert scores["accuracy"] == pytest.approx(3 / 5)
+    assert scores["macro_f1"] == pytest.approx(2 / 3)
+    assert scores["false_support_rate"] == pytest.approx(1 / 3)
+    assert scores["assessment_completion_rate"] == pytest.approx(5 / 7)
+    assert scores["all_case_accuracy"] == pytest.approx(3 / 7)
+    assert scores["assessment_errors"] == scores["not_assessed"] == 1
+    assert scores["confusion_matrix"]["SUPPORTED"]["UNSUPPORTED"] == 1
+    assert sum(sum(r.values()) for r in scores["confusion_matrix"].values()) == 5
+    retrieval = {"retrieval_only": True, **stance_record({"type": "supported"},
+                 {"pipeline": "narrative_evidence_retrieval"})}
+    assert summarize_stances(rows + [retrieval]) == scores
+    assert summarize_stances([retrieval])["accuracy"] is None
+
+
+def test_invalid_stance_is_not_counted_as_a_refusal():
+    from scripts.narrative.evaluation.evaluate_rag_pilot import stance_record
+
+    result = assessment("SUPPORTED")
+    result["supporting_fact_indices"] = [12]
+    row = stance_record({"type": "unsupported"}, result)
+    assert row["stance_assessment_status"] == "ERROR" and row["predicted_stance"] is None
+    assert row["stance_correct"] is None and row["stance_validation_errors"]
+
+
+def test_matrix_stance_reports_count_cases_once_not_per_search_direction(tmp_path):
+    from scripts.narrative.evaluation.evaluate_rag_comparison import score
+
+    run, _ = saved_run(tmp_path)
+    config = json.loads((run / "configuration.json").read_text())
+    config.update(backend="bm25", dataset_sha256="dataset", retrieval_only=False)
+    write_json(run / "configuration.json", config)
+    write_json(run / "matrix_configuration.json", {
+        "selected_case_ids": ["AAPL-SUP-01"], "dataset_sha256": "dataset",
+        "configurations": [{"strategy": "C1", "backend": "bm25", "folder": "."}]})
+    path = run / "cases/AAPL-SUP-01/result.json"
+    result = json.loads(path.read_text())
+    result.update(assessment("SUPPORTED"))
+    original = json.dumps(result)
+    path.write_text(original, encoding="utf-8")
+    report = score(run, tmp_path)
+    assert len(report["aggregates"]) == 10  # Directions x original case-type strata, including partial.
+    assert report["stance_aggregates"][0]["valid_assessments"] == 1
+    assert report["stance_aggregates"][0]["accuracy"] == 1
+    with (run / "stance_per_case.csv").open(encoding="utf-8-sig") as handle:
+        assert len(list(csv.DictReader(handle))) == 1
+    with (run / "stance_confusion_matrix.csv").open(encoding="utf-8-sig") as handle:
+        assert sum(int(r["cases"]) for r in csv.DictReader(handle)) == 1
+    assert "Narrative stance performance" in (run / "comparison.md").read_text()
+    assert path.read_text() == original  # Scoring does not rewrite generation artifacts.
+
+
 def test_changed_source_is_not_scored_against_stale_trace(tmp_path):
     run, parsed = saved_run(tmp_path)
     parsed.write_text(parsed.read_text(encoding="utf-8") + "\n", encoding="utf-8")
@@ -135,6 +213,67 @@ def test_runner_preserves_existing_outputs(tmp_path):
     with pytest.raises(ValueError, match="not empty"):
         run(args)
     assert marker.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize("bad_date", ["", "2026-02-30", "2026-7-1", "20260701"])
+def test_preflight_reports_case_and_csv_row_for_every_bad_cutoff_before_build_reads(tmp_path, monkeypatch, bad_date):
+    from scripts.narrative.evaluation import run_rag_pilot as pilot
+
+    case = {"id": "valid", "company": "AAPL", "claims": "A product claim", "type": "supported",
+            "source_doc": "source", "gold_answer": "answer", "gold_snippet": "snippet", "cut_off": "2026-01-01"}
+    path = tmp_path / "cases.csv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(case))
+        writer.writeheader()
+        writer.writerows([case, {**case, "id": "bad-date", "cut_off": bad_date},
+                         {**case, "id": "missing-date", "cut_off": ""}])
+    monkeypatch.setattr(pilot, "read_json", lambda _: pytest.fail("Invalid dates must fail before any build read"))
+    args = Namespace(cases=path, output_dir=tmp_path / "run", corpus_root=tmp_path / "corpus",
+                     limit=3, top_k=10, candidate_k=50, max_tokens=1500, ollama_context=20000)
+    with pytest.raises(ValueError) as caught:
+        pilot.run(args)
+    message = str(caught.value)
+    assert "2 selected cases" in message and "YYYY-MM-DD" in message
+    assert "bad-date (CSV row 3)" in message and "missing-date (CSV row 4)" in message
+    assert not args.output_dir.exists()
+
+
+def test_multiple_gold_anchors_are_validated_without_dropping_any_quote(tmp_path):
+    from scripts.narrative.evaluation.evaluate_rag_pilot import load_reference
+
+    run, parsed = saved_run(tmp_path)
+    original = json.loads(parsed.read_text(encoding="utf-8"))
+    second = {"document_id": "doc2", "publication_date": "2024-01-01", "text": "gamma"}
+    parsed.write_text(json.dumps(original) + "\n" + json.dumps(second) + "\n", encoding="utf-8")
+    case = {"id": "multi", "company": "AAPL", "type": "supported", "cut_off": "2024-01-01",
+            "source_doc": "doc | test\nblock 1 | chars 0:5\n\ndoc2 | call\nblock 2 | chars 0:5",
+            "gold_snippet": "alpha\n\ngamma"}
+    reference, _, _ = load_reference(case, tmp_path, tmp_path / "strategy")
+    assert len(reference["spans"]) == 2
+    maps = {"a": {"document_id": "doc", "block_line_1based": 1, "body_char_span": [0, 5]},
+            "b": {"document_id": "doc2", "block_line_1based": 2, "body_char_span": [0, 5]}}
+    incomplete = score_direction([{"chunk_id": "a"}], reference, maps)
+    complete = score_direction([{"chunk_id": "a"}, {"chunk_id": "b"}], reference, maps)
+    assert incomplete["source_hit_at_5"] == 1 and incomplete["known_reference_recall_at_5"] == 0
+    assert complete["known_reference_recall_at_5"] == 1
+    assert complete["mrr_at_10"] == 0 and complete["bundle_completion_rr_at_10"] == .5
+    with pytest.raises(ValueError, match="gold text"):
+        load_reference({**case, "gold_snippet": "alpha"}, tmp_path, tmp_path / "strategy")
+    with pytest.raises(ValueError, match="identity/bounds"):
+        load_reference({**case, "source_doc": case["source_doc"].replace("doc2 |", "wrong |")},
+                       tmp_path, tmp_path / "strategy")
+    second["publication_date"] = "2024-01-02"
+    parsed.write_text(json.dumps(original) + "\n" + json.dumps(second) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="after cutoff"):
+        load_reference(case, tmp_path, tmp_path / "strategy")
+
+
+def test_partial_case_keeps_gold_evidence_but_expects_unsupported_stance():
+    from scripts.narrative.evaluation.evaluate_rag_pilot import stance_record
+
+    result = assessment("UNSUPPORTED")
+    row = stance_record({"type": "partially supported"}, result)
+    assert row["expected_stance"] == "UNSUPPORTED" and row["stance_correct"] is True
 
 
 def test_runner_captures_fresh_pipeline_without_sending_gold(tmp_path, monkeypatch):
@@ -178,6 +317,10 @@ def test_runner_captures_fresh_pipeline_without_sending_gold(tmp_path, monkeypat
         calls.append(kwargs)
         return LLMResponse(
             text=json.dumps({"selected_evidence_ids": ["c"],
+                             "stance": "SUPPORTED", "stance_reason": "The source states alpha beta.",
+                             "stance_reason_code": "ALL_MATERIAL_PARTS_SUPPORTED",
+                             "supporting_fact_indices": [0], "contradicting_fact_indices": [],
+                             "missing_claim_parts": [],
                              "facts": [{"evidence_id": "c", "quote": "alpha\nbeta"}],
                              "summary": [{"text": "Source says alpha beta.", "evidence_ids": ["c"]}]}),
             input_tokens=20, output_tokens=10, cost_usd=0, latency_ms=1,

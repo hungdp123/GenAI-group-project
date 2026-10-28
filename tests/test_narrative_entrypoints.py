@@ -84,6 +84,8 @@ def test_registered_real_entries_return_scoped_contract_evidence(corpus_root, mo
     assert items[0].citation_span == "Results paragraph"
     assert items[0].produced_by == "narrative_retrieval_unassessed"
     assert "stance" not in registry.narrative.last_analysis["evidence"][0]
+    assert registry.narrative.last_analysis["stance"] is None
+    assert registry.narrative.last_analysis["assessment_status"] == "NOT_ASSESSED"
 
 
 def test_registry_retriever_does_not_default_every_query_to_nvda(corpus_root, monkeypatch):
@@ -208,6 +210,10 @@ def preparation_model(monkeypatch):
         passages = json.loads(prompt.split('<data name="source_passages">\n', 1)[1].split("\n</data>", 1)[0])
         passage = passages[0]
         result = {
+            "stance": "SUPPORTED",
+            "stance_reason": "The cited source states the requested figure and period.",
+            "stance_reason_code": "ALL_MATERIAL_PARTS_SUPPORTED",
+            "supporting_fact_indices": [0], "contradicting_fact_indices": [], "missing_claim_parts": [],
             "facts": [{"evidence_id": passage["evidence_id"],
                        "source_span_id": passage["source_spans"][0]["source_span_id"]}],
             "summary": [
@@ -232,7 +238,7 @@ def preparation_model(monkeypatch):
     return calls
 
 
-def test_basic_rag_prepares_cited_evidence_without_stance_or_verdict(corpus_root, preparation_model):
+def test_basic_rag_prepares_cited_evidence_and_claim_stance(corpus_root, preparation_model):
     from finsight.agents.narrative.rag.basic_rag import run_basic_narrative_rag
 
     report = run_basic_narrative_rag("META", "Daily active people June 2024", CUTOFF, corpus_root=corpus_root, top_k=3)
@@ -245,6 +251,7 @@ def test_basic_rag_prepares_cited_evidence_without_stance_or_verdict(corpus_root
     assert report["facts"][0]["quote"] == report["evidence"][0]["content"]
     assert report["summary"][0]["evidence_ids"] == report["selected_evidence_ids"]
     assert "answer" not in report and "verdict" not in report
+    assert report["stance"] == "SUPPORTED" and report["assessment_status"] == "ASSESSED"
     assert all("stance" not in item for item in report["evidence"])
 
 
@@ -268,6 +275,38 @@ def test_registry_reuses_candidates_for_preparation(corpus_root, preparation_mod
     assert len(preparation_model) == 1
     assert agent.last_analysis_path.is_file()
     assert "verdict" not in agent.last_analysis
+    assert agent.last_analysis["stance"] == "SUPPORTED"
+    assert agent.last_analysis["assessment_status"] == "ASSESSED"
+    assert json.loads(agent.last_analysis_path.read_text(encoding="utf-8"))["stance"] == "SUPPORTED"
+
+
+@pytest.mark.parametrize("entrypoint", ["basic_rag", "collect_evidence"])
+def test_cli_saved_reports_preserve_assessment_status(corpus_root, preparation_model, monkeypatch, entrypoint):
+    from importlib import import_module
+    import sys
+
+    module = import_module(f"finsight.agents.narrative.rag.{entrypoint}")
+    output = corpus_root / f"{entrypoint}.json"
+    arguments = [entrypoint, "--ticker", "META", "--claim", "Daily active people June 2024",
+                 "--cutoff", str(CUTOFF), "--backend", "bm25", "--corpus-root", str(corpus_root),
+                 "--output", str(output)]
+    if entrypoint == "collect_evidence":
+        arguments.extend(["--sub-claim-id", "cli-claim"])
+    monkeypatch.setattr(sys, "argv", arguments)
+    module.main()
+    saved = json.loads(output.read_text(encoding="utf-8"))
+    assert saved["assessment_status"] == "ASSESSED"
+    assert saved["stance"] == "SUPPORTED" and saved["stance_reason"]
+    assert len(preparation_model) == 1
+
+
+def test_retrieval_only_has_no_stance_or_model_call(corpus_root, preparation_model):
+    from finsight.agents.narrative.rag.basic_rag import run_basic_narrative_rag
+
+    report = run_basic_narrative_rag("META", "Daily active people June 2024", CUTOFF,
+                                     corpus_root=corpus_root, retrieval_only=True)
+    assert report["assessment_status"] == "NOT_ASSESSED" and report["stance"] is None
+    assert preparation_model == []
 
 
 @pytest.mark.parametrize(

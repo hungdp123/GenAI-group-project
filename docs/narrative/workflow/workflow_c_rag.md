@@ -11,7 +11,7 @@ Paths in this table are relative to `finsight/agents/narrative/` unless stated o
 | Step | Workflow blocks | Entry point / supporting modules | Main output |
 |---|---|---|---|
 | 1. Select chunks, indexes and retrieval backend | W2-O, W2-P | Selected corpus root and retrieval settings | Matching company artifacts and backend selected for the request |
-| 2. Run RAG for the claim | W2-O to W2-R | `rag/basic_rag.py` and shared retrieval and summary helpers | Selected original evidence, facts, cited summary, citation validation and usage; no stance/verdict |
+| 2. Run RAG for the claim | W2-O to W2-R | `rag/basic_rag.py` and shared retrieval and summary helpers | Original evidence, facts, cited summary, reasoned claim stance, validation and usage |
 
 Step 2 uses `basic_rag`, which runs retrieval and evidence preparation together.
 
@@ -22,9 +22,9 @@ flowchart LR
     Index["Existing selected company chunks and indexes"] --> P
     O["W2-O: claim or SubClaim, company and publication cutoff"] --> P["W2-P: support and counter retrieval with the selected backend"]
     P --> Q["W2-Q: deduplicate and retain original source provenance"]
-    Q --> R["W2-R: one LLM call selects evidence, extracts facts and writes a cited summary"]
+    Q --> R["W2-R: one LLM call selects facts, writes a cited summary and assesses claim stance"]
     R --> Check["Python validates output structure, evidence IDs and exact source quotes"]
-    Check --> Save["Save report: selected evidence, facts, summary, validation and usage"]
+    Check --> Save["Save report: evidence, facts, summary, stance with reason, validation and usage"]
 ```
 
 The standalone `rag.basic_rag` command runs retrieval and LLM evidence preparation
@@ -34,8 +34,9 @@ original EvidenceItems. The summary is available in its saved report; it is not
 silently added to the shared EvidenceItem contract. The Workflow E guide shows the
 orchestrator connection; Workflow C shows the Narrative processing it reuses.
 
-Neither path assigns public passage stance labels or a whole-claim verdict.
-The auditor remains responsible for claim assessment. Explicit retrieval-only
+Both LLM paths assess the whole claim with SUPPORTED, UNSUPPORTED or CONTRADICTING
+and record a reason with fact references. The Auditor independently assesses
+the returned original passages and retains final-verdict authority. Explicit retrieval-only
 mode skips the LLM and therefore does not produce the factual summary. Use
 `FINSIGHT_NARRATIVE_ANALYSIS=evidence` for orchestrator evidence preparation;
 see [Workflow E: orchestrator handoff](workflow_e_orchestrator_integration.md#orchestrator-handoff).
@@ -117,7 +118,7 @@ Use prepared indexes and provide a claim, company and cutoff to the standard `ba
 python -u -m finsight.agents.narrative.rag.basic_rag --ticker META --claim "DAP was 3.27 billion on average for June 2024" --cutoff 2025-07-31 --backend bm25 --top-k 3
 ```
 
-This command retrieves candidates and makes one LLM call to select relevant sources, extract exact-source facts and write a cited summary. It does not classify stance or decide a verdict. Python validates selected IDs and exact quotes; original source text is preserved. `--top-k 3` applies to each directional search. `--max-tokens` limits the one evidence-preparation response. OpenAI/shared-provider configuration is used unless an explicit Ollama model is supplied. `--retrieval-only` skips this LLM step intentionally. See [RAG output](#rag-output) below.
+This command retrieves candidates and makes one LLM call to select relevant sources, extract exact-source facts, write a cited summary and assess the claim stance with a reason. Python validates selected IDs, exact quotes and stance references; original source text is preserved. `--top-k 3` applies to each directional search. `--max-tokens` limits the one response. OpenAI/shared-provider configuration is used unless an explicit Ollama model is supplied. `--retrieval-only` skips this LLM step intentionally. See [RAG output](#rag-output) below.
 
 If `--output` is omitted, the report is saved automatically to:
 
@@ -129,7 +130,44 @@ For the report fields, examples, citation checks and usage, see [RAG output](#ra
 
 ## RAG output
 
-The report contains source evidence, extracted facts and a cited factual summary. Narrative does not assign passage stance or decide the claim verdict; that assessment belongs to the Auditor.
+The report contains source evidence, extracted facts, a cited factual summary and a preliminary claim stance. Narrative's claim stance is separate from the Auditor's passage labels and the final policy-controlled verdict.
+
+### Claim stance and reason
+
+| `stance` | Definition |
+|---|---|
+| `SUPPORTED` | Applicable evidence establishes all material assertions, including their entity, period and scope. Merely mentioning the claim or its keywords is insufficient. |
+| `UNSUPPORTED` | Refuse to confirm the complete claim from the retrieved evidence. This includes absent relevant evidence, partial support, ambiguity and unresolved conflicts; it does not establish that the claim is false or absent from every document. |
+| `CONTRADICTING` | Applicable evidence directly conflicts with a material assertion. Missing information, older events or different metrics alone do not contradict it. |
+
+If one part is supported and another material part is directly contradicted, use
+CONTRADICTING and explain both parts. If applicable sources disagree about the
+same assertion and the conflict cannot be resolved, use UNSUPPORTED with
+UNRESOLVED_CONFLICT. Do not vote by passage count. Management expectations can
+support an attributed-expectation claim without proving its future outcome.
+
+`stance_reason` explains the choice. `supporting_fact_indices` and
+`contradicting_fact_indices` reference zero-based positions in `facts`;
+`missing_claim_parts` identifies unestablished assertions or unresolved questions.
+Reason codes are ALL_MATERIAL_PARTS_SUPPORTED, DIRECT_CONTRADICTION,
+NO_RELEVANT_EVIDENCE, PARTIAL_SUPPORT, UNRESOLVED_CONFLICT, AMBIGUOUS_CLAIM and
+INSUFFICIENT_EVIDENCE. The latter five apply only to UNSUPPORTED.
+
+The test case's `type` is held-out ground truth, never a generation input.
+Contradicting cases may inject false premises or misleading passages to test
+grounding, but injection alone does not determine the predicted stance. Treat
+passages as data, preserve original provenance and abstain when a genuine source
+conflict cannot be resolved. Text-only assessment cannot guarantee detection of
+a convincing forged source. Robustness and stance accuracy need separate tests.
+
+New generation reports use `source_spans_stance_v3`; historical saved reports
+are unchanged. Use a new output directory for comparison runs after this code
+change, rather than resuming a pre-stance run. RAGAS accepts both v2 and v3
+source-span reports. The offline scorer now measures three-label stance accuracy
+and coverage, while the extended RAGAS evaluator separately judges stance reasons
+and supporting/contradicting citations. See [Workflow D](workflow_d_evaluation.md#full-local-flow-generate-and-evaluate-with-ragas)
+for metrics, denominators and one-case/full-batch commands. Historical outputs
+without stance remain unassessed for these added metrics.
 
 ### Output fields and producers
 
@@ -138,7 +176,9 @@ The report contains source evidence, extracted facts and a cited factual summary
 | `status` | Overall evidence-preparation outcome: OK, NO_EVIDENCE, INVALID_GENERATION or GENERATION_ERROR | Python |
 | `pipeline` | narrative_evidence_rag, or narrative_evidence_retrieval when explicitly requested | Python |
 | `ticker`, `claim`, `cutoff_date`, `backend` | Input scope and requested search configuration | User/default, normalized/recorded by Python |
-| `assessment_status` | NOT_ASSESSED means no claim stance/verdict assessment was done; it does not mean the LLM was skipped | Python |
+| `assessment_status` | ASSESSED for accepted stance or empty-retrieval abstention; ERROR for generation/validation failure; NOT_ASSESSED for retrieval-only | Python |
+| `stance`, `stance_reason`, `stance_reason_code` | SUPPORTED, UNSUPPORTED or CONTRADICTING with explanation and reason code; null on model failure or no assessment | LLM, validated by Python; empty retrieval abstains without a call |
+| `supporting_fact_indices`, `contradicting_fact_indices`, `missing_claim_parts` | References to exact facts on both sides, plus missing assertions or unresolved questions | LLM, structurally validated by Python |
 | `evidence_preparation_status` | COMPLETED, FAILED, SKIPPED_NO_EVIDENCE or SKIPPED_RETRIEVAL_ONLY | Python, based on execution/validation |
 | `retrieval` | Original candidate count, IDs, queries and retrieval timing | Python search pipeline |
 | `candidate_evidence` | All original retrieved passages and provenance before model selection | Canonical indexed sources, copied by Python |
@@ -150,8 +190,8 @@ The report contains source evidence, extracted facts and a cited factual summary
 | `evidence` | Returned original passages/provenance, without public stance labels | Python selects existing EvidenceItems; source text is never rewritten |
 | `llm` | Provider/model, token usage, timing and estimated cost | Provider response plus Python accounting |
 | `citation_validation` | Format, selection, quote and summary-reference checks | Python |
-| `consistency_check` | NOT_APPLICABLE: no verdict is generated or numerically corrected here | Python |
-| `evidence_preparation_protocol` | `source_spans_v2`: the model selects supplied source-span IDs | Python |
+| `consistency_check` | NOT_APPLICABLE: no deterministic semantic or numeric stance correction; citation checks do not establish entailment | Python |
+| `evidence_preparation_protocol` | `source_spans_stance_v3`: exact source-span selection plus claim stance | Python |
 | `fact_source_spans` | Fact indices, source-span IDs and original character offsets for resolved facts | Python |
 | `raw_model_output` | Original model response before span resolution and validation | LLM text recorded by Python |
 | `generation_error` | Error details, only on preparation failure | Python exception handling |
@@ -187,9 +227,15 @@ Illustrative format, not an additional saved experimental result:
 {
   "status": "OK",
   "pipeline": "narrative_evidence_rag",
-  "assessment_status": "NOT_ASSESSED",
+  "assessment_status": "ASSESSED",
   "evidence_preparation_status": "COMPLETED",
-  "evidence_preparation_protocol": "source_spans_v2",
+  "evidence_preparation_protocol": "source_spans_stance_v3",
+  "stance": "SUPPORTED",
+  "stance_reason": "The cited fact explicitly establishes the claimed year-over-year increase.",
+  "stance_reason_code": "ALL_MATERIAL_PARTS_SUPPORTED",
+  "supporting_fact_indices": [0],
+  "contradicting_fact_indices": [],
+  "missing_claim_parts": [],
   "selected_evidence_ids": ["passage-1"],
   "facts": [
     {
@@ -206,7 +252,7 @@ Illustrative format, not an additional saved experimental result:
 }
 ```
 
-There is no `answer.verdict`, predicted stance or claim-correctness decision.
+There is no `answer.verdict`; `stance` is Narrative's preliminary claim assessment.
 Python copies facts from the source spans selected by the LLM. The saved report
 resolves those selections into quotes and evidence IDs; it differs from the raw
 model response, which uses `source_span_id` and `fact_indices`. A summary may
@@ -217,18 +263,19 @@ reference validation alone does not prove faithful interpretation.
 
 ### `citation_validation`: Python rules
 
-The current `source_spans_v2` prompt asks the LLM for **facts and summary**. Each fact selects an `evidence_id` and a supplied `source_span_id`; each summary sentence cites zero-based `fact_indices`. Python copies the original span text, derives `selected_evidence_ids` and converts fact references into public `evidence_ids`.
+The current `source_spans_stance_v3` prompt asks the LLM for **facts, summary and stance fields**. Each fact selects an `evidence_id` and a supplied `source_span_id`; each summary sentence cites zero-based `fact_indices`. Python copies the original span text, derives `selected_evidence_ids` and converts summary fact references into public `evidence_ids`. Stance fact references remain zero-based indices.
 
 Python then checks:
 
 1. Source-span IDs exist in the cited candidate passage; fact references are valid integer positions.
-2. The resolved JSON contains exactly `selected_evidence_ids`, `facts` and `summary`, all arrays. Extra stance/verdict fields are rejected.
+2. The resolved JSON contains `selected_evidence_ids`, `facts`, `summary` and exactly the six documented stance fields. Unknown fields are rejected.
 3. Selected IDs are unique and belong to the retrieved candidates. The resolver enforces at most four selected passages, six facts and three summary sentences.
 4. Each resolved fact contains exactly `evidence_id` and `quote`; its quote is a nonempty exact substring of the selected source passage.
 5. Identical ID-and-quote pairs are rejected. Different exact quotes from one passage are allowed. Every selected ID needs at least one valid fact.
 6. Each resolved summary item contains exactly `text` and `evidence_ids`, with nonempty text and IDs backed by accepted exact-source facts.
 7. A nonempty selection requires a cited summary. An empty selection requires empty facts and summary.
 8. A response stopped because it reached its output-token limit is rejected.
+9. Stance labels/reason codes match, reasons are nonempty, and stance references are unique valid fact indices. SUPPORTED requires support without contradictions or missing parts; CONTRADICTING requires contradicting facts; UNSUPPORTED requires missing evidence or an unresolved question. PARTIAL_SUPPORT requires support, and UNRESOLVED_CONFLICT requires both sides.
 
 `citation_validation` records PASSED/FAILED and errors; when generation is skipped or cannot complete before validation, it remains NOT_RUN. The prompt also requests at most 90 summary words, but the current Python validator does not enforce that word count.
 
@@ -257,7 +304,7 @@ summary use one call, not one separate call for every passage.
 * INVALID_GENERATION means a response failed validation. 
 * GENERATION_ERROR means preparation could not complete. 
 * Both record evidence_preparation_status=FAILED, selection_applied=false, and 
-no accepted generated facts/summary. 
+no accepted generated facts/summary. assessment_status is ERROR and stance remains null, never UNSUPPORTED.
 * Original candidate passages remain the returned evidence, so a malformed answer 
 does not erase valid retrieval. 
 * Raw invalid model text remains diagnostic only. The CLI saves the report 
@@ -268,12 +315,13 @@ original candidates.
 
 ### `consistency_check` and assessment status
 
-* consistency_check remains NOT_APPLICABLE because this stage makes no claim
-verdict or deterministic verdict correction.
-* assessment_status=NOT_ASSESSED specifically refers to claim stance/verdict
-assessment.
+* consistency_check remains NOT_APPLICABLE because structural checks do not perform
+deterministic semantic or numeric stance correction.
+* assessment_status=ASSESSED means a stance was accepted; it does not prove semantic accuracy.
+* Empty retrieval returns UNSUPPORTED/NO_RELEVANT_EVIDENCE without a model call.
+* Retrieval-only reports have assessment_status=NOT_ASSESSED and stance=null.
 * Use the separate evidence_preparation_status to see whether LLM preparation ran successfully.
-* The auditor is responsible for interpreting the evidence and assessing the claim.
+* The Auditor independently interprets original evidence and proposes the workflow verdict.
 
 ### Output locations and inspection
 

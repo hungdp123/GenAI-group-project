@@ -5,8 +5,8 @@ Runtime imports:
 
 Collector contract: gather(SubClaim, cutoff_date, feedback) -> list[EvidenceItem].
 Retriever contract: retrieve(query, top_k, cutoff_date) -> list[EvidenceItem].
-The basic_rag entry point prepares cited evidence with an LLM, without stance or
-claim verdict. verdict_baseline retains historical answer generation and the
+The basic_rag entry point prepares cited evidence and a reasoned claim stance with
+an LLM. The Auditor retains final verdict authority. verdict_baseline retains historical answer generation and the
 Ollama adapter used by current evidence preparation and evaluation. Workflow
 modules below cover preparation, evaluation and inference without import-time work.
 """

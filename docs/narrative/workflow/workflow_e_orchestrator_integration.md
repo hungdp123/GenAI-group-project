@@ -66,7 +66,7 @@ Select the explicit implementations below when the orchestrator should use LLM e
 
 | File / export | Responsibility |
 |---|---|
-| `stub.py:NarrativeAgent` | Collects candidates, then prepares selected evidence, exact-source facts and a cited summary with the shared LLM helper. No stance/verdict decision. |
+| `stub.py:NarrativeAgent` | Collects candidates, then prepares exact facts, a cited summary and SUPPORTED/UNSUPPORTED/CONTRADICTING with a reason. The Auditor retains final-verdict authority. |
 | `retriever_stub.py:NarrativeRetriever` | Implements the raw retrieval contract with an explicit or unambiguous company; supports the configured retrieval backend without generating a summary. |
 | `__init__.py` | Exposes both classes and the standalone RAG helper through the package. |
 
@@ -87,7 +87,7 @@ Select the explicit implementations below when the orchestrator should use LLM e
 
 `NarrativeRetriever.retrieve(query, top_k, cutoff_date)` also returns `list[EvidenceItem]`, but only performs raw retrieval. Prefer an explicit constructor ticker or `FINSIGHT_NARRATIVE_TICKER`; without one, this adapter resolves one company named in the query. Unscoped queries return no evidence, and ambiguous multi-company queries raise an error. Unlike the lower-level `CorpusRetriever`'s NVDA default, this registry adapter does not silently choose a company.
 
-The orchestrator owns routing and retry decisions. Narrative accepts feedback for another evidence pass; it does not run its own multi-step retry loop. The Auditor interprets the evidence and determines the claim verdict under the application's assessment rules. A successfully connected collector alone does not prove final-verdict accuracy.
+The orchestrator owns routing and retry decisions. Narrative accepts feedback for another evidence pass; it does not run its own multi-step retry loop. Narrative's stance and reason are saved in its report, not inserted into EvidenceItem passage labels. The Auditor independently interprets original evidence and determines the claim verdict under the application's assessment rules. The two assessments may differ; see [Workflow C's definitions](workflow_c_rag.md#claim-stance-and-reason). A successfully connected collector alone does not prove final-verdict accuracy.
 
 #### Default chunks and retrieval backend
 
@@ -180,6 +180,9 @@ evidence = registry.narrative.gather(
 )
 for item in evidence:
     print(item.model_dump(mode="json", exclude={"stance"}))
+print(registry.narrative.last_analysis["stance"])
+print(registry.narrative.last_analysis.get("stance_reason"))
+print(registry.narrative.last_analysis_path)
 ```
 
 The Python example makes a real evidence-preparation call when candidates exist; model settings must be configured first. The input claim here is supplied directly for testing the interface; the complete application obtains its own claims through its claim-source/extraction stages.

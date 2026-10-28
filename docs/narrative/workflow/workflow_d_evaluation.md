@@ -29,8 +29,8 @@ Step numbers start at 1 within this workflow. Prepare sources/indexes using Work
 | 1. Prepare test claims and indexes | Current CSV, source maps and Workflow B build reports | Reviewed gold evidence and matching company/strategy artifacts |
 | 2. Run retrieval comparisons | `scripts/narrative/evaluation/run_rag_comparison.py --retrieval-only` | Ranked support/counter passages, queries, evidence and source metadata |
 | 3. Validate and score saved retrieval | `scripts/narrative/evaluation/evaluate_rag_comparison.py` | Source checks, Source Hit@5/10, Recall@5/10, MRR@5/10 and company/case reports |
-| 4. Run RAG for selected configurations | `scripts/narrative/evaluation/run_rag_comparison.py` without `--retrieval-only` | Exact LLM inputs/responses, selected evidence, quoted facts, cited summaries, validation and usage |
-| 5. Evaluate selected RAG outputs | `scripts/narrative/evaluation/evaluate_rag_comparison.py`, then `evaluate_ragas.py` | Technical/citation checks, usage and separate RAGAS evidence/summary quality reports |
+| 4. Run RAG for selected configurations | `scripts/narrative/evaluation/run_rag_comparison.py` without `--retrieval-only` | Exact LLM inputs/responses, selected evidence, quoted facts, cited summaries, stance with reason, validation and usage |
+| 5. Evaluate selected RAG outputs | `scripts/narrative/evaluation/evaluate_rag_comparison.py`, then `evaluate_ragas.py` | Local stance classification and coverage, technical checks, usage, RAGAS evidence/summary quality, stance justification and citation relations; see the [metric index](#metrics-available-from-each-evaluation-script) |
 
 ## Workflow and responsibilities
 
@@ -214,13 +214,66 @@ Get-Content -LiteralPath "$ragRun/comparison.md"
 | Technical completion | Report OK, INVALID_GENERATION and GENERATION_ERROR outcomes; retain retrieval scores when generation fails. |
 | Usage | Report saved generation tokens, recorded cost estimates and timings. Scoring makes no new model calls. |
 | Summary quality | Run the separate RAGAS evaluator below against saved inputs/outputs and reviewed references. The offline comparison scorer above makes no judge calls. |
-| Final claim verdict | Determined by the Auditor; not a Narrative Agent output or a metric of this standalone run. |
+| Narrative stance | Locally compare SUPPORTED/UNSUPPORTED/CONTRADICTING with the existing CSV `type`; separately judge the reason and supporting/contradicting citations. |
+| Final claim verdict | Determined by the Auditor; separate from Narrative's preliminary stance and not scored by this standalone evaluation. |
 
 Technical acceptance is not answer accuracy. Report generated-summary quality separately from retrieval metrics and use independently reviewed held-out cases for final quality conclusions.
 
+### Metrics available from each evaluation script
+
+The run command captures outputs; the evaluation commands below calculate the
+metrics. Use the existing CSV `type` for expected stance. No additional dataset
+columns are required.
+
+| Script and saved input | Metrics available | Reports | Judge calls |
+|---|---|---|---|
+| `evaluate_rag_comparison --run-dir $run`, where `$run` contains a **retrieval-only matrix** | Source Hit@5/@10, known-reference Recall@5/@10, MRR@5/@10 and bundle completion RR@10; source/cutoff checks and run status. No assessed stance or generated-answer quality. | `comparison.md`, `comparison.json`, `comparison.csv`, `per_case.csv`, `per_company.csv`; bundle completion RR is in JSON/CSV. | None |
+| `evaluate_rag_comparison --run-dir $ragRun`, where `$ragRun` contains a **full stance-enabled RAG matrix** | The same retrieval metrics, plus stance accuracy, macro F1, precision/recall/F1 for each stance, confusion matrix, false support rate, assessment completion rate and all-case accuracy. Also reports citation-validation status, generation failures, saved tokens/cost and timing. | `comparison.md`/`.json`, `stance_metrics.csv`, `stance_per_case.csv`, `stance_per_label.csv`, `stance_confusion_matrix.csv`, plus the retrieval CSVs. | None |
+| `evaluate_rag_pilot --run-dir <CONFIGURATION_FOLDER>` | Single-configuration counterpart of the local scorer: retrieval, technical and stance metrics. | `evaluation.md`, `evaluation.json` with per-case records, reasons and `stance_metrics`. | None |
+| `evaluate_ragas --run-dir $ragRun ... --output-dir $judgeRun` | Faithfulness; selected Context Recall (`evidence_completeness`); selected Context Precision (`evidence_selection_quality`); retrieved Context Precision/Recall; summary completeness; summary citation correctness; relevance; stance justification; stance citation correctness; extended unsupported behavior. Also repeats local stance classification and records judge usage. | `ragas_report.md`/`.json`, `ragas_metrics.csv`, `ragas_per_case.csv`; detailed judge reasons/checkpoints under `samples/` and `calls/`. | Yes, except `--prepare-only`, which exports inputs without calculating judge scores. |
+
+**Your retrieval-only command:** `run_rag_comparison --retrieval-only` does not
+generate a stance. Score its saved output with:
+
+```powershell
+python -m scripts.narrative.evaluation.evaluate_rag_comparison --run-dir $run
+Get-Content -LiteralPath "$run/comparison.md"
+Import-Csv -LiteralPath "$run/comparison.csv" | Format-Table
+```
+
+To obtain stance metrics, first create a separate full RAG run without
+`--retrieval-only`, then score `$ragRun`. RAGAS also requires that full run;
+passing the retrieval-only folder is rejected. The full local flow below shows
+generation, a one-case judge check and full-batch evaluation.
+
+**How to inspect a stance-enabled run:**
+
+```powershell
+Get-Content -LiteralPath "$ragRun/comparison.md"
+Import-Csv -LiteralPath "$ragRun/stance_metrics.csv" | Format-Table
+Import-Csv -LiteralPath "$ragRun/stance_per_label.csv" | Format-Table
+Import-Csv -LiteralPath "$ragRun/stance_confusion_matrix.csv" | Format-Table
+Import-Csv -LiteralPath "$ragRun/stance_per_case.csv" |
+    Select-Object id, expected_stance, predicted_stance, stance_assessment_status, stance_correct, stance_reason |
+    Format-List
+
+Get-Content -LiteralPath "$judgeRun/ragas_report.md"
+Import-Csv -LiteralPath "$judgeRun/ragas_metrics.csv" | Format-Table
+Import-Csv -LiteralPath "$judgeRun/ragas_per_case.csv" | Format-Table
+```
+
+The table lists implemented metrics, not newly measured performance. N/A and
+errors remain distinct from scores. Classification excludes invalid/null
+predictions from accuracy/F1 while coverage and all-case accuracy retain failures
+in their denominators. Judge scores have their own scored-case counts. See the
+[local metric definitions](#step-3-validate-and-score-saved-pipeline-outputs)
+and [RAGAS field mappings](#what-the-scores-compare) below for interpretation.
+Noise Sensitivity and Factual Correctness in F1 mode are not currently reported;
+`summary_completeness` uses Factual Correctness in recall mode.
+
 ### Full local flow: generate and evaluate with RAGAS
 
-**Flow:** existing C4 indexes -> R4 retrieval -> Ollama facts and summaries -> Python source/citation/retrieval checks -> Ollama RAGAS judging -> reports. This is the Narrative evaluation flow; the Auditor remains responsible for final claim verdicts.
+**Flow:** existing C4 indexes -> R4 retrieval -> Ollama facts, summary and reasoned stance -> Python source/citation/retrieval and stance classification checks -> Ollama RAGAS judging -> reports. The Auditor remains responsible for final claim verdicts.
 
 The commands use C4/R4 for all 126 claims. Both runners now default to local `qwen3-vl:4b-instruct`, with a 20,000-token context. RAGAS scoring reads saved outputs without repeating retrieval or generation. It makes multiple local judge requests per case.
 
@@ -232,11 +285,35 @@ Run from the repository root in PowerShell. Keep Ollama running and check the mo
 python -m pip install -e ".[retrieval,ragas]"
 ollama list
 
-$ragRun = 'data/narrative/evaluation/test_claims_v1_result/rag_C4_r4_ollama_v1'
-$judgeRun = 'data/narrative/evaluation/test_claims_v1_result/ragas_C4_r4_ollama_v1'
+$ragRun = 'data/narrative/evaluation/test_claims_v1_result/rag_C4_r4_ollama_stance_v1'
+$judgeRun = 'data/narrative/evaluation/test_claims_v1_result/ragas_C4_r4_ollama_stance_v1'
 ```
 
 If the model is missing, install it using `ollama pull qwen3-vl:4b-instruct`. The CSV, current parsed documents and matching full C4 indexes/vectors must already be present. No OpenAI key or provider environment change is required for local mode. Use separate folders from the OpenAI runs; changing provider/model cannot resume those generation/judge checkpoints.
+
+The stance prompt and evaluation protocol changed. Use new generation and judge
+folders, including when older folders used the same model. Existing saved results
+are not rewritten or relabelled. No new dataset columns are needed: `type` maps
+supported -> SUPPORTED, unsupported -> UNSUPPORTED, contradicting -> CONTRADICTING.
+Keep the reviewed labels, `gold_answer`, `gold_snippet` and `expected_behavior`
+out of generation inputs. No adversarial flags, attack categories or pair IDs
+are required, and no dedicated paired-attack metrics are reported.
+
+CSV `cut_off` must be populated for every selected case as `YYYY-MM-DD`, using
+the reviewed claim/video publication cutoff. It is not the collection-folder
+date or today's date. Preflight reports invalid dates with case IDs and CSV
+record numbers before reading corpus builds. Changing CSV contents requires a
+new run folder when an older manifest already exists.
+
+Positive cases can cite multiple exact `block N | chars START:END` anchors in
+`source_doc`. Each anchor needs its own document header; `gold_snippet` contains
+their quotes in the same order. All identities, bounds, text and dates are checked.
+Known-reference Recall@K requires coverage of every span; Source Hit@K counts any
+annotated document, single-passage MRR requires one passage to cover the complete
+reference, and bundle completion RR measures when the accumulated hits cover it.
+The optional existing CSV type `partially supported` retains its gold evidence
+for retrieval/quality evaluation but maps to expected UNSUPPORTED for the
+three-stance assessment. Its original CSV label and evidence are preserved.
 
 #### Step 2. Run retrieval and local generation
 
@@ -244,7 +321,7 @@ If the model is missing, install it using `ollama pull qwen3-vl:4b-instruct`. Th
 python -u -m scripts.narrative.evaluation.run_rag_comparison --all-cases --strategies C4 --backends r4 --build-version full_v1 --threads 2 --max-tokens 3000 --rerank-overflow truncate --output-dir $ragRun --resume
 ```
 
-**Output:** exact `llm_input.json` and `llm_response.json`, `result.json`, `retrieval.json`, selected evidence, facts, cited summaries, validation and usage under each case folder. The startup message identifies the local model. If Ollama is unavailable, the runner stops; it does not switch to a paid API.
+**Output:** exact `llm_input.json` and `llm_response.json`, `result.json`, `retrieval.json`, selected evidence, facts, cited summary, stance with reason and fact references, validation and usage under each case folder. The startup message identifies the local model. If Ollama is unavailable, the runner stops; it does not switch to a paid API.
 
 For a one-claim preview, replace `--all-cases` with `--limit 1`. Later extend to `--all-cases --resume` using the same folder/settings. Append `--preflight-only` to the generation command to check inputs without model calls; remove it to execute.
 
@@ -257,7 +334,30 @@ python -u -m scripts.narrative.evaluation.evaluate_rag_comparison --run-dir $rag
 Get-Content -LiteralPath "$ragRun/comparison.md"
 ```
 
-This offline scorer reports source checks, directional retrieval metrics, technical/citation outcomes and recorded generation usage. It makes no new retrieval or model calls. Invalid generations remain visible rather than being counted as successful semantic answers.
+This offline scorer reports source checks, directional retrieval metrics, technical/citation outcomes, stance classification and recorded usage. It makes no retrieval or model calls. Invalid generations remain visible rather than being counted as semantic answers. The single-configuration counterpart is `python -m scripts.narrative.evaluation.evaluate_rag_pilot --run-dir <CONFIGURATION_FOLDER>`.
+
+Stance classification counts each case once, not once per support/counter search.
+The matrix writes `stance_metrics.csv`, `stance_per_case.csv`, `stance_per_label.csv`
+and `stance_confusion_matrix.csv`, plus the stance section in `comparison.md` and
+`comparison.json`. Each configuration's `evaluation.json` also contains
+`stance_metrics` and the per-case prediction/reason/status.
+
+| Local metric | Definition |
+|---|---|
+| `accuracy` | Correct labels / valid assessments. |
+| `macro_f1` | Unweighted average F1 over all three labels. Undefined class precision/recall/F1 is zero when at least one valid assessment exists; all are N/A with none. |
+| Per-label precision, recall and F1 | Computed from valid expected/predicted labels; includes class support counts. UNSUPPORTED recall measures correct refusal on gold unsupported cases. |
+| Confusion matrix | Expected labels in rows, predictions in columns, valid assessments only. |
+| `false_support_rate` | Incorrect SUPPORTED predictions / valid gold UNSUPPORTED or CONTRADICTING cases. Lower is better; N/A without such cases. |
+| `assessment_completion_rate` | Valid assessments / all saved full-RAG cases. |
+| `all_case_accuracy` | Correct predictions / all saved full-RAG cases, retaining failures/missing assessments in the denominator. |
+
+Retrieval-only cases are excluded from stance denominators. Historical reports
+without a stance remain NOT_ASSESSED; invalid generation/model failures are
+ERROR, never an UNSUPPORTED prediction. A valid empty-retrieval abstention counts
+as an assessment and can still be incorrect against the gold label. Read valid
+accuracy together with coverage and all-case accuracy. A one-case preview is an
+execution check; use all three classes before interpreting macro F1.
 
 #### Step 4. Run local RAGAS judging
 
@@ -278,6 +378,9 @@ Get-Content -LiteralPath "$ragRun/comparison.md"
 Get-Content -LiteralPath "$judgeRun/ragas_report.md"
 Import-Csv -LiteralPath "$judgeRun/ragas_metrics.csv" | Format-Table
 Import-Csv -LiteralPath "$judgeRun/ragas_per_case.csv" | Format-Table
+Import-Csv -LiteralPath "$ragRun/stance_metrics.csv" | Format-Table
+Import-Csv -LiteralPath "$ragRun/stance_per_case.csv" | Format-Table
+Import-Csv -LiteralPath "$ragRun/stance_confusion_matrix.csv" | Format-Table
 ```
 
 `ragas_report.json` contains per-metric status/reasons and coverage; `calls/` retains judge request/response checkpoints. Local token counts and timings are reported, with API cost recorded as zero; hardware/electricity costs are not measured. Do not combine local and OpenAI judge scores as if they came from the same evaluator model.
@@ -295,13 +398,28 @@ Import-Csv -LiteralPath "$judgeRun/ragas_per_case.csv" | Format-Table
 | `faithfulness` | Joined `summary[].text` vs actual `source_passages` captured in `llm_input.json` | RAGAS Faithfulness: are the summary's factual statements grounded in the supplied sources? |
 | `evidence_completeness` | Selected original passages vs CSV `gold_answer` | RAGAS Context Recall: how much of the expected source fact is covered by selected evidence? |
 | `evidence_selection_quality` | Original passages in `selected_evidence_ids` order vs claim and `gold_answer` | RAGAS Context Precision: rank-aware relevance of the selected evidence; not a simple percentage of useful passages. |
+| `retrieved_context_precision` | All actual supplied contexts in captured prompt order vs claim and `gold_answer` | RAGAS Context Precision before LLM selection. This is the captured supplied list, not either original directional ranking. |
+| `retrieved_context_recall` | All actual supplied contexts vs `gold_answer` | RAGAS Context Recall before LLM selection; compare with `evidence_completeness` to identify selection losses. |
 | `summary_completeness` | Joined summary text vs CSV `gold_answer` | RAGAS Factual Correctness in recall mode: how much expected factual content appears in the summary? |
 | `citation_correctness` | Each summary sentence vs only the passages in its `evidence_ids` | Custom RAGAS binary attribution rubric; case score is the mean across cited sentences. Requires entity/period/number/qualification and explicit attribution to match. |
 | `relevance` | `facts` and `summary` vs claim/company/cutoff | Custom RAGAS rubric: 0 = off-topic/materially changes scope, 0.5 = partly relevant, 1 = directly relevant. No stance/verdict is required. |
-| `unsupported_behavior` | Evidence brief, supplied contexts and CSV `expected_behavior` | Custom RAGAS binary rubric for the 42 unsupported cases; checks avoidance of invented evidence. Empty facts/summary are valid for this extraction interface. |
+| `stance_justification` | Stance, reason, exact facts, missing parts and actual supplied contexts | Custom rubric: 0 = unjustified/inconsistent, 0.5 = partially justified with a missing qualification, 1 = fully justified. Includes compound claims, attribution, matching scope/period and unresolved conflicts. No gold label is supplied to this judge task. |
+| `stance_citation_correctness` | Each supporting/contradicting fact reference vs claim, exact quote and its original cited passage | Binary relation check per reference; case score is their mean. Supporting facts must establish a material part; contradicting facts must directly oppose it under applicable scope/period. No references means N/A. Existing summary citation correctness remains separate. |
+| `unsupported_behavior` | Evidence brief, supplied contexts, available stance/reason/missing parts and CSV `expected_behavior` | Extended binary rubric for gold unsupported cases: avoids invented evidence and, when a stance exists, requires a justified UNSUPPORTED refusal to confirm. Empty facts/summary are valid; an error is not a refusal. Historical v2 reports retain brief-only behavior checks. |
 | Technical citation checks | Saved `citation_validation` | Existing Python ID/exact-quote/structure checks, reported separately from semantic attribution. |
 
 For **contradicting** claims, `gold_answer` contains the correct source fact, not the false assertion. For **unsupported** claims, positive-reference completeness/precision scores are N/A. Empty summaries get no faithfulness score; failed generation is not scored as zero or as perfect. For supported/contradicting cases, an accepted empty evidence selection/summary has zero expected-fact coverage. All output quality scores are separate from the Auditor's claim verdict.
+
+The judge report also includes locally calculated `stance_metrics` per
+configuration and expected/predicted stance, reason and status in
+`ragas_per_case.csv`. Per-reference relation judgments and reasons are saved as
+`samples/<CONFIG>/<CASE_ID>/stance_citation_<ROLE>_<FACT_INDEX>.json` and
+`stance_justification.json`. JSON/CSV metric status distinguishes scored values,
+N/A and failures. Historical outputs without stance get N/A for stance judging;
+no stance is fabricated. Judge errors stop/checkpoint the run as before.
+In-progress stance aggregates cover processed rows only; use a COMPLETE report
+for the full selected scope. These software changes do not refresh the historical
+performance tables below, and no new model/judge calls were made for this update.
 
 The evaluator uses **RAGAS 0.4.3** with the existing shared client (or the existing Ollama helper), not a second production pipeline. References: [Faithfulness](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/faithfulness/), [Context Recall](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/context_recall/), [Context Precision](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/context_precision/), [Factual Correctness](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/factual_correctness/) and [custom criteria](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/general_purpose/).
 
