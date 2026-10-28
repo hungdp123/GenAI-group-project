@@ -548,3 +548,58 @@ def test_free_cash_flow_is_on_topic_when_margins_are_named_first():
     r = audit(sc, [item])
     assert r.passed and not any("does not measure" in x for x in r.failure_reasons)
 
+
+
+# -- regression: items 12 and 31 of the end-to-end evaluation (28 Oct 2026) --------------------------------------
+
+def _rev_item(sc, content, value):
+    from datetime import date
+    return EvidenceItem(
+        evidence_id="XBRL-REV-YOY", sub_claim_id=sc.sub_claim_id, stance=Stance.SUPPORTING, content=content,
+        source_tier=SourceTier.TIER_1, doc_type="10-Q", company="Alphabet", period="Q1 2026",
+        publication_date=date(2026, 4, 30), url="https://www.sec.gov/x", citation_span="XBRL us-gaap:Revenues",
+        produced_by="financial", metric_name="revenue_growth_yoy", computed_value=value)
+
+
+def _audit(text, content, value):
+    from finsight.agents.auditor.agent import AuditorAgent
+    sc = SubClaim(sub_claim_id="s", text=text, sub_claim_type=SubClaimType.HISTORICAL_GROWTH,
+                  company_ticker="GOOGL", is_quantitative=True)
+    return AuditorAgent(use_llm=False).audit(sc, [_rev_item(sc, content, value)])
+
+
+REC = "Revenue was $109,896m in the quarter ended 2026-03-31 vs $90,234m in the quarter ended 2025-03-31 (+21.8% YoY)."
+
+
+def test_bare_dollar_amount_is_read_in_billions():
+    r = _audit("Alphabet's revenue growing 22% year-over-year to $110 in Q1.", REC, 0.2179)
+    assert r.verdict is Verdict.SUPPORTED and r.numeric_check.matches
+
+
+def test_bare_dollar_amount_that_is_really_wrong_still_contradicts():
+    r = _audit("Alphabet's revenue growing 22% year-over-year to $90 in Q1.", REC, 0.2179)
+    assert r.verdict is Verdict.CONTRADICTED
+
+
+def test_ever_with_a_checkable_figure_is_still_checked():
+    r = _audit("their best quarter ever by far, $81.6 billion in revenue, which is up 85% year-over-year.",
+               "Revenue was $81,615m in the quarter ended 2026-04-26 vs $44,062m (+85.2% YoY).", 0.8524)
+    assert r.verdict is Verdict.SUPPORTED
+
+
+def test_ever_without_a_figure_stays_insufficient():
+    r = _audit("this was the best quarter ever", REC, 0.2179)
+    assert r.verdict is Verdict.INSUFFICIENT_EVIDENCE
+
+
+def test_stated_amount_far_from_the_record_is_out_of_window_not_contradicted():
+    """Item 17: "13.5 billion, up 101%" is a 2023 quarter; the latest record is $96.2bn (+105.9%)."""
+    rec = "Revenue was $96,221m in the quarter ended 2026-07-26 vs $46,743m in the quarter ended 2025-07-27 (+105.9% YoY)."
+    r = _audit("The next quarter arrived, Nvidia reported 13.5 billion of total revenue, up 101%.", rec, 1.0585)
+    assert r.verdict is Verdict.INSUFFICIENT_EVIDENCE and r.passed
+
+
+def test_stated_amount_near_the_record_but_wrong_is_still_contradicted():
+    rec = "Revenue was $96,221m in the quarter ended 2026-07-26 vs $46,743m in the quarter ended 2025-07-27 (+105.9% YoY)."
+    r = _audit("Nvidia reported $80 billion of revenue, up 106%.", rec, 1.0585)
+    assert r.verdict is Verdict.CONTRADICTED

@@ -80,8 +80,17 @@ MARGINS = {"gross_margin", "operating_margin", "net_margin", "fcf_margin"}
 # "first time since 2004", "all-time high", "in 20 years": the corpus holds the latest 10-K and four quarters, so
 # a claim about a longer history cannot be verified (knowledge layer section 3). Not a defect of the evidence.
 _LONG_HISTORY = re.compile(
-    r"\bfirst time since\b|\bsince (?:19|20)\d{2}\b|\ball[- ]time\b|\bever\b|\brecord[- ](?:high|low)\b|"
+    r"\bfirst time since\b|\bsince (?:19|20)\d{2}\b|\ball[- ]time\b|\brecord[- ](?:high|low)\b|"
     r"\bin (?:over |more than )?\d+ years\b|\bin decades\b|\bdecades?\b", re.I)
+# "best quarter ever, $81.6 billion, up 85%": the superlative cannot be checked, but the figures can. "ever" only
+# short-circuits to INSUFFICIENT when the line states no figure the record could confirm.
+_EVER = re.compile(r"\bever\b", re.I)
+
+
+def _is_long_history(text: str) -> bool:
+    if _LONG_HISTORY.search(text):
+        return True
+    return bool(_EVER.search(text)) and not (_pcts(text) or _money(text))
 
 # -- wording -------------------------------------------------------------------------------------
 
@@ -167,6 +176,57 @@ def _money_half_unit(text: str) -> float:
     decimals = len(raw.split(".")[1]) if "." in raw else 0
     unit = m.group(3).lower() if m.group(3) else None
     return 0.5 * 10 ** (-decimals) * _UNIT[unit]
+
+
+def _bare_amount_scale(text: str, stated: float, record: float) -> float:
+    """Scale for a dollar amount written without a unit ("$110 in Q1").
+
+    Speakers drop "billion". When the amount has no unit and is far below the record, read it in the unit
+    (million, billion, trillion) that lands it within a factor of 10 of the record. A genuinely wrong bare
+    figure ("$20" against $109.9bn) still lands off and stays a mismatch. Amounts with a unit are never rescaled.
+    """
+    m = _MONEY_RE.search(text)
+    if not m or m.group(3) or stated <= 0 or record <= 0 or stated >= record / 1e3:
+        return 1.0
+    for scale in (1e6, 1e9, 1e12):
+        if record / 10 <= stated * scale <= record * 10:
+            return scale
+    return 1.0
+
+
+# A stated dollar amount this many times above or below every dollar figure in the record is not a rounding
+# slip or a misquote of that period: the speaker means another period (item 17: "the next quarter ... 13.5 billion"
+# is a 2023 quarter, the latest quarter is $96.2bn). The record cannot speak to it.
+OUT_OF_WINDOW_FACTOR = 3.0
+
+
+_UNIT_AMOUNT_RE = re.compile(rf"(?<![\w$.])({_NUM})\s?(bn|billion|million|trillion)\b", re.I)
+
+
+def _stated_amounts(text: str) -> list[float]:
+    """Dollar amounts the sub-claim states: "$110 billion", or "13.5 billion" when the transcript drops the $."""
+    found = _money(text)
+    if found:
+        return found
+    return [float(m.group(1).replace(",", "")) * {"bn": 1e9, "billion": 1e9, "million": 1e6,
+                                                   "trillion": 1e12}[m.group(2).lower()]
+            for m in _UNIT_AMOUNT_RE.finditer(text)]
+
+
+def _out_of_window(sub_claim: SubClaim, evidence: list[EvidenceItem]) -> bool:
+    """True when the one dollar amount the sub-claim states is far from every dollar figure in the numeric evidence."""
+    stated = _stated_amounts(sub_claim.text)
+    if len(stated) != 1 or stated[0] <= 0 or _threshold(sub_claim.text) is not None:
+        return False
+    figures: list[float] = []
+    for item in evidence:
+        if item.computed_value is None:
+            continue
+        figures += [abs(v) for v in _money(item.content) if v]
+    if not figures:
+        return False
+    amount = stated[0] * _bare_amount_scale(sub_claim.text, stated[0], max(figures))
+    return amount > max(figures) * OUT_OF_WINDOW_FACTOR or amount < min(figures) / OUT_OF_WINDOW_FACTOR
 
 
 _NEGATOR = re.compile(r"\b(?:not|never|no|without|n't|didn't|doesn't|hasn't|haven't|wasn't|isn't)\s+(?:\w+\s+)?$", re.I)
@@ -406,9 +466,13 @@ class AuditorAgent:
         if not evidence:
             return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
                                verdict=Verdict.INSUFFICIENT_EVIDENCE)
-        if _LONG_HISTORY.search(sub_claim.text):
+        if _is_long_history(sub_claim.text):
             return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
                                verdict=Verdict.INSUFFICIENT_EVIDENCE)
+        if _out_of_window(sub_claim, evidence):     # the stated amount belongs to a period the record does not cover
+            return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
+                               verdict=Verdict.INSUFFICIENT_EVIDENCE,
+                               evidence_stances={i.evidence_id: Stance.NEUTRAL for i in evidence})
         run = _Run()
         stances: list[Stance] = []
         expected = _expected_concepts(sub_claim)
@@ -611,8 +675,10 @@ class AuditorAgent:
         stated_money = [] if threshold is not None else _money(sub_claim.text)
         content_money = _money(item.content)
         if len(stated_money) == 1 and content_money:
-            tol = max(_money_half_unit(sub_claim.text), 1e-9 * abs(content_money[0]))   # rounding to stated precision
-            matches.append(abs(stated_money[0] - content_money[0]) <= tol)
+            stated_amount, scale = stated_money[0], _bare_amount_scale(sub_claim.text, stated_money[0], content_money[0])
+            stated_amount *= scale                  # "$110 in Q1" is $110 billion when the record is $109,896m
+            tol = max(_money_half_unit(sub_claim.text) * scale, 1e-9 * abs(content_money[0]))   # rounding to stated precision
+            matches.append(abs(stated_amount - content_money[0]) <= tol)
             if stated_frac is None:
                 stated_frac = stated_money[0]       # the claimed dollar amount, shown next to the computed one
         if not matches:
