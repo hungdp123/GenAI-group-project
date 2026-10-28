@@ -45,6 +45,7 @@ import re
 from dataclasses import dataclass, field
 
 from finsight.config import CORPUS_COMPANIES, get_settings
+from finsight.knowledge.terms import mask_other_margins
 from finsight.contracts.schemas import (
     AuditResult,
     CitationCheck,
@@ -321,7 +322,7 @@ def _expected_concepts(sub_claim: SubClaim) -> set[str] | None:
 
     A line can name several measures ("lower margins, more of a drag on the free cash flow"), so every measure
     named is expected, not only the first one found."""
-    text = sub_claim.text.lower()
+    text = mask_other_margins(sub_claim.text.lower())   # shared list: "margin buyers" is not a profit margin
     named: set[str] = set()
     margins: set[str] = set()
     if re.search(r"\bgross (profit )?margin", text):

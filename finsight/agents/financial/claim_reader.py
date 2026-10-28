@@ -36,6 +36,9 @@ except ImportError:   # pragma: no cover - thesaurus not in this checkout
     def find_mentions(text, include_products=True):
         return []
 
+from finsight.knowledge.terms import (FORECAST_WORDS, NON_GAAP_WORDS, PERSONAL_GAIN, PRICE_MOVE_WORDS, YIELD_WORDS,
+                                      mask_other_margins)
+
 GROWTH_MEASURES = ("Revenue", "OperatingIncome", "NetIncome", "OperatingCashFlow", "DilutedEPS")
 LEVEL_MEASURES = ("gross_margin", "operating_margin", "net_margin", "free_cash_flow", "fcf_margin",
                   "current_ratio", "cash_ratio")
@@ -60,7 +63,7 @@ OTHER_COMPANY_NOTE = "about another company"
 # so "free cash flow" is not also read as "cash flow".
 _LEXICON = [
     (r"price[- ]to[- ](?:sales|earnings|revenue)s?|p/?e\b|(?:\d+(?:\.\d+)?\s*x|times)\s+(?:sales|revenue|earnings)"
-     r"|(?:sales|revenue|earnings) multiples?|earnings multiples?", "ignore"),
+     r"|(?:sales|revenue|earnings) multiples?|earnings multiples?|" + YIELD_WORDS, "ignore"),
     (r"earnings (?:calls?|reports?|releases?|dates?|season|day|beats?|miss(?:es)?|previews?|announcements?)"
      r"|(?:report|reports|reported|reporting) (?:their |its |q[1-4] )?earnings|(?:after|before|ahead of) earnings"
      r"|(?:taking|take|took) profits|profit[- ]taking|operating leverage|a quarter of", "ignore"),
@@ -68,8 +71,7 @@ _LEXICON = [
     (r"free cash flows?|\bfcf\b", ["free_cash_flow"]),
     (r"operating cash flows?|cash flows? from operations|cash from operations", ["OperatingCashFlow"]),
     (r"cash generation|cash flows?", ["free_cash_flow"]),
-    (r"ebitda(?: margins?)?|ebit\b|adjusted (?:earnings|net income|profits?|eps|operating income|margins?)"
-     r"|non-gaap \w+", "excluded:" + _NON_GAAP),
+    (NON_GAAP_WORDS + r"(?: \w+)?", "excluded:" + _NON_GAAP),       # shared list (finsight/knowledge/terms.py)
     (r"gross margins?", ["gross_margin"]),
     (r"operating (?:profit )?margins?", ["operating_margin"]),
     (r"(?:net income|net profit|net|profit) margins?", ["net_margin"]),
@@ -84,7 +86,7 @@ _LEXICON = [
     (r"gross profits?", "excluded:" + _GROSS_PROFIT),
     (r"run[- ]rate", "excluded:" + _RUN_RATE),
     (r"net income|net profits?|net earnings|earnings|profits?|bottom line", ["NetIncome"]),
-    (r"revenues?|sales|top[- ]line", ["Revenue"]),
+    (r"revenues?|sales(?!force)|top[- ]line", ["Revenue"]),        # not "Salesforce"
 ]
 _EXPANSION_PHRASE = (r"\b(financially (?:strong|weak|healthy)|(?:strong|weak|solid|healthy) (?:financial position|"
                      r"fundamentals|balance sheet|financials)|financial position|(?:healthy|good|poor) company|"
@@ -95,9 +97,8 @@ _SEGMENT_WORDS = (r"\b(aws|amazon web services|azure|google cloud|cloud|youtube|
                   r"business units?|ad(?:vertising)?|backlog|remaining performance obligations?|rpo|"
                   r"subscribers?|users|automotive|energy|hardware|commercial|government)\b")
 # Forward-looking wording: the claim is about the future, so past figures are evidence about something else
-_FORECAST_WORDS = (r"\b(will|would|going to|set to|expected to|expects?|expecting|forecast\w*|projected|projects?|"
-                   r"guid(?:ance|ed|es)|outlook|next (?:year|quarter)|this coming|by the end of (?:this|next) year|"
-                   r"in (?:five|ten|\d+) years)\b")
+_FORECAST_WORDS = FORECAST_WORDS            # shared list (finsight/knowledge/terms.py)
+_FORECAST_REACH = 40   # characters before a measure in which a forecast word still applies to it
 _EXCLUDING_WORDS = r"\b(exclud\w*|excluding|ex-|strip\w* out|one-?time|minus (?:the )?gains|without (?:the )?gains)"
 _GROWTH_PCT = (r"\b(grew|grow|grows|growing|growth|up|rose|risen|increased?|declined?|fell|fallen|down|doubled|"
                r"jumped|surged|dropped|shot up)\b[^.;]{0,40}?\d+(?:\.\d+)?\s*%"
@@ -107,7 +108,7 @@ _HISTORY = (r"\b(first time since|since (?:it|google|the company|they) went publ
 # "operating margins are 34%", "is around 17%", "48.4% now": a level stated in the present = the latest quarter
 _PRESENT = (r"\b(is|are|currently|sits? at|stands? at|sitting at)\s+(?:at\s+)?(?:about|around|nearly|over|roughly|"
             r"almost|just over|just under)?\s*\d|\d+(?:\.\d+)?\s*%\s*(?:now|currently|today)\b")
-_PRICE = r"\b(stocks?|shares?|share price|market cap\w*|valuation|worth|price target)\b"
+_PRICE = PRICE_MOVE_WORDS                   # shared list: a share-price move is not a company figure
 _OTHER_NAME = (r"\b([A-Z][A-Za-z]+(?:\s[A-Z][a-z]+)?)(?:'s)?\s+(?:generated|reported|posted|made|delivered|saw|grew|"
                r"has|had|announced)\b")
 _NOT_A_NAME = {"It", "They", "The", "This", "That", "He", "She", "We", "I", "You", "Company", "Revenue", "Revenues",
@@ -255,7 +256,7 @@ def _mask(text: str, start: int, end: int) -> str:
 
 def _mentions(text: str) -> list[_Mention]:
     """Measure mentions in order of position (ignored words removed)."""
-    work, found = text, []
+    work, found = mask_other_margins(text), []   # "margin buyers", "by a wide margin": not a profit margin
     for pattern, what in _LEXICON:
         for m in list(re.finditer(rf"\b(?:{pattern})", work, flags=re.IGNORECASE)):
             if what != "ignore":
@@ -312,6 +313,9 @@ def _read(text: str, ticker: str, implied_ok: bool) -> Reading:
     out = Reading()
     if not text:
         return out
+    if PERSONAL_GAIN.search(text):
+        out.notes.append("the influencer's own investment gain, not a company figure; nothing to calculate")
+        return out
     marks = _company_marks(text, ticker)
     mentions = _mentions(text)
     measured = [m for m in mentions if m.measures]
@@ -339,7 +343,10 @@ def _read(text: str, ticker: str, implied_ok: bool) -> Reading:
                             for x in mentions)
         if near_excluded:
             continue                                     # "revenue run rate": noted with the run rate
-        if _has(_FORECAST_WORDS, words):
+        # A forecast word counts only near the measure: just before it, or after it in its clause. "Planned
+        # investment will support ... revenue growing 22% year-over-year" and "The next quarter arrived, Nvidia
+        # reported ... revenue, up 101%" are past results.
+        if _has(_FORECAST_WORDS, text[max(start, m.start - _FORECAST_REACH):m.start] + " " + text[m.start:stop]):
             out.notes.append(f"'{label}' not checked: {_FORECAST}")
             continue
         if _has(_EXCLUDING_WORDS, words) or _has(_EXCLUDING_WORDS, text) and "NetIncome" in m.measures:
@@ -356,7 +363,7 @@ def _read(text: str, ticker: str, implied_ok: bool) -> Reading:
         m = re.search(_GROWTH_PCT, text, flags=re.IGNORECASE)
         owner = _owner(marks, m.start())
         clause = text[_clause_start(text, m.start()):m.end()]
-        if _has(_PRICE, clause) or _has(_FORECAST_WORDS, clause):
+        if _has(_PRICE, text) or _has(_FORECAST_WORDS, clause):   # a price word anywhere: "down 19% year to date"
             pass                                          # "the stock is up 25%": a price, not a company figure
         elif owner == "self" and not _has(_SEGMENT_WORDS, clause):
             out.points.append(Point("Revenue", named_period(text), text.strip(), True, streak(text), _history(text)))
