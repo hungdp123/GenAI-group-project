@@ -56,14 +56,28 @@ def run(args: argparse.Namespace) -> dict:
     selected = cases[:args.limit]
     if len(selected) != args.limit:
         raise ValueError("CSV has fewer cases than the requested pilot limit")
+    # Validate the entire selected date column before reading/building any corpus artifacts.
+    # Do not infer a date here: cutoff controls look-ahead eligibility and dataset identity.
+    bad_dates = []
+    for csv_row, case in enumerate(selected, 2):
+        value = case["cut_off"]
+        try:
+            if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                raise ValueError("Expected YYYY-MM-DD")
+            date.fromisoformat(value)
+        except (TypeError, ValueError):
+            bad_dates.append(f"{case['id']} (CSV row {csv_row}): cut_off={value!r}")
+    if bad_dates:
+        examples = "; ".join(bad_dates[:8])
+        raise ValueError(f"{args.cases}: {len(bad_dates)} selected cases have a missing/invalid cut_off. "
+                         f"Use the reviewed claim/video publication cutoff in YYYY-MM-DD format. {examples}")
     preflights, reference_cache = {}, {}
     for case in selected:
         if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", case["id"])
                 or not re.fullmatch(r"[A-Z0-9][A-Z0-9.-]{0,14}", case["company"])):
             raise ValueError("Invalid case ID or company ticker")
-        if case["type"] not in {"supported", "contradicting", "unsupported"}:
-            raise ValueError("Unknown case type")
-        date.fromisoformat(case["cut_off"])
+        if case["type"] not in {"supported", "contradicting", "unsupported", "partially supported"}:
+            raise ValueError(f"Unknown case type for {case['id']}: {case['type']!r}")
         folder = corpus / case["company"]
         parsed = workspace / "data/narrative/processed" / case["company"] / "documents.jsonl"
         build = read_json(folder / "build_report.json")
@@ -83,6 +97,10 @@ def run(args: argparse.Namespace) -> dict:
             "index_sha256": build["index_sha256"], "corpus_fingerprint": build["corpus_fingerprint"],
             "source_map_sha256": sha(folder / "source_map.jsonl"),
             "gold_source_block_1based": reference.get("line"),
+            **({"gold_source_spans": [{"document_id": r["block"]["document_id"],
+                                       "block_line_1based": r["line"], "char_start": r["start"],
+                                       "char_end": r["end"]} for r in reference["spans"]]}
+               if "spans" in reference else {}),
             "semantic_labels": "NOT_INDEPENDENTLY_ADJUDICATED",
         }
     settings = get_settings()

@@ -35,11 +35,12 @@ class NarrativeAgent(NarrativeEvidenceAgent):
     """Real narrative collector exposed at the original integration module.
 
     SubClaim -> support/counter retrieval -> deduplication -> canonical provenance
-    -> LLM relevance selection, exact facts and cited evidence summary
-    -> list[EvidenceItem] without stance judgments. Feedback is forwarded
+    -> LLM relevance selection, exact facts, cited summary and claim stance report
+    -> list[EvidenceItem] for independent audit. Feedback is forwarded
     to the existing bounded query builder; the orchestrator owns retries.
 
-    This collector never classifies passage stance or generates a claim verdict.
+    The report classifies the claim as SUPPORTED, UNSUPPORTED or CONTRADICTING.
+    The Auditor and tier policy still own the final workflow verdict.
     The required EvidenceItem.stance uses NEUTRAL as an unassessed compatibility
     placeholder; exported reports omit it. Auditor/policy integration must account
     for unassessed evidence before producing meaningful verdicts.
@@ -63,7 +64,7 @@ class NarrativeAgent(NarrativeEvidenceAgent):
             raise ValueError("FINSIGHT_NARRATIVE_ANALYSIS must be evidence or retrieval")
         if requested_mode in {"stance", "basic_rag"}:
             logger.warning(
-                "Legacy analysis mode now prepares evidence without stance/verdict. "
+                "Legacy analysis mode now prepares evidence and a cited claim stance. "
                 "Set FINSIGHT_NARRATIVE_ANALYSIS=evidence."
             )
         self.analysis_mode = "retrieval" if requested_mode == "retrieval" else "evidence"
@@ -121,7 +122,8 @@ class NarrativeAgent(NarrativeEvidenceAgent):
             "pipeline": "narrative_evidence_rag"
             if self.analysis_mode == "evidence"
             else "narrative_evidence_retrieval",
-            "assessment_status": "NOT_ASSESSED",
+            "assessment_status": preparation.get("assessment_status", "NOT_ASSESSED"),
+            "stance": preparation.get("stance"),
             "ticker": sub_claim.company_ticker,
             "claim": sub_claim.text,
             "cutoff_date": cutoff_date.isoformat(),

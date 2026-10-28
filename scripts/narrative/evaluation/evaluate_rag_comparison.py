@@ -7,7 +7,9 @@ import csv
 from pathlib import Path
 import statistics
 
-from scripts.narrative.evaluation.evaluate_rag_pilot import METRICS, evaluate, read_json, render_report, write_json
+from scripts.narrative.evaluation.evaluate_rag_pilot import (
+    METRICS, STANCE_LABELS, evaluate, read_json, render_report, write_json,
+)
 
 
 def mean(values):
@@ -42,6 +44,7 @@ def save_csv(path: Path, rows: list[dict]) -> None:
 def score(run_dir: Path, workspace: Path) -> dict:
     manifest = read_json(run_dir / "matrix_configuration.json")
     configuration_rows, rows, company_rows, case_rows = [], [], [], []
+    stance_rows, stance_cases, stance_classes, confusion_rows = [], [], [], []
     expected_ids = manifest["selected_case_ids"]
     for entry in manifest["configurations"]:
         folder = run_dir / entry["folder"]
@@ -57,6 +60,18 @@ def score(run_dir: Path, workspace: Path) -> dict:
         write_json(folder / "evaluation.json", report)
         (folder / "evaluation.md").write_text(render_report(report), encoding="utf-8")
         records = report["records"]
+        stance = report["stance_metrics"]
+        scope = {"strategy": entry["strategy"], "backend": entry["backend"]}
+        stance_rows.append({**scope, **{k: v for k, v in stance.items()
+                                        if k not in {"per_label", "confusion_matrix", "denominators"}}})
+        stance_classes.extend({**scope, **r} for r in stance["per_label"])
+        confusion_rows.extend({**scope, "expected_stance": g, "predicted_stance": p,
+                               "cases": stance["confusion_matrix"][g][p]}
+                              for g in STANCE_LABELS for p in STANCE_LABELS)
+        stance_cases.extend({**scope, **{k: r[k] for k in
+                             ("id", "company", "type", "status", "retrieval_only", "expected_stance",
+                              "predicted_stance", "stance_assessment_status", "stance_correct",
+                              "stance_reason", "stance_reason_code")}} for r in records)
         configuration_rows.append({
             "strategy": entry["strategy"], "backend": entry["backend"],
             "cases": report["cases"], "status_counts": dict(Counter(r["status"] for r in records)),
@@ -64,9 +79,10 @@ def score(run_dir: Path, workspace: Path) -> dict:
             "recorded_cost_usd": report["recorded_cost_usd"],
             "unknown_usage_cases": report["unknown_usage_cases"], "generation_ms": report["generation_ms"],
             "retrieval_only_cases": report["retrieval_only_cases"],
+            "stance_metrics": stance,
         })
         for direction in ("support", "counter"):
-            for stratum in ("all", "supported", "contradicting", "unsupported"):
+            for stratum in ("all", "supported", "contradicting", "unsupported", "partially supported"):
                 subset = records if stratum == "all" else [r for r in records if r["type"] == stratum]
                 rows.append({"strategy": entry["strategy"], "backend": entry["backend"],
                              "direction": direction, "stratum": stratum, **summarize(subset, direction)})
@@ -78,10 +94,17 @@ def score(run_dir: Path, workspace: Path) -> dict:
                 case_rows.append({"strategy": entry["strategy"], "backend": entry["backend"],
                                   "direction": direction, "id": r["id"], "company": r["company"],
                                   "type": r["type"], "status": r["status"],
+                                  "expected_stance": r["expected_stance"],
+                                  "predicted_stance": r["predicted_stance"],
+                                  "stance_correct": r["stance_correct"],
                                   **{key: r["directional_retrieval"][direction][key] for key in METRICS}})
     save_csv(run_dir / "comparison.csv", rows)
     save_csv(run_dir / "per_company.csv", company_rows)
     save_csv(run_dir / "per_case.csv", case_rows)
+    save_csv(run_dir / "stance_metrics.csv", stance_rows)
+    save_csv(run_dir / "stance_per_case.csv", stance_cases)
+    save_csv(run_dir / "stance_per_label.csv", stance_classes)
+    save_csv(run_dir / "stance_confusion_matrix.csv", confusion_rows)
     result = {
         "status": "SCORED_SAVED_OUTPUTS", "configurations": len(configuration_rows),
         "cases_per_configuration": len(expected_ids),
@@ -94,6 +117,7 @@ def score(run_dir: Path, workspace: Path) -> dict:
         "retrieval_only": manifest.get("retrieval_only", False),
         "new_retrieval_requests": 0, "configuration_results": configuration_rows,
         "aggregates": rows,
+        "stance_aggregates": stance_rows,
         "limitations": ["Known annotated source spans only; labels still need independent review.",
                         "Source Hit@K counts any passage from the annotated document, not evidence relevance.",
                         "MRR@5/10 uses the first single passage covering the complete gold span, not a document hit.",
@@ -124,7 +148,23 @@ def score(run_dir: Path, workspace: Path) -> dict:
                      f"{fmt('known_reference_recall_at_5', True)} | "
                      f"{fmt('known_reference_recall_at_10', True)} | {fmt('mrr_at_5')} | {fmt('mrr_at_10')} | "
                      f"{output_status} |")
-    lines += ["", "OK output counts are technical outcomes, not answer accuracy. "
+    lines += ["", "## Narrative stance performance", "",
+              "Each saved case counts once per configuration, independently of search direction. "
+              "Expected labels come from CSV type; Auditor verdicts are not scored.", "",
+              "| Strategy | Backend | Valid / full-RAG cases | Accuracy | Macro F1 | False support rate | "
+              "Completion | All-case accuracy |", "|---|---|---|---|---|---|---|---|"]
+    for row in stance_rows:
+        def stance_fmt(key):
+            return "N/A" if row[key] is None else f"{row[key]:.4f}"
+        lines.append(f"| {row['strategy']} | {row['backend']} | "
+                     f"{row['valid_assessments']} / {row['eligible_cases']} | " + " | ".join(
+                         stance_fmt(k) for k in ("accuracy", "macro_f1", "false_support_rate",
+                                                "assessment_completion_rate", "all_case_accuracy")) + " |")
+    lines += ["", "Classification scores exclude null/error/missing assessments; completion and all-case "
+              "accuracy retain all saved full-RAG cases. Macro F1 includes all three labels. "
+              "See stance_per_case.csv, stance_per_label.csv and stance_confusion_matrix.csv for diagnostics. "
+              "Historical reports without stance remain unassessed, not UNSUPPORTED.", "",
+              "OK output counts are technical outcomes, not answer accuracy. "
               "See comparison.csv for type-specific and equal-company metrics, per_company.csv "
               "for company results and per_case.csv for individual cases.", "",
               f"Recorded tokens: {result['input_tokens']:,} input / {result['output_tokens']:,} output. "

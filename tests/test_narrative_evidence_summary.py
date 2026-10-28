@@ -16,14 +16,20 @@ def item(eid="source", content="Product scope.\nSupports multiple clouds, but ex
                         publication_date=date(2024, 1, 1), produced_by="narrative_retrieval_unassessed")
 
 
+def stance_fields():
+    return {"stance": "SUPPORTED", "stance_reason": "The cited source states the claim.",
+            "stance_reason_code": "ALL_MATERIAL_PARTS_SUPPORTED", "supporting_fact_indices": [0],
+            "contradicting_fact_indices": [], "missing_claim_parts": []}
+
+
 def selection(eid="source", span="s2"):
-    return {"selected_evidence_ids": [eid], "facts": [{"evidence_id": eid, "source_span_id": span}],
+    return {**stance_fields(), "selected_evidence_ids": [eid], "facts": [{"evidence_id": eid, "source_span_id": span}],
             "summary": [{"text": "The source describes multi-cloud support with an offline limitation.",
                          "evidence_ids": [eid]}]}
 
 
 def linked_selection(eid="source", span="s2"):
-    return {"facts": [{"evidence_id": eid, "source_span_id": span}],
+    return {**stance_fields(), "facts": [{"evidence_id": eid, "source_span_id": span}],
             "summary": [{"text": "The source describes multi-cloud support with an offline limitation.",
                          "fact_indices": [0]}]}
 
@@ -181,12 +187,102 @@ def test_single_llm_call_resolves_facts_but_never_accepts_truncated_output(monke
     selected, report = summary.prepare_narrative_evidence(claim, date(2024, 1, 2), [evidence])
     assert len(calls) == 1 and report["llm"]["api_requests"] == 1
     assert report["status"] == expected
-    assert report["evidence_preparation_protocol"] == "source_spans_v2"
+    assert report["evidence_preparation_protocol"] == "source_spans_stance_v3"
     assert "source_span_id" in json.loads(report["raw_model_output"])["facts"][0]
-    assert selected == [evidence] and "verdict" not in report and "stance" not in report
+    assert selected == [evidence] and "verdict" not in report
     if expected == "OK":
         assert report["facts"][0]["quote"] == "Supports multiple clouds, but excludes offline devices."
         assert report["citation_validation"]["passed"] is True
+        assert report["assessment_status"] == "ASSESSED" and report["stance"] == "SUPPORTED"
     else:
         assert not report["facts"] and not report["summary"]
         assert report["selection_applied"] is False
+        assert report["assessment_status"] == "ERROR" and report["stance"] is None
+
+
+@pytest.mark.parametrize("label,code,support,against,missing", [
+    ("SUPPORTED", "ALL_MATERIAL_PARTS_SUPPORTED", [0], [], []),
+    ("CONTRADICTING", "DIRECT_CONTRADICTION", [0], [1], []),
+    ("UNSUPPORTED", "PARTIAL_SUPPORT", [0], [], ["Global availability is not established."]),
+    ("UNSUPPORTED", "UNRESOLVED_CONFLICT", [0], [1], ["The sources disagree on launch scope."]),
+])
+def test_stance_and_both_sides_keep_exact_source_references(monkeypatch, label, code, support, against, missing):
+    first = "The platform launched globally in June." if code == "UNRESOLVED_CONFLICT" else "The platform launched in June."
+    second = "Availability was not specified." if code == "PARTIAL_SUPPORT" else "The June launch was US-only."
+    items = [item("date", first), item("scope", second)]
+    claim_text = "The platform launched in the US in June." if label == "SUPPORTED" else "The platform launched globally in June."
+    claim = SubClaim(sub_claim_id="sc1", text=claim_text,
+                     company_ticker="AAPL", sub_claim_type=SubClaimType.OTHER)
+    output = {"facts": [{"evidence_id": i.evidence_id, "source_span_id": "s1"} for i in items],
+              "summary": [{"text": "The source describes a June launch in the US.", "fact_indices": [0, 1]}],
+              "stance": label, "stance_reason": "The launch date is established; assess availability separately.",
+              "stance_reason_code": code, "supporting_fact_indices": support,
+              "contradicting_fact_indices": against, "missing_claim_parts": missing}
+    monkeypatch.setattr(summary, "get_settings", lambda: SimpleNamespace(llm_provider="openai", llm_model="fake"))
+    monkeypatch.setattr(summary, "complete", lambda **kwargs: LLMResponse(
+        text=json.dumps(output), input_tokens=10, output_tokens=10, cost_usd=0,
+        latency_ms=1, model="fake", provider="openai", finish_reason="stop"))
+    selected, report = summary.prepare_narrative_evidence(claim, date(2024, 1, 2), items)
+    assert report["status"] == "OK" and report["stance"] == label
+    assert report["supporting_fact_indices"] == support
+    assert report["contradicting_fact_indices"] == against
+    assert [i.content for i in selected] == [i.content for i in items]
+    assert all(i.stance.value == "NEUTRAL" for i in selected)  # Auditor owns passage judgments.
+
+
+@pytest.mark.parametrize("changes", [
+    {"stance": "NEUTRAL"},
+    {"stance_reason": " "},
+    {"supporting_fact_indices": [True]},
+    {"supporting_fact_indices": [2]},
+    {"supporting_fact_indices": [0, 0]},
+    {"contradicting_fact_indices": [0]},
+    {"missing_claim_parts": ["Missing assertion"]},
+    {"stance": "CONTRADICTING", "stance_reason_code": "DIRECT_CONTRADICTION"},
+    {"stance": "UNSUPPORTED", "stance_reason_code": "PARTIAL_SUPPORT"},
+    {"stance": "UNSUPPORTED", "stance_reason_code": "DIRECT_CONTRADICTION"},
+])
+def test_unbacked_inconsistent_or_malformed_stance_is_rejected(changes):
+    items = [item()]
+    _, catalog = summary._source_spans(items)
+    output = {**linked_selection(), **changes}
+    resolved, _, errors = summary._resolve_spans(json.dumps(output), items, catalog)
+    result, validation = summary._validate(resolved, items)
+    assert not errors and result is None and validation
+
+
+def test_no_candidates_abstains_without_calling_a_model(monkeypatch):
+    def unexpected_call(**kwargs):
+        pytest.fail("Empty retrieval must not call a model")
+    monkeypatch.setattr(summary, "complete", unexpected_call)
+    claim = SubClaim(sub_claim_id="sc1", text="A product launched globally.", company_ticker="AAPL",
+                     sub_claim_type=SubClaimType.OTHER)
+    selected, report = summary.prepare_narrative_evidence(claim, date(2024, 1, 2), [])
+    assert selected == [] and report["stance"] == "UNSUPPORTED"
+    assert report["stance_reason_code"] == "NO_RELEVANT_EVIDENCE"
+    assert report["assessment_status"] == "ASSESSED" and report["llm"]["api_requests"] == 0
+
+
+def test_no_relevant_selection_abstains_with_a_reason():
+    output = {"facts": [], "summary": [], "stance": "UNSUPPORTED",
+              "stance_reason": "The supplied passage discusses another product.",
+              "stance_reason_code": "NO_RELEVANT_EVIDENCE", "supporting_fact_indices": [],
+              "contradicting_fact_indices": [], "missing_claim_parts": ["The claimed launch."]}
+    items = [item()]
+    _, catalog = summary._source_spans(items)
+    resolved, _, errors = summary._resolve_spans(json.dumps(output), items, catalog)
+    result, checks = summary._validate(resolved, items)
+    assert not errors and not checks and result["selected_evidence_ids"] == []
+
+
+def test_provider_failure_is_error_not_unsupported(monkeypatch):
+    claim = SubClaim(sub_claim_id="sc1", text="Product launch.", company_ticker="AAPL",
+                     sub_claim_type=SubClaimType.OTHER)
+    monkeypatch.setattr(summary, "get_settings", lambda: SimpleNamespace(llm_provider="openai", llm_model="fake"))
+    def fail(**kwargs):
+        raise RuntimeError("Provider unavailable")
+    monkeypatch.setattr(summary, "complete", fail)
+    items = [item()]
+    selected, report = summary.prepare_narrative_evidence(claim, date(2024, 1, 2), items)
+    assert selected == items and report["assessment_status"] == "ERROR"
+    assert report["stance"] is None and report["stance_reason"] is None

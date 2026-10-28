@@ -89,7 +89,7 @@ flowchart LR
     Check --> Save["Save report: selected evidence, facts, summary, validation and usage"]
 ```
 
-Retrieve and deduplicate candidate passages, then use one LLM call to select evidence, extract facts and write a cited summary. Python checks evidence IDs and exact quotes. Narrative does not assign stance labels or a claim verdict.
+Retrieve and deduplicate candidate passages, then use one LLM call to select facts, write a cited summary and assess SUPPORTED, UNSUPPORTED or CONTRADICTING with a reason. Python checks evidence IDs, exact quotes and stance references. The Auditor retains final-verdict authority. See [Workflow C's stance definitions](workflow_c_rag.md#claim-stance-and-reason).
 
 [Workflow C details: explanations, scripts and instructions](workflow_c_rag.md).
 
@@ -189,7 +189,7 @@ Generated chunks and indexed chunks differ because exact duplicate content is ex
 
 ## 5. Run RAG for a claim
 
-Provide a claim, company and publication cutoff. RAG retrieves source passages, uses an LLM to select relevant evidence and extract facts, and returns a cited summary. It does **not** assign passage stance or a claim verdict. No evaluation dataset is required. See [Workflow C](workflow_c_rag.md) for model and retrieval configuration.
+Provide a claim, company and publication cutoff. RAG retrieves source passages, uses an LLM to select relevant facts, and returns a cited summary plus a reasoned claim stance. Original passage labels and the final verdict remain independently assessed by the Auditor. No evaluation dataset is required. See [Workflow C](workflow_c_rag.md) for model and retrieval configuration.
 
 ### 5.1 Current command and output
 

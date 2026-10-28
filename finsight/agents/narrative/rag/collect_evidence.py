@@ -1,7 +1,7 @@
 """Narrative source collection and CLI for cited LLM evidence preparation.
 
 The raw NarrativeEvidenceAgent retrieves without assessment. The CLI and registry
-adapter add relevance/fact/summary preparation; neither predicts stance/verdict.
+adapter add relevance/fact/summary preparation and a separate claim stance report.
 """
 
 from __future__ import annotations
@@ -457,7 +457,8 @@ def main() -> None:
         "reranking": (agent.last_search or {}).get("reranking"),
         "index": (agent.last_search or {}).get("index"),
         "pipeline": "narrative_evidence_retrieval" if args.retrieval_only else "narrative_evidence_rag",
-        "assessment_status": "NOT_ASSESSED",
+        "assessment_status": preparation.get("assessment_status", "NOT_ASSESSED"),
+        "stance": preparation.get("stance"),
         "queries": dict(
             zip(
                 ("support", "counter"),
