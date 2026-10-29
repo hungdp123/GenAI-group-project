@@ -147,7 +147,8 @@ def main() -> None:
     parser.add_argument("--experiment-dir", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
-        "--stance-method", choices=("none", "exact", "llm"), help="Deprecated passage option; claim stance runs unless retrieval-only"
+        "--stance-method", choices=("none", "exact", "llm"),
+        help="Deprecated passage option; claim stance runs unless retrieval-only",
     )
     parser.add_argument("--retrieval-only", action="store_true", help="Explicitly skip LLM evidence preparation")
     parser.add_argument(

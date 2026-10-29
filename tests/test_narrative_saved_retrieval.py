@@ -292,14 +292,20 @@ def test_missing_source_pin_does_not_relabel_existing_generated_work(saved):
     assert len(saved.calls) == 1
 
 
-def test_audited_migration_preserves_existing_live_mode_only():
+@pytest.mark.parametrize('line_ending', [b'\n', b'\r\n'])
+def test_audited_migration_preserves_existing_live_mode_only(line_ending):
+    import hashlib
+
     from scripts.narrative.evaluation.resume import (
         SAVED_RETRIEVAL_CODE_MIGRATIONS, _migrated, capture_compatible, matrix_compatible,
     )
 
     cases = [{'id': 'one', 'claims': 'same'}]
     for name, before, after in SAVED_RETRIEVAL_CODE_MIGRATIONS:
-        assert _migrated(name, after, sha(Path('scripts/narrative/evaluation') / name))
+        content = (Path('scripts/narrative/evaluation') / name).read_bytes()
+        checkout_bytes = content.replace(b'\r\n', b'\n').replace(b'\n', line_ending)
+        checkout_hash = hashlib.sha256(checkout_bytes).hexdigest()
+        assert _migrated(name, after, checkout_hash)
         if name == 'run_rag_pilot.py':
             old = {'case_ids': ['one'], 'selected_cases_sha256': case_identity(cases),
                    'code_hashes': {name: before}, 'model': 'same-model'}
@@ -312,6 +318,49 @@ def test_audited_migration_preserves_existing_live_mode_only():
             new = {**old, 'runner_sha256': after}
             assert matrix_compatible(old, new)
             assert not matrix_compatible(old, {**new, 'saved_retrieval': {'source': 'new-mode'}})
+
+
+@pytest.mark.parametrize('relative_path', [
+    'scripts/narrative/evaluation/run_rag_comparison.py',
+    'scripts/narrative/evaluation/run_rag_pilot.py',
+    'finsight/agents/narrative/rag/basic_rag.py',
+    'finsight/agents/narrative/rag/evidence_summary.py',
+])
+def test_reviewed_source_line_endings_are_portable_but_code_changes_are_rejected(relative_path):
+    import hashlib
+
+    from scripts.narrative.evaluation.resume import _migrated
+
+    path = Path(relative_path)
+    lf = path.read_bytes().replace(b'\r\n', b'\n')
+    crlf = lf.replace(b'\n', b'\r\n')
+    lf_hash, crlf_hash = [hashlib.sha256(content).hexdigest() for content in (lf, crlf)]
+    assert _migrated(path.name, lf_hash, crlf_hash)
+    assert _migrated(path.name, crlf_hash, lf_hash)
+    changed = hashlib.sha256(lf + b'\nUNREVIEWED_CHANGE = True\n').hexdigest()
+    assert not _migrated(path.name, lf_hash, changed)
+    assert not _migrated(path.name, changed, lf_hash)
+    assert not _migrated('unrelated.py', lf_hash, crlf_hash)
+
+
+def test_formatting_migrations_preserve_captures_but_not_changed_settings():
+    from scripts.narrative.evaluation.resume import (
+        FORMATTING_CODE_MIGRATIONS, LINE_ENDING_EQUIVALENTS, capture_compatible,
+    )
+
+    cases = [{'id': 'one', 'claims': 'same'}]
+    for name, before, after in FORMATTING_CODE_MIGRATIONS:
+        old_crlf = next(crlf for module, lf, crlf in LINE_ENDING_EQUIVALENTS
+                        if module == name and lf == before)
+        new_crlf = next(crlf for module, lf, crlf in LINE_ENDING_EQUIVALENTS
+                        if module == name and lf == after)
+        old = {'case_ids': ['one'], 'selected_cases_sha256': case_identity(cases),
+               'code_hashes': {name: old_crlf}, 'model': 'same-model'}
+        for current_hash in (after, new_crlf):
+            new = {**old, 'code_hashes': {name: current_hash}}
+            assert capture_compatible(old, new, cases, cases)
+            assert not capture_compatible(old, {**new, 'model': 'different'}, cases, cases)
+        assert not capture_compatible(old, {**old, 'code_hashes': {name: 'unreviewed'}}, cases, cases)
 
 
 def test_case_ranges_preserve_dataset_identity_and_reuse_only_requested_case(saved):

@@ -1,7 +1,6 @@
 """Local Qdrant lock recovery and cleanup; no model downloads or API requests."""
 from datetime import date
 import json
-from pathlib import Path
 import subprocess
 import sys
 import threading
@@ -32,7 +31,10 @@ def test_waits_only_for_this_stores_native_lock(tmp_path, monkeypatch):
     assert len(attempts) == 3 and sleeps == [.2, .2]
 
 
-@pytest.mark.parametrize("message", ["Invalid collection", "Storage folder unrelated is already accessed by another instance of Qdrant client."])
+@pytest.mark.parametrize("message", [
+    "Invalid collection",
+    "Storage folder unrelated is already accessed by another instance of Qdrant client.",
+])
 def test_other_runtime_errors_are_not_retried(tmp_path, monkeypatch, message):
     def client(**kwargs):
         raise RuntimeError(message)
@@ -87,7 +89,8 @@ def test_real_qdrant_process_lock_releases_then_search_preserves_results(tmp_pat
             return [[1., 0.], [0., 1.]]
     chunks = [{"chunk_id": name, "text": name, "company_ticker": "AAPL", "publication_date": "2024-01-01",
                "document_id": name, "document_type": "earnings_release", "source_tier": "TIER_2",
-               "source_url": "https://example.test/" + name, "citation_span": "paragraph"} for name in ["alpha", "beta"]]
+               "source_url": "https://example.test/" + name, "citation_span": "paragraph"}
+              for name in ["alpha", "beta"]]
     payload = {"corpus_fingerprint": "unchanged", "chunks": chunks}
     vectors.build_qdrant_index(payload, tmp_path, Embeddings())
     metadata = (tmp_path / "qdrant_metadata.json").read_bytes()
