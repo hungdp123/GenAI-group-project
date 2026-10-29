@@ -123,7 +123,8 @@ def assessment(label, *, status="OK"):
               "supporting_fact_indices": [0], "contradicting_fact_indices": [], "missing_claim_parts": [],
               "citation_validation": {"passed": True}}
     if label == "CONTRADICTING":
-        result.update(stance_reason_code="DIRECT_CONTRADICTION", supporting_fact_indices=[], contradicting_fact_indices=[0])
+        result.update(stance_reason_code="DIRECT_CONTRADICTION", supporting_fact_indices=[],
+                      contradicting_fact_indices=[0])
     elif label == "UNSUPPORTED":
         result.update(stance_reason_code="PARTIAL_SUPPORT", missing_claim_parts=["The full claim is not established."])
     if status == "NO_EVIDENCE":
