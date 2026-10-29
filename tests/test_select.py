@@ -231,6 +231,50 @@ def test_a_stated_figure_absent_before_the_cutoff_retrieves_no_claim():
     assert any("2.4 billion" in quote for quote in found.quotes)
 
 
+def test_a_named_segment_is_not_offered_against_a_different_product():
+    focus = stated_claim(
+        "Joseph Carlson said AWS grew 24% year over year in Q4 2025 with a $142 billion revenue run rate.",
+        "joseph_carlson",
+        ["Amazon", "AMZN", "AWS", "Amazon Web Services"],
+    )
+    assert focus is not None and "aws" in focus.lower()
+    aws = "In Q4 of 2025, AWS reported 24% year-over-year growth with a $142 billion revenue run rate."
+    chip = (
+        "They say that their revenue run rate for their chip business is 20 billion, "
+        "triple-digit year-over-year growth."
+    )
+    choice = choose_line(
+        focus, [], [_post("DVOI6dxSumw", f"Amazon reported. {chip} {aws}")], ticker="AMZN",
+    )
+    assert choice.question is None
+    assert choice.quotes == [aws]
+
+
+def test_a_bare_figure_is_used_only_when_no_line_names_the_measure():
+    bare = _claim("bare", "22% is massive.", SubClaimType.HISTORICAL_GROWTH)
+    bare = bare.model_copy(update={"company_ticker": "GOOGL"})
+    margin = _claim("margin", "operating margin is 22%.", SubClaimType.PROFITABILITY)
+    margin = margin.model_copy(update={"company_ticker": "GOOGL"})
+    named = _claim("named", "Alphabet revenue grew by 22% last quarter.", SubClaimType.HISTORICAL_GROWTH)
+    named = named.model_copy(update={"company_ticker": "GOOGL"})
+    only_bare = choose_line(
+        "Alphabet revenue grew 22%",
+        [(bare, "april"), (margin, "april")],
+        [_post("april", f"{bare.text} {margin.text}")],
+        ticker="GOOGL",
+    )
+    assert only_bare.question is None
+    assert only_bare.quotes == [bare.text]
+    both = choose_line(
+        "Alphabet revenue grew 22%",
+        [(bare, "april"), (named, "june")],
+        [_post("april", bare.text), _post("june", named.text)],
+        ticker="GOOGL",
+    )
+    assert both.quotes == [named.text]
+    assert both.video_id == "june"
+
+
 def test_a_far_number_on_the_same_measure_retrieves_no_claim():
     line = ("The stock so far is already growing substantially, but if we look at this on a trailing "
             "12-month basis, their revenue has grown 22% in the last quarter.")

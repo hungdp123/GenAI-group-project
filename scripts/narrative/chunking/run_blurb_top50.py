@@ -1,13 +1,15 @@
-"""Smaller blurb test on the contextual row index.
+"""Blurb the contextual passages retrieved for the v2 claims.
 
-Collect the top 50 BM25 and dense passages for the 84 labeled claims, prepend an
-LLM sentence in front of the existing header, rebuild those vectors, and score
-BM25, dense, and hybrid with the same Hit / Recall / MRR columns.
+Collect the top 50 BM25 and dense passages for the supported and contradicting
+claims, prepend an LLM sentence in front of the existing header, and rebuild
+those vectors. A sentence already written for the same passage is reused.
+Score the result with run_rag_comparison, not this script.
 """
 
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import shutil
 import time
@@ -29,19 +31,14 @@ from finsight.contracts.schemas import SubClaim, SubClaimType
 from finsight.llm.client import complete
 
 SOURCE = Path("data/narrative/processed/chunking_strategies/contextual/row512_v1")
-DEST = Path("data/narrative/processed/chunking_strategies/contextual/blurb_top50")
-CASES = Path("data/narrative/evaluation/test_claims_v1/cases.csv")
+DEST = Path("data/narrative/processed/chunking_strategies/contextual/blurb_v2_top50")
+CASES = Path("data/narrative/evaluation/test_claims_v2/cases.csv")
 PROGRESS = Path("data/narrative/experiments/context_blurbs/progress.jsonl")
 MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
-def norm(text: str) -> str:
-    return " ".join((text or "").replace("\u2019", "'").replace("\u2014", "-").split()).lower()
-
-
-def gold_doc(source: str) -> str | None:
-    first = (source or "").strip().split(" | ", 1)[0].strip()
-    return None if not first or first.startswith("BACKGROUND") else first
+def file_sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def load_done() -> dict[str, str]:
@@ -161,7 +158,9 @@ def main() -> None:
                 if finished % 100 == 0:
                     print(f"blurbs {finished}/{len(futures)}", flush=True)
     QdrantClient, models = _qdrant_modules()
-    for ticker, ids in sorted(chosen.items()):
+    tickers = sorted(path.name for path in SOURCE.iterdir() if (path / "indexes" / "index.json").is_file())
+    for ticker in tickers:
+        ids = chosen.get(ticker, set())
         payload = load_index(SOURCE / ticker / "indexes" / "index.json")
         changed = []
         for position, chunk in enumerate(payload["chunks"]):
@@ -171,79 +170,52 @@ def main() -> None:
                 changed.append(position)
         dest = DEST / ticker / "indexes"
         dest.mkdir(parents=True, exist_ok=True)
-        (dest / "index.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        index_path = dest / "index.json"
+        index_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         qdrant_dest = dest / "qdrant"
         if not (qdrant_dest / "qdrant_metadata.json").is_file():
             shutil.copytree(SOURCE / ticker / "indexes" / "qdrant", qdrant_dest)
-        if not changed:
-            print(f"{ticker} no blurb updates", flush=True)
-            continue
-        vectors = embedder.encode_documents([
-            payload["chunks"][position].get("search_text") or payload["chunks"][position]["text"] for position in changed
-        ])
-        client = QdrantClient(path=str(qdrant_dest / "storage"))
-        try:
-            client.upsert(
-                collection_name=QDRANT_COLLECTION,
-                points=[point(models, position, payload["chunks"][position], list(map(float, vectors[i])))
-                        for i, position in enumerate(changed)],
-                wait=True,
-            )
-        finally:
-            client.close()
+        if changed:
+            vectors = embedder.encode_documents([
+                payload["chunks"][position].get("search_text") or payload["chunks"][position]["text"]
+                for position in changed
+            ])
+            client = QdrantClient(path=str(qdrant_dest / "storage"))
+            try:
+                client.upsert(
+                    collection_name=QDRANT_COLLECTION,
+                    points=[point(models, position, payload["chunks"][position], list(map(float, vectors[i])))
+                            for i, position in enumerate(changed)],
+                    wait=True,
+                )
+            finally:
+                client.close()
+        write_runner_files(ticker, payload, index_path)
         print(f"updated {ticker} {len(changed)}", flush=True)
     print("BUILD_DONE", flush=True)
-    score(embedder)
+    print("Score with: python -m scripts.narrative.evaluation.run_rag_comparison "
+          "--all-cases --cases data/narrative/evaluation/test_claims_v2/cases.csv "
+          "--strategies contextual --backends bm25 dense hybrid r4 --build-version blurb_v2_top50 "
+          "--retrieval-only --rerank-overflow truncate "
+          "--output-dir data/narrative/evaluation/test_claims_v2_result/retrieval_blurb_v2 --resume")
 
 
-def score(embedder) -> None:
-    cases = labeled_cases()
-    cache = {}
-
-    def retriever(ticker, kind):
-        key = (kind, ticker)
-        if key not in cache:
-            cache[key] = CorpusRetriever(
-                company_ticker=ticker, corpus_root=DEST, backend=kind, candidate_k=50,
-                embedding_backend=embedder if kind != "bm25" else None,
-            )
-        return cache[key]
-
-    def measure(hits, needle, doc):
-        texts = [norm(hit.content) for hit in hits]
-        docs = [hit.evidence_id.split(":")[0] for hit in hits]
-        first = next((i for i, text in enumerate(texts[:10], 1) if needle and needle in text), None)
-        return {
-            "source5": int(bool(doc) and doc in docs[:5]),
-            "source10": int(bool(doc) and doc in docs[:10]),
-            "recall5": int(bool(needle) and any(needle in text for text in texts[:5])),
-            "recall10": int(bool(needle) and any(needle in text for text in texts[:10])),
-            "mrr5": (1 / first) if first and first <= 5 else 0.0,
-            "mrr10": (1 / first) if first else 0.0,
-        }
-
-    totals = {(method, direction): [] for method in ("bm25", "dense", "hybrid") for direction in ("support", "counter")}
-    for case in cases:
-        claim = SubClaim(sub_claim_id=case["id"], text=case["claims"], company_ticker=case["company"], sub_claim_type=SubClaimType.OTHER)
-        support, counter = build_queries(claim)
-        cutoff = date.fromisoformat(case["cut_off"])
-        needle, doc = norm(case["gold_snippet"]), gold_doc(case["source_doc"])
-        for method in ("bm25", "dense", "hybrid"):
-            got = retriever(case["company"], method)
-            for direction, query in (("support", support), ("counter", counter)):
-                totals[(method, direction)].append(measure(got.retrieve(query, 10, cutoff), needle, doc))
-    print("TABLE")
-    for method in ("bm25", "dense", "hybrid"):
-        for direction in ("support", "counter"):
-            rows = totals[(method, direction)]
-            n = len(rows)
-            print(
-                f"blurb+contextual / {method}\t{direction}\t"
-                f"{100 * sum(r['source5'] for r in rows) / n:.2f}% / {100 * sum(r['source10'] for r in rows) / n:.2f}%\t"
-                f"{100 * sum(r['recall5'] for r in rows) / n:.2f}% / {100 * sum(r['recall10'] for r in rows) / n:.2f}%\t"
-                f"{sum(r['mrr5'] for r in rows) / n:.4f}\t{sum(r['mrr10'] for r in rows) / n:.4f}"
-            )
-    print("EVAL_DONE", flush=True)
+def write_runner_files(ticker: str, payload: dict, index_path: Path) -> None:
+    """Write the build report and source map the retrieval runner checks."""
+    source_map = SOURCE / ticker / "source_map.jsonl"
+    if not source_map.is_file():
+        raise FileNotFoundError(f"Missing source map for {ticker}")
+    shutil.copy2(source_map, DEST / ticker / "source_map.jsonl")
+    parsed = Path("data/narrative/processed") / ticker / "documents.jsonl"
+    report = {
+        "status": "COMPLETE",
+        "strategy": "contextual",
+        "ticker": ticker,
+        "inputs": {"parsed_sha256": file_sha(parsed)},
+        "corpus_fingerprint": payload.get("corpus_fingerprint"),
+        "index_sha256": file_sha(index_path),
+    }
+    (DEST / ticker / "build_report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

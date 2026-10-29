@@ -139,8 +139,10 @@ def execute(
     names = routing.influencers_named(claim or "") if not influencer else []
     if len(names) >= 2 and influencer is None and not post_id:
         runs = [
-            execute(claim, cutoff, registry=registry, settings=settings, kb=kb,
-                    company_ticker=company_ticker, influencer=name, on_stage=on_stage)
+            execute(
+                routing.speaker_claim(claim, name), cutoff, registry=registry, settings=settings, kb=kb,
+                company_ticker=company_ticker, influencer=name, on_stage=on_stage,
+            )
             for name in names[:2]
         ]
         return _combine(runs)

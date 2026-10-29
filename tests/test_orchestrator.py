@@ -509,6 +509,18 @@ def test_a_one_letter_typo_is_checked_with_a_visible_note():
     assert influencers_named("Joseph Carlson said Google grew 20% but Mark Roussin said 22%") == [
         "joseph_carlson", "mark_roussin",
     ]
+    from finsight.agents.orchestrator.routing import speaker_claim
+
+    prompt = (
+        "Mark Roussin said Alphabet's revenue grew 20% last quarter, "
+        "but Joseph Carlson said 22%. Which one is right? Cut-off: 30 Apr 2026"
+    )
+    mark = speaker_claim(prompt, "mark_roussin")
+    joseph = speaker_claim(prompt, "joseph_carlson")
+    assert "20%" in mark and "22%" not in mark
+    assert "22%" in joseph and "20%" not in joseph
+    assert "revenue" in joseph.lower() and "Alphabet" in joseph
+    assert "Cut-off: 30 Apr 2026" in mark and "Cut-off: 30 Apr 2026" in joseph
     fa = execute("Mark Rousin said Company X revenue doubled.").assessment
     assert fa.status is AssessmentStatus.NEEDS_CLARIFICATION
     assert fa.summary.startswith("Checking Mark Roussin. Not who you meant?")

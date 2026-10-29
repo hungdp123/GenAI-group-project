@@ -45,6 +45,30 @@ def test_source_hits_and_mrr_respect_rank_cutoffs(rank):
         assert scores[f"mrr_at_{k}"] == pytest.approx(1 / rank if rank <= k else 0)
 
 
+def test_multiple_gold_spans_score_when_every_span_is_covered():
+    reference = {
+        "block": {"document_id": "release", "text": "aws grew"},
+        "line": 1, "start": 0, "end": 8,
+        "spans": [
+            {"block": {"document_id": "release", "text": "aws grew"}, "line": 1, "start": 0, "end": 8},
+            {"block": {"document_id": "tenq", "text": "sales increased"}, "line": 4, "start": 0, "end": 15},
+        ],
+    }
+    maps = {
+        "a": {"document_id": "release", "block_line_1based": 1, "body_char_span": [0, 8]},
+        "b": {"document_id": "tenq", "block_line_1based": 4, "body_char_span": [0, 15]},
+    }
+    one = score_direction([{"chunk_id": "a"}], reference, maps)
+    assert one["source_hit_at_5"] == 1
+    assert one["known_reference_recall_at_10"] == 0
+    assert one["mrr_at_10"] == 0
+    both = score_direction([{"chunk_id": "a"}, {"chunk_id": "b"}], reference, maps)
+    assert both["known_reference_recall_at_5"] == 1
+    assert both["mrr_at_5"] == 0
+    assert both["bundle_completion_rr_at_10"] == 0.5
+    assert both["source_hit_at_10"] == 1
+
+
 def test_source_hit_does_not_require_gold_passage_or_span():
     reference = {"block": {"document_id": "gold", "text": "alpha"},
                  "line": 1, "start": 0, "end": 5}
