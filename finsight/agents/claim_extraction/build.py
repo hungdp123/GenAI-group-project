@@ -353,47 +353,61 @@ def _blocked_sentence(text: str) -> bool:
     )
 
 
-def split_company_measures(text: str) -> list[tuple[str, Kind, str]]:
-    """The two-company check. Each company with its own figure becomes one claim.
-
-    A clause that does not repeat the measure keeps the measure already stated.
-    A forecast, price remark, segment line, versus line, or comparison stays one
-    claim. Pairing that does not fit stays one claim.
-    """
-    if not text or _blocked_sentence(text) or _COMPARE.search(text):
+def _company_clauses(text: str) -> list[tuple[str, str]]:
+    """One clause per company, cut at each new company name."""
+    mentions = [
+        (ticker, start) for ticker, _surface, start in find_mentions(text) if ticker != "CMPX"
+    ]
+    cuts: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for ticker, start in mentions:
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        cuts.append((ticker, start))
+    if len(cuts) < 2:
         return []
-    named = [ticker for ticker, _surface, _start in find_mentions(text) if ticker != "CMPX"]
-    if len(dict.fromkeys(named)) < 2:
+    clauses = []
+    for index, (ticker, start) in enumerate(cuts):
+        end = cuts[index + 1][1] if index + 1 < len(cuts) else len(text)
+        clause = re.sub(r"\s+\band\s*$", "", text[start:end].strip(), flags=re.IGNORECASE)
+        clause = clause.strip(" ,.;")
+        if clause:
+            clauses.append((ticker, clause))
+    return clauses
+
+
+def split_company_measures(text: str) -> list[tuple[str, Kind, str]]:
+    """The two-company check. Each company with its own result becomes one claim.
+
+    A later clause keeps the measure named earlier. "Microsoft has grown all three by
+    about 15%" is Microsoft's claim when the earlier clause named the three measures.
+    A list of company names with no result stays one claim.
+    """
+    if not text or _blocked_sentence(text) or _COMPARE.search(text) or not _STATED_FIGURE.search(text):
+        return []
+    clauses = _company_clauses(text)
+    if len(clauses) < 2:
         return []
     carried: str | None = None
     found: list[tuple[str, str, str]] = []
-    dropped_figure = False
-    for raw in _CLAIM_SPLIT.split(text):
-        part = _LEAD_IN.sub("", raw).strip(" ,.;")
-        if not part:
-            continue
-        own = _piece_measure(part)
-        clause_measure = carried
+    for ticker, clause in clauses:
+        own = _piece_measure(clause)
         if own:
             collapsed = _collapse_measure(own, [carried] if carried else [])
             if collapsed:
                 carried = collapsed
-                clause_measure = collapsed
-        companies = list(dict.fromkeys(
-            ticker for ticker, _surface, _start in find_mentions(part) if ticker != "CMPX"
-        ))
-        paired = len(companies) == 1 and bool(_STATED_FIGURE.search(part)) and bool(clause_measure)
-        if _STATED_FIGURE.search(part) and not paired:
-            dropped_figure = True
+        measure = own or carried
+        refers_back = bool(re.search(r"\ball three\b|\ball of them\b", clause, flags=re.IGNORECASE))
+        has_figure = bool(_STATED_FIGURE.search(clause))
+        if not ((measure and (_moving(clause) or has_figure)) or (refers_back and carried and has_figure)):
             continue
-        if not paired:
-            continue
-        found.append((part, clause_measure, companies[0]))
-    if dropped_figure or len(found) < 2 or len({ticker for _quote, _measure, ticker in found}) < 2:
+        found.append((clause, measure or carried or "", ticker))
+    if len({ticker for _quote, _measure, ticker in found}) < 2:
         return []
     return [
         (quote, _kind_for_piece(measure, quote), ticker)
-        for quote, measure, ticker in found
+        for quote, measure, ticker in found if measure
     ]
 
 

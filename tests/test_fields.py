@@ -49,6 +49,17 @@ def test_every_stated_metric_has_to_be_on_the_line():
     assert fields_match(prompt, full) is True
 
 
+def test_all_time_highs_are_up_and_leading_to_is_not_the_reported_move():
+    highs = parse_fields(
+        "Revenues are at all-time highs, operating profits at all-time highs, operating margins are at 41%.",
+    )
+    thesis = parse_fields(
+        "investing leading to higher revenues, higher operating profits, and bigger operating margins",
+    )
+    assert highs.direction == "up"
+    assert thesis.direction is None
+
+
 def test_a_line_must_name_the_metric_as_well_as_the_figure():
     prompt = parse_fields("Google revenue grew 24%")
     spoken = parse_fields("grew by 24% year-over-year, marking its twelfth consecutive quarter")

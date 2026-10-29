@@ -395,12 +395,23 @@ function checkBody(row) {
       ${row.rationale ? `<p>Audit: ${esc(row.rationale)}</p>` : ""}
       ${row.capped_by ? `<p>Capped: ${esc(row.capped_by)}</p>` : ""}
       ${audit.numeric_label ? `<p>Number: ${esc(audit.numeric_label)}</p>` : ""}
+      ${stanceLines(audit)}
       ${(audit.failure_reasons || []).length ? `<p>Failures: ${esc(audit.failure_reasons.join("; "))}</p>` : ""}
     </div>
     ${row.explanation ? `<p class="why">${esc(row.explanation)}</p>` : ""}
     ${evidenceGroup(row.supporting, "Evidence for", "for")}
     ${evidenceGroup(row.challenging, "Evidence against", "against")}
     ${!row.supporting.length && !row.challenging.length ? `<p class="where missing">No evidence was attached to ${esc(claim.sub_claim_id)}.</p>` : ""}`;
+}
+
+function stanceLines(audit) {
+  const stances = audit.evidence_stances || {};
+  const reasons = audit.failure_reasons || [];
+  return Object.keys(stances).map((id) => {
+    const why = reasons.find((reason) => reason.startsWith(`${id}: `));
+    const note = why ? why.slice(id.length + 2) : "";
+    return `<p>Stance: ${esc(stances[id])}${note ? ` — ${esc(note)}` : ""}</p><p class="where">${esc(id)}</p>`;
+  }).join("");
 }
 
 function evidenceGroup(items, title, tone) {

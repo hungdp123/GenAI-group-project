@@ -42,6 +42,76 @@ def test_broken_observer_cannot_break_the_run(monkeypatch, tmp_path):
     assert out.assessment.status is AssessmentStatus.COMPLETED
 
 
+def test_audit_stage_lists_each_passage_stance():
+    from finsight.contracts.schemas import AuditResult, Stance, Verdict
+
+    reporter = StageReporter(emit=lambda _line: None)
+    lines = reporter._audit({
+        "audits": {
+            "aws": AuditResult(
+                sub_claim_id="aws", passed=False, verdict=Verdict.INSUFFICIENT_EVIDENCE,
+                failure_reasons=["doc-1: only 22% of the sub-claim's key words appear"],
+                evidence_stances={"doc-1": Stance.NEUTRAL},
+            ),
+        },
+    })
+    assert any("stance NEUTRAL" in line and "doc-1" in line and "22%" in line for line in lines)
+
+
+def test_prepared_narrative_output_is_what_the_auditor_receives(monkeypatch):
+    from datetime import date
+
+    from finsight.agents.orchestrator.nodes import _prepared_narrative
+    from finsight.contracts.schemas import EvidenceItem, SourceTier, Stance, SubClaim, SubClaimType
+
+    claim = SubClaim(sub_claim_id="aws", text="AWS grew 28%.", company_ticker="AMZN",
+                     sub_claim_type=SubClaimType.OTHER)
+    kept = EvidenceItem(
+        evidence_id="release", sub_claim_id="aws", stance=Stance.NEUTRAL, content="AWS sales increased 28%.",
+        source_tier=SourceTier.TIER_2, doc_type="EX-99.1", company="Amazon", period="Q1 2026",
+        publication_date=date(2026, 4, 29), produced_by="narrative",
+    )
+    dropped = kept.model_copy(update={"evidence_id": "other", "content": "Unrelated caption."})
+
+    def prepare(sub_claim, cutoff, items, **_kwargs):
+        assert items == [kept, dropped]
+        return [kept], {
+            "evidence_preparation_status": "COMPLETED",
+            "stance": "SUPPORTED",
+            "stance_reason": "The filing says AWS sales increased 28%.",
+            "stance_reason_code": "ALL_MATERIAL_PARTS_SUPPORTED",
+            "summary": [{"text": "AWS sales increased 28% year over year.", "evidence_ids": ["release"]}],
+        }
+
+    monkeypatch.setattr(
+        "finsight.agents.narrative.rag.evidence_summary.prepare_narrative_evidence", prepare,
+    )
+    selected, report = _prepared_narrative(object(), claim, date(2026, 4, 30), [kept, dropped])
+    assert selected == [kept]
+    assert report["stance"] == "SUPPORTED"
+    assert report["summary"] == ["AWS sales increased 28% year over year."]
+
+
+def test_gather_stage_shows_the_narrative_stance_and_summary():
+    reporter = StageReporter(emit=lambda _line: None)
+    lines = reporter._gather_evidence({
+        "narrative_reports": {
+            "aws": {
+                "stance": "SUPPORTED",
+                "stance_reason_code": "ALL_MATERIAL_PARTS_SUPPORTED",
+                "stance_reason": "The filing says AWS sales increased 28%.",
+                "summary": ["AWS sales increased 28% year over year."],
+                "status": "COMPLETED",
+            },
+        },
+        "evidence": {},
+    })
+    text = "\n".join(lines)
+    assert "narrative stance SUPPORTED (ALL_MATERIAL_PARTS_SUPPORTED)" in text
+    assert "narrative reason The filing says AWS sales increased 28%." in text
+    assert "summary AWS sales increased 28% year over year." in text
+
+
 def test_reporter_lines_for_retry_round_only_show_retried_sub_claim(monkeypatch, tmp_path):
     prepared_demo(monkeypatch, tmp_path, pin_impl=True)
     monkeypatch.setenv("FINSIGHT_STUB_FAIL_SUB_CLAIMS", "sc1")

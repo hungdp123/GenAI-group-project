@@ -159,6 +159,26 @@ def test_24_percent_does_not_attach_to_the_17_percent_row():
     assert all("17%" not in quote for quote in choice.quotes)
 
 
+def test_reported_all_time_highs_beat_a_leading_to_sentence():
+    thesis = (
+        "We have a company that is investing leading to higher revenues, higher operating profits, "
+        "and bigger operating margins."
+    )
+    results = (
+        "Revenues are at all-time highs, operating profits at all-time highs, operating margins are at 41% "
+        "trailing only 2024 when margins reached 42% over the course of the past 7 years."
+    )
+    transcript = f"Shares of Meta are down 8% after reporting. {thesis} Q1 revenue came in at 56 billion. {results}"
+    choice = choose_line(
+        "Mark Roussin said Meta's Q1 2026 revenue, operating profit and operating margin all went up.",
+        [],
+        [_post("1-jC6oE5Ffo", transcript)],
+        ticker="META",
+    )
+    assert choice.question is None
+    assert choice.quotes == [results]
+
+
 def test_a_company_stays_in_force_until_another_company_is_named():
     transcript = " ".join([
         "Shares of Meta are down 8% after reporting.",

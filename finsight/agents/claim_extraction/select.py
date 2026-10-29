@@ -535,6 +535,14 @@ def _ranked(
     matched: list[tuple[SubClaim, str]] = []
     for claim, video_id in rows:
         candidate = parse_fields(claim.text, company=claim.company_ticker or ticker)
+        if not candidate.metrics and claim.parent_span and re.search(
+            r"\ball three\b|\ball of them\b", claim.text, flags=re.IGNORECASE,
+        ):
+            inherited = parse_fields(claim.parent_span).metrics
+            if inherited:
+                candidate = ClaimFields(
+                    candidate.company, inherited, candidate.direction, candidate.values, candidate.period,
+                )
         if any(fields_match(prompt, candidate, strict_value=strict_value) for prompt in prompts):
             matched.append((claim, video_id))
     # A stated figure keeps every line that has it. BM25 only orders those lines.

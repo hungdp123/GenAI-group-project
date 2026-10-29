@@ -34,6 +34,19 @@ def linked_selection(eid="source", span="s2"):
                          "fact_indices": [0]}]}
 
 
+def test_a_plain_summary_sentence_cites_the_selected_facts():
+    items = [item()]
+    _, catalog = summary._source_spans(items)
+    value = linked_selection()
+    value["summary"] = ["The source describes multi-cloud support with an offline limitation."]
+    resolved, _, errors = summary._resolve_spans(json.dumps(value), items, catalog)
+    parsed, checks = summary._validate(resolved, items)
+    assert not errors and not checks
+    assert parsed["summary"][0]["text"].startswith("The source describes")
+    assert parsed["summary"][0]["evidence_ids"] == ["source"]
+    assert parsed["stance"] == "SUPPORTED"
+
+
 def test_selection_and_public_citations_are_derived_only_from_provided_facts():
     items = [item(), item("second", "Qualification: online access required.")]
     _, catalog = summary._source_spans(items)

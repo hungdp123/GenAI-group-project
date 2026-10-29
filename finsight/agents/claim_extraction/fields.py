@@ -64,6 +64,9 @@ _UP = frozenset({
     "increase", "increased", "increasing", "higher", "up", "double", "doubled",
     "expand", "expanded", "expanding", "improved", "improving", "strong", "stronger",
 })
+# "leading to higher revenues" names a consequence. It is not the reported move.
+_LEADING_TO = re.compile(r"\b(?:leading|leads|lead|led)\s+to\b", flags=re.IGNORECASE)
+_RECORD_HIGH = re.compile(r"\b(?:all[- ]time|record)\s+highs?\b", flags=re.IGNORECASE)
 _DOWN = frozenset({
     "fell", "fall", "fallen", "falling", "decline", "declined", "declining",
     "drop", "dropped", "down", "lower", "decrease", "decreased", "shrink", "shrank",
@@ -204,8 +207,13 @@ def _metrics(text: str) -> set[str]:
 
 
 def _direction(text: str) -> str | None:
-    words = set(_WORD.findall(text.lower()))
-    up = bool(words & _UP)
+    """The move the sentence reports. Words after "leading to" are a consequence, not that move.
+
+    "Revenues are at all-time highs" is up, even though the sentence never says "higher".
+    """
+    reported = _LEADING_TO.split(text or "", maxsplit=1)[0]
+    words = set(_WORD.findall(reported.lower()))
+    up = bool(words & _UP) or bool(_RECORD_HIGH.search(reported))
     down = bool(words & _DOWN)
     if up and not down:
         return "up"

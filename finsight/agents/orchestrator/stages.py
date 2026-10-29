@@ -119,18 +119,38 @@ class StageReporter:
 
     def _gather_evidence(self, u: dict) -> list[str]:
         lines = []
-        for sid, items in u.get("evidence", {}).items():
+        reports = u.get("narrative_reports") or {}
+        evidence = u.get("evidence") or {}
+        for sid in list(dict.fromkeys([*evidence, *reports])):
             if self._active is not None and sid not in self._active:
                 continue
+            report = reports.get(sid)
+            if report:
+                lines.extend(self._narrative_report_lines(sid, report))
+            items = evidence.get(sid) or []
             if not items:
                 lines.append(f"{sid:<4} no evidence")
             for e in items:
-                # No stance here: collectors report figures and passages; the Auditor judges them.
                 period = f"  [period from {e.period_source}]" if getattr(e, "period_source", None) else ""
                 lines.append(f"{sid:<4} {_tier(e.source_tier)} {e.content[:110]}{period}")
         for sid, why in u.get("insufficient_reasons", {}).items():
             if "failed" in why:
                 lines.append(f"{sid:<4} {why}")
+        return lines
+
+    @staticmethod
+    def _narrative_report_lines(sid: str, report: dict) -> list[str]:
+        stance = report.get("stance") or "not produced"
+        code = report.get("stance_reason_code")
+        label = f"{stance} ({code})" if code else str(stance)
+        lines = [f"{sid:<4} narrative stance {label}"]
+        reason = report.get("stance_reason")
+        if reason:
+            lines.append(f"{sid:<4} narrative reason {reason}")
+        for sentence in report.get("summary") or []:
+            lines.append(f"{sid:<4} summary {sentence}")
+        if report.get("status") == "FAILED" and not report.get("stance"):
+            lines.append(f"{sid:<4} narrative preparation failed; retrieved passages were kept")
         return lines
 
     def _audit(self, u: dict) -> list[str]:
@@ -144,6 +164,22 @@ class StageReporter:
                 from finsight.agents.orchestrator.render import fmt_numeric_check
                 extra += f" numeric {fmt_numeric_check(a.numeric_check)}"
             lines.append(f"{sid:<4} {state}, proposes {a.verdict.value}{extra}")
+            lines.extend(self._stance_lines(sid, a))
+        return lines
+
+    @staticmethod
+    def _stance_lines(sid: str, audit) -> list[str]:
+        """The auditor's stance for each passage. Gather only lists the text; this is the judgment."""
+        reasons = {}
+        for reason in audit.failure_reasons:
+            evidence_id, _, why = reason.partition(": ")
+            if why:
+                reasons[evidence_id] = why
+        lines = []
+        for evidence_id, stance in audit.evidence_stances.items():
+            why = reasons.get(evidence_id)
+            note = f" — {why}" if why else ""
+            lines.append(f"{sid:<4} stance {stance.value}  {evidence_id}{note}")
         return lines
 
     def _retry_or_accept(self, u: dict) -> list[str]:

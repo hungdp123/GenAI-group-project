@@ -116,6 +116,59 @@ def _no_second_look(sub_claim: SubClaim, collectors: list[str], evidence: list[E
     return None
 
 
+def _narrative_brief(report: dict[str, Any]) -> dict[str, Any]:
+    """The stance and summary the UI shows. The selected passages travel separately as evidence."""
+    summary = []
+    for row in report.get("summary") or []:
+        if isinstance(row, dict) and isinstance(row.get("text"), str):
+            summary.append(row["text"].strip())
+        elif isinstance(row, str) and row.strip():
+            summary.append(row.strip())
+    return {
+        "stance": report.get("stance"),
+        "stance_reason": report.get("stance_reason") or report.get("generation_error")
+        or "; ".join((report.get("citation_validation") or {}).get("errors") or []),
+        "stance_reason_code": report.get("stance_reason_code"),
+        "summary": [sentence for sentence in summary if sentence],
+        "status": report.get("evidence_preparation_status") or report.get("status"),
+    }
+
+
+def _already_prepared(agent: Any, sub_claim_id: str) -> dict[str, Any] | None:
+    report = getattr(agent, "last_analysis", None)
+    if not isinstance(report, dict) or report.get("sub_claim_id") != sub_claim_id:
+        return None
+    if report.get("evidence_preparation_status") in {"COMPLETED", "FAILED", "SKIPPED_NO_EVIDENCE"}:
+        return report
+    return None
+
+
+def _prepared_narrative(
+    agent: Any, sub_claim: SubClaim, cutoff: date, items: list[EvidenceItem],
+) -> tuple[list[EvidenceItem], dict[str, Any]]:
+    """Run narrative evidence preparation unless this agent already did, and return its passages.
+
+    The returned list is what the auditor receives. On a preparation failure the retrieved
+    passages are kept and the report says why no stance was produced.
+    """
+    ready = _already_prepared(agent, sub_claim.sub_claim_id)
+    if ready is not None:
+        return items, _narrative_brief(ready)
+    try:
+        from finsight.agents.narrative.rag.evidence_summary import prepare_narrative_evidence
+
+        selected, report = prepare_narrative_evidence(sub_claim, cutoff, items)
+    except Exception as exc:
+        report = {
+            "evidence_preparation_status": "FAILED",
+            "stance": None,
+            "stance_reason": f"{type(exc).__name__}: {exc}",
+            "summary": [],
+        }
+        selected = items
+    return selected, _narrative_brief(report)
+
+
 def _said_and_verified(state: FinSightState, results: list[SubClaimResult], text: str, overall: Verdict | None):
     """Separate what was said from what can be verified on the user's cut-off."""
     request = state.request
@@ -483,8 +536,9 @@ class Nodes:
         req = state.request
         sub_claims = {c.sub_claim_id: c for c in state.sub_claims}
 
-        def collect(sub_claim_id: str) -> tuple[str, list[EvidenceItem], list[str]]:
+        def collect(sub_claim_id: str) -> tuple[str, list[EvidenceItem], list[str], dict[str, Any] | None]:
             items, errors = [], []
+            narrative_report = None
             for collector in state.routing_plan[sub_claim_id].collectors:
                 agent = getattr(self.ctx.registry, collector)
                 result, error = self._call(collector, agent.gather, sub_claims[sub_claim_id], req.cutoff_date,
@@ -494,23 +548,35 @@ class Nodes:
                     error = TypeError("collector did not return list[EvidenceItem]")
                 if error:
                     errors.append(f"{collector} agent failed ({error})")
-                else:
-                    items.extend(result)
-            return sub_claim_id, items, errors
+                    continue
+                if collector == "narrative":
+                    result, narrative_report = _prepared_narrative(
+                        agent, sub_claims[sub_claim_id], req.cutoff_date, result,
+                    )
+                items.extend(result)
+            return sub_claim_id, items, errors, narrative_report
 
         with self._pool() as pool:
             results = list(pool.map(collect, state.pending_sub_claim_ids))
 
         evidence, insufficient = dict(state.evidence), dict(state.insufficient_reasons)
-        for sub_claim_id, items, errors in results:
+        reports = dict(state.narrative_reports)
+        for sub_claim_id, items, errors, narrative_report in results:
             if errors:
                 # DECISION: any collector failure makes the sub-claim INSUFFICIENT_EVIDENCE (no partial evidence).
                 insufficient[sub_claim_id] = "; ".join(errors)
                 evidence[sub_claim_id] = []
             else:
                 evidence[sub_claim_id] = self._screen(sub_claim_id, items, req)
+            if narrative_report is not None:
+                reports[sub_claim_id] = narrative_report
         pending = [c for c in state.pending_sub_claim_ids if c not in insufficient]
-        return {"evidence": evidence, "insufficient_reasons": insufficient, "pending_sub_claim_ids": pending}
+        return {
+            "evidence": evidence,
+            "insufficient_reasons": insufficient,
+            "pending_sub_claim_ids": pending,
+            "narrative_reports": reports,
+        }
 
     def _screen(self, sub_claim_id: str, items: list[EvidenceItem], req: ClaimRequest) -> list[EvidenceItem]:
         """Hard temporal filter, claim-is-not-evidence filter, sub_claim_id consistency."""

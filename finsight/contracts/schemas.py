@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,7 +28,8 @@ from pydantic import BaseModel, ConfigDict, Field
 # 0.8: ClaimRequest/FinalAssessment.cutoff_source + requested_cutoff (where the evidence cut-off came from).
 # 0.9: SubClaim.context + user_text (period clues); EvidenceItem.period_source (where its period came from).
 
-SCHEMA_VERSION = "0.9"
+# 0.10: FinSightState.narrative_reports (stance, reason, and summary from narrative evidence preparation).
+SCHEMA_VERSION = "0.10"
 
 
 class _Strict(BaseModel):
@@ -404,6 +405,8 @@ class FinSightState(_Strict):
     feedback: dict[str, str] = Field(default_factory=dict)
     retries_used: dict[str, int] = Field(default_factory=dict)
     evidence: dict[str, list[EvidenceItem]] = Field(default_factory=dict)
+    # Narrative preparation for this run: stance, reason, and summary. The selected passages are `evidence`.
+    narrative_reports: dict[str, dict[str, Any]] = Field(default_factory=dict)
     audits: dict[str, AuditResult] = Field(default_factory=dict)
     insufficient_reasons: dict[str, str] = Field(default_factory=dict)
     tier_shortfalls: dict[str, str] = Field(default_factory=dict)  # sub-claims whose evidence tier is not enough

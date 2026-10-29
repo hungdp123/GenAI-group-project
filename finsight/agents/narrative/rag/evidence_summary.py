@@ -220,6 +220,15 @@ def _resolve_spans(raw: str, items: list[EvidenceItem], catalog: dict) -> tuple[
         value["facts"][index] = {"evidence_id": eid, "quote": by_id[eid].content[start:end]}
         resolved.append({"fact_index": index, "evidence_id": eid, "source_span_id": span_id,
                          "char_start": start, "char_end": end})
+    if isinstance(value.get("summary"), list):
+        fact_count = len(value["facts"]) if isinstance(value.get("facts"), list) else 0
+        normalized = []
+        for sentence in value["summary"]:
+            if isinstance(sentence, str) and sentence.strip() and fact_count:
+                normalized.append({"text": sentence.strip(), "fact_indices": list(range(fact_count))})
+            else:
+                normalized.append(sentence)
+        value["summary"] = normalized
     if "selected_evidence_ids" not in value:
         # Derive source IDs from explicit facts, never from an uncited passage or guessed span.
         value["selected_evidence_ids"] = list(dict.fromkeys(
