@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts.narrative.evaluation.evaluate_rag_pilot import case_identity, evaluate, read_json, write_json
+from scripts.narrative.evaluation.resume import LINE_ENDING_EQUIVALENTS
 from scripts.narrative.evaluation.run_rag_pilot import sha
 
 
@@ -320,26 +321,24 @@ def test_audited_migration_preserves_existing_live_mode_only(line_ending):
             assert not matrix_compatible(old, {**new, 'saved_retrieval': {'source': 'new-mode'}})
 
 
-@pytest.mark.parametrize('relative_path', [
-    'scripts/narrative/evaluation/run_rag_comparison.py',
-    'scripts/narrative/evaluation/run_rag_pilot.py',
-    'finsight/agents/narrative/rag/basic_rag.py',
-    'finsight/agents/narrative/rag/evidence_summary.py',
-])
-def test_reviewed_source_line_endings_are_portable_but_code_changes_are_rejected(relative_path):
+@pytest.mark.parametrize('name,lf_hash,crlf_hash', sorted(LINE_ENDING_EQUIVALENTS))
+def test_reviewed_line_endings_preserve_captures_but_unreviewed_code_is_rejected(name, lf_hash, crlf_hash):
     import hashlib
 
-    from scripts.narrative.evaluation.resume import _migrated
+    from scripts.narrative.evaluation.resume import _migrated, capture_compatible
 
-    path = Path(relative_path)
-    lf = path.read_bytes().replace(b'\r\n', b'\n')
-    crlf = lf.replace(b'\n', b'\r\n')
-    lf_hash, crlf_hash = [hashlib.sha256(content).hexdigest() for content in (lf, crlf)]
-    assert _migrated(path.name, lf_hash, crlf_hash)
-    assert _migrated(path.name, crlf_hash, lf_hash)
-    changed = hashlib.sha256(lf + b'\nUNREVIEWED_CHANGE = True\n').hexdigest()
-    assert not _migrated(path.name, lf_hash, changed)
-    assert not _migrated(path.name, changed, lf_hash)
+    # Test reviewed historical versions. A new substantive source revision may
+    # intentionally require a fresh run, without making the CI suite invalid.
+    cases = [{'id': 'one', 'claims': 'same'}]
+    old = {'case_ids': ['one'], 'selected_cases_sha256': case_identity(cases),
+           'code_hashes': {name: lf_hash}, 'model': 'same-model'}
+    new = {**old, 'code_hashes': {name: crlf_hash}}
+    assert capture_compatible(old, new, cases, cases)
+    assert capture_compatible(new, old, cases, cases)
+    changed = hashlib.sha256((lf_hash + 'unreviewed source').encode()).hexdigest()
+    assert not capture_compatible(old, {**new, 'code_hashes': {name: changed}}, cases, cases)
+    assert not capture_compatible(old, {**new, 'model': 'different'}, cases, cases)
+    assert not _migrated(name, changed, lf_hash)
     assert not _migrated('unrelated.py', lf_hash, crlf_hash)
 
 

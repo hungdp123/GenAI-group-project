@@ -80,6 +80,8 @@ LINE_ENDING_EQUIVALENTS = {
      "9c9191df335b68353d676966cc4515713984413273c9aa37f588c773e2e89f76"),
     ("evidence_summary.py", "a54d469b76e0a2a97a38647456c094b44606c03b354d7a900d24359fffec3767",
      "9e71cc27dc0af5cdde713ba351a9d263f8d4ce74cf93a52983e9256175e3fd5c"),
+    ("evidence_summary.py", "22d91fdb043ed41c2af1936f1d07d1726312434aefeeb8da49d87849c834f00f",
+     "c7d9b13c603f2cb0e5b4411b9ca5372a1a4a8d799af457e21155ce735ec44991"),
 }
 
 # Ruff line wrapping only. CLI help, prompts, output strings and executable ASTs
@@ -89,6 +91,9 @@ FORMATTING_CODE_MIGRATIONS = {
      "9dfc6886495b464420e852b27ed220088bf7c396d055d503e2cf7d0dbd2ef542"),
     ("evidence_summary.py", "c524491427f960a2351416c5e89095542e16098b5eecdceb9fab6bf821c71a10",
      "a54d469b76e0a2a97a38647456c094b44606c03b354d7a900d24359fffec3767"),
+    # Equivalent line wrapping brought in by the merge from main; AST is unchanged.
+    ("evidence_summary.py", "a54d469b76e0a2a97a38647456c094b44606c03b354d7a900d24359fffec3767",
+     "22d91fdb043ed41c2af1936f1d07d1726312434aefeeb8da49d87849c834f00f"),
 }
 
 # The source-span validator fix admits blank-only source segments omitted by the
