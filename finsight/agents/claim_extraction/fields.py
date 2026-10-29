@@ -110,19 +110,28 @@ def parse_fields(text: str, company: str | None = None) -> ClaimFields:
     )
 
 
-def fields_match(prompt: ClaimFields, candidate: ClaimFields, *, strict_value: bool = True) -> bool:
-    """True when the candidate is the same claim. A stated 24% does not match 17%."""
+def fields_match(
+    prompt: ClaimFields, candidate: ClaimFields, *, strict_value: bool = True, metric_required: bool = True,
+) -> bool:
+    """True when the candidate is the same claim. A stated 24% does not match 17%.
+
+    `metric_required` is turned off only after no line names the measure. A line that names a
+    different measure still fails. "22% is massive" can then match "revenue grew 22%".
+    """
     if not (prompt.metrics or prompt.values or prompt.direction):
         return False
     if prompt.company and candidate.company and prompt.company != candidate.company:
         return False
-    if prompt.direction and candidate.direction and prompt.direction != candidate.direction:
+    if prompt.direction and candidate.direction and candidate.direction != prompt.direction:
         return False
-    if prompt.metrics and not (candidate.metrics and prompt.metrics <= candidate.metrics):
+    shares_metric = bool(candidate.metrics and prompt.metrics <= candidate.metrics)
+    if prompt.metrics and metric_required and not shares_metric:
+        return False
+    if prompt.metrics and not metric_required and candidate.metrics and not shares_metric:
         return False
     if strict_value and prompt.values and not _values_match(prompt.values, candidate.values):
         return False
-    if not strict_value and prompt.metrics and not (candidate.metrics and prompt.metrics <= candidate.metrics):
+    if not strict_value and prompt.metrics and not shares_metric:
         return False
     return True
 

@@ -258,8 +258,65 @@ def detect_influencer(text: str, hint: str | None = None) -> str | None:
 
 def influencers_named(text: str) -> list[str]:
     """Every influencer named by a full alias. A longer alias hides the shorter one inside it."""
-    occupied = [False] * len(text or "")
     found: list[str] = []
+    for _start, _end, key in _influencer_spans(text):
+        if key not in found:
+            found.append(key)
+    return found
+
+
+_WHICH = re.compile(r"\bwhich one is right\??", flags=re.IGNORECASE)
+_TRAILING_LINK = re.compile(r"[\s,;.]*(?:\bbut\b|\band\b)[\s,;.]*$", flags=re.IGNORECASE)
+_METRIC_WORD = {
+    "revenue": "revenue", "profit": "profit", "margin": "margin",
+    "cash": "cash", "debt": "debt", "leverage": "leverage",
+}
+
+
+def speaker_claim(claim: str, influencer: str) -> str:
+    """The clause this influencer said, keeping the shared company, measure, and cut-off.
+
+    "Mark said revenue grew 20%, but Joseph said 22%" checks 20% on Mark and 22% on Joseph.
+    Joseph's clause still carries "revenue" and the company, because "said 22%" names neither.
+    """
+    text = claim or ""
+    spans = _influencer_spans(text)
+    mine = [span for span in spans if span[2] == influencer]
+    if len(spans) < 2 or not mine:
+        return text
+    start = mine[0][0]
+    later = [span[0] for span in spans if span[0] > start]
+    end = min(later) if later else len(text)
+    clause = _WHICH.sub(" ", text[start:end])
+    clause = _TRAILING_LINK.sub("", clause).strip(" ,.;")
+    held = _CUTOFF_RE.search(clause)
+    body = clause[:held.start()].strip(" ,.;") if held else clause
+    tail = clause[held.start():].strip() if held else ""
+    from finsight.agents.claim_extraction.fields import parse_fields
+
+    spoken = parse_fields(body)
+    if not spoken.company:
+        named = next(
+            (surface for ticker, surface, at in find_mentions(text) if ticker != "CMPX" and not start <= at < end),
+            "",
+        )
+        if named:
+            body = f"{body} {named}"
+    if not spoken.metrics:
+        shared = parse_fields(text).metrics
+        if len(shared) == 1:
+            body = f"{body} {_METRIC_WORD[next(iter(shared))]}"
+    clause = f"{body} {tail}".strip()
+    cutoff = _CUTOFF_RE.search(text)
+    if cutoff and not _CUTOFF_RE.search(clause):
+        clause = f"{clause} {cutoff.group(0)}"
+    return re.sub(r"\s+", " ", clause).strip()
+
+
+def _influencer_spans(text: str) -> list[tuple[int, int, str]]:
+    """(start, end, key) for each influencer alias, longest alias first so "Carlson" does not double-count."""
+    occupied = [False] * len(text or "")
+    spans: list[tuple[int, int, str]] = []
     pairs = sorted(
         ((key, alias) for key, aliases in INFLUENCERS.items() for alias in aliases),
         key=lambda item: len(item[1]),
@@ -271,9 +328,9 @@ def influencers_named(text: str) -> list[str]:
                 continue
             for index in range(match.start(), match.end()):
                 occupied[index] = True
-            if key not in found:
-                found.append(key)
-    return found
+            spans.append((match.start(), match.end(), key))
+    spans.sort()
+    return spans
 
 
 def typo_match(text: str) -> tuple[str, str] | None:

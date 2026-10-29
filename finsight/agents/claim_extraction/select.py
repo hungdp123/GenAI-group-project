@@ -25,7 +25,7 @@ from finsight.agents.claim_extraction.fields import (
     parse_fields,
 )
 from finsight.agents.claim_extraction.prepare import _SENTENCE, _drop_reason
-from finsight.agents.claim_extraction.thesaurus import find_mentions, without_urls
+from finsight.agents.claim_extraction.thesaurus import PRODUCTS, find_mentions, without_urls
 from finsight.agents.orchestrator.routing import INFLUENCERS
 from finsight.contracts.schemas import SubClaim
 
@@ -163,13 +163,21 @@ def miss_text(checked_post: str | None) -> str | None:
     return None
 
 
+_PRODUCT_NAMES = {name.casefold() for names in PRODUCTS.values() for name in names}
+
+
 def _strip_names(text: str, influencer: str | None, aliases: list[str]) -> str:
+    """Drop the influencer and the company name. Keep a product name such as AWS.
+
+    "AWS grew 24%" is about that segment. Stripping AWS makes the AWS sentence look
+    like a different fact from a company-wide revenue line.
+    """
     cleaned = _CUTOFF.sub(" ", without_urls(text or ""))
     names = list(aliases)
     if influencer:
         names.extend(INFLUENCERS.get(influencer, ()))
     for name in sorted(set(names), key=len, reverse=True):
-        if not name:
+        if not name or name.casefold() in _PRODUCT_NAMES:
             continue
         cleaned = re.sub(rf"\b{re.escape(name)}\b", " ", cleaned, flags=re.IGNORECASE)
     return cleaned
@@ -321,6 +329,11 @@ def _best_hit(
 ) -> tuple[str, str] | None:
     stored = _ranked(focus, claims, ticker=ticker)
     spoken = _transcript_hits(focus, posts, None, ticker)
+    if not stored and not spoken and _states_figure(focus):
+        # "said 22%" still means the measure named earlier. Use a line that has 22% and names no other measure
+        # when nothing in the store repeats the measure ("22% is massive").
+        stored = _ranked(focus, claims, ticker=ticker, metric_required=False)
+        spoken = _transcript_hits(focus, posts, None, ticker, metric_required=False)
     if stored:
         # A stored claim wins ties, but not over a spoken line that agrees with the prompt more closely
         # (the catalog may not hold every sentence: "free cash flow is going down because ...").
@@ -529,7 +542,12 @@ def semantic_score(left: str, right: str) -> float:
 
 
 def _ranked(
-    focus: str, rows: list[tuple[SubClaim, str]], *, ticker: str | None = None, strict_value: bool = True,
+    focus: str,
+    rows: list[tuple[SubClaim, str]],
+    *,
+    ticker: str | None = None,
+    strict_value: bool = True,
+    metric_required: bool = True,
 ) -> list[tuple[float, SubClaim, str]]:
     prompts = [parse_fields(part, company=ticker) for part in _parts(focus)]
     matched: list[tuple[SubClaim, str]] = []
@@ -543,7 +561,10 @@ def _ranked(
                 candidate = ClaimFields(
                     candidate.company, inherited, candidate.direction, candidate.values, candidate.period,
                 )
-        if any(fields_match(prompt, candidate, strict_value=strict_value) for prompt in prompts):
+        if any(
+            fields_match(prompt, candidate, strict_value=strict_value, metric_required=metric_required)
+            for prompt in prompts
+        ):
             matched.append((claim, video_id))
     # A stated figure keeps every line that has it. BM25 only orders those lines.
     stated_value = any(prompt.values for prompt in prompts)
@@ -655,6 +676,7 @@ def _transcript_hits(
     ticker: str | None,
     *,
     strict_figure: bool = True,
+    metric_required: bool = True,
 ) -> list["_Hit"]:
     prompts = [parse_fields(part, company=ticker) for part in _parts(focus)]
     passed: list[tuple[str, str, str]] = []
@@ -670,7 +692,10 @@ def _transcript_hits(
             if ticker and company != ticker:
                 continue
             candidate = parse_fields(sentence, company=company)
-            if any(fields_match(prompt, candidate, strict_value=strict_figure) for prompt in prompts):
+            if any(
+                fields_match(prompt, candidate, strict_value=strict_figure, metric_required=metric_required)
+                for prompt in prompts
+            ):
                 passed.append((sentence, vid, when))
     if not passed:
         return []
