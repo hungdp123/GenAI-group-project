@@ -13,6 +13,7 @@ from finsight.agents.narrative.corpus.processing.contextual import (
     split_claim_parts,
 )
 from finsight.agents.narrative.corpus.processing.index import search_index
+from finsight.agents.narrative.rag.collect_evidence import expand_filing_query
 
 
 def _chunk(**overrides):
@@ -184,3 +185,15 @@ def test_a_growth_claim_keeps_only_the_matching_quarter_and_percent():
     assert follow is not None
     assert "earnings release" in follow
     assert followup_query(claim, ["AWS grew 24%"], ["10-Q"]) is None
+
+
+def test_filing_query_adds_metric_figure_and_period_words():
+    expanded = expand_filing_query(
+        "[SYNTHETIC FALSE-PREMISE VARIANT] AWS sales grew 28% in Q1 2026."
+    )
+    assert "SYNTHETIC" not in expanded
+    assert "grew" in expanded
+    assert "increased" in expanded
+    assert "revenue" in expanded
+    assert "28%" in expanded
+    assert "first" in expanded and "quarter" in expanded

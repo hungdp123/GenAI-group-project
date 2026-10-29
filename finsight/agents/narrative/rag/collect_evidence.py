@@ -168,10 +168,59 @@ def _append_search(record: dict) -> None:
             handle.write(line + "\n")
 
 
-def build_queries(sub_claim: SubClaim, feedback: str | None = None) -> tuple[str, str]:
+_ANNOTATION = re.compile(r"\[SYNTHETIC FALSE-PREMISE VARIANT\]\s*", re.IGNORECASE)
+_FIGURE = re.compile(
+    r"\d+(?:\.\d+)?%|\$\s*\d[\d,]*(?:\.\d+)?(?:\s*(?:billion|million))?",
+    re.IGNORECASE,
+)
+_PERIOD = re.compile(
+    r"\bq[1-4]\s*\d{2,4}\b|\bfy\s*\d{2,4}\b|\b(?:first|second|third|fourth)\s+quarter\b",
+    re.IGNORECASE,
+)
+# A claim word pulls in the filing words used for the same metric, direction, or period.
+_FILING_TERMS: tuple[tuple[frozenset[str], tuple[str, ...]], ...] = (
+    (frozenset({"grew", "grown", "growing", "growth", "rose", "risen", "rising", "higher"}),
+     ("increased", "increase", "growth")),
+    (frozenset({"fell", "fallen", "falling", "dropped", "drop", "declined", "decline", "decreased", "lower"}),
+     ("decreased", "decrease", "declined", "decline")),
+    (frozenset({"sales", "revenue", "revenues"}), ("revenue", "revenues", "sales")),
+    (frozenset({"earnings", "profit", "profits", "income"}), ("earnings", "profit", "profits", "income")),
+    (frozenset({"margin", "margins"}), ("margin", "margins")),
+    (frozenset({"yoy", "y/y"}), ("year", "over", "year")),
+    (frozenset({"q1"}), ("q1", "first", "quarter")),
+    (frozenset({"q2"}), ("q2", "second", "quarter")),
+    (frozenset({"q3"}), ("q3", "third", "quarter")),
+    (frozenset({"q4"}), ("q4", "fourth", "quarter")),
+    (frozenset({"agent", "agents"}), ("agent", "agents")),
+    (frozenset({"shipping", "shipment", "shipments", "fulfillment"}),
+     ("shipping", "shipment", "shipments", "fulfillment")),
+    (frozenset({"software", "tool", "tools"}), ("software", "tool", "tools")),
+    (frozenset({"recommendation", "recommendations"}), ("recommendation", "recommendations")),
+    (frozenset({"advertising", "ads", "ad"}), ("advertising", "ads")),
+    (frozenset({"chip", "chips", "silicon"}), ("chip", "chips", "silicon")),
+)
+
+
+def expand_filing_query(text: str) -> str:
+    """Add filing words for the claim's metric, figure, and period. The claim words stay."""
+    cleaned = _ANNOTATION.sub("", text or "").strip()
+    tokens = {token.lower() for token in re.findall(r"[a-z0-9]+", cleaned.lower())}
+    extra: list[str] = []
+    for triggers, words in _FILING_TERMS:
+        if tokens & triggers:
+            extra.extend(word for word in words if word not in tokens and word not in extra)
+    extra.extend(figure for figure in _FIGURE.findall(cleaned) if figure not in extra)
+    extra.extend(period for period in _PERIOD.findall(cleaned) if period not in extra)
+    if not extra:
+        return cleaned
+    return f"{cleaned} {' '.join(extra)}".strip()
+
+
+def build_queries(sub_claim: SubClaim, feedback: str | None = None, *, expand: bool = False) -> tuple[str, str]:
     """Deterministic search strings; all inputs are search data, never commands."""
     # Tokenization bounds feedback and strips markup without interpreting instructions.
-    terms = re.findall(r"[\w.%+-]+", sub_claim.text, flags=re.UNICODE)[:160]
+    source = expand_filing_query(sub_claim.text) if expand else sub_claim.text
+    terms = re.findall(r"[\w.%+-]+", source, flags=re.UNICODE)[:160]
     base = f"{sub_claim.company_ticker} " + " ".join(terms)
     refinement = " ".join(re.findall(r"[\w.%+-]+", feedback or "")[:40])
     suffix = f" {refinement}" if refinement else ""
@@ -207,6 +256,7 @@ class NarrativeEvidenceAgent:
         reranker_model: str | None = None,
         rerank_overflow: str | None = None,
         part_search: bool = False,
+        expand_query: bool = False,
     ) -> None:
         self.corpus_root = Path(corpus_root or os.getenv("FINSIGHT_NARRATIVE_CORPUS_ROOT", "data/narrative/processed"))
         self.index_template = index_template or os.getenv("FINSIGHT_NARRATIVE_INDEX_TEMPLATE")
@@ -237,6 +287,7 @@ class NarrativeEvidenceAgent:
         self.retriever_factory = retriever_factory
         self.index_path_factory = index_path_factory
         self.part_search = part_search
+        self.expand_query = expand_query
         self.last_search: dict | None = None
 
     def _record_search(
@@ -290,7 +341,8 @@ class NarrativeEvidenceAgent:
         scoped = sub_claim.model_copy(update={"company_ticker": ticker})
         parts = split_claim_parts(scoped.text) if self.part_search else [scoped.text]
         query_pairs = [
-            build_queries(scoped.model_copy(update={"text": part}), feedback) for part in parts
+            build_queries(scoped.model_copy(update={"text": part}), feedback, expand=self.expand_query)
+            for part in parts
         ]
         support_query, counter_query = query_pairs[0]
         if self.part_search and len(query_pairs) > 1:

@@ -42,6 +42,7 @@ def run_basic_narrative_rag(
     reranker_model: str | None = None,
     rerank_overflow: str | None = None,
     part_search: bool = False,
+    expand_query: bool = False,
 ) -> dict[str, Any]:
     """Return original passages, exact facts, cited summary and a reasoned claim stance.
 
@@ -73,6 +74,7 @@ def run_basic_narrative_rag(
         reranker_model=reranker_model,
         rerank_overflow=rerank_overflow,
         part_search=part_search,
+        expand_query=expand_query,
         index_template=str(experiment / "companies/{ticker}/index.json") if experiment is not None else None,
         qdrant_template=str(experiment / "companies/{ticker}/qdrant") if experiment is not None else None,
     )
