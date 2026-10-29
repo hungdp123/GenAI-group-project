@@ -32,7 +32,8 @@ DEFAULT_IMPLEMENTATIONS: dict[str, str] = {
 }
 
 # End-to-end defaults only; standalone Narrative CLIs retain their own defaults.
-DEFAULT_NARRATIVE_CORPUS_ROOT = "data/narrative/processed/chunking_strategies/C1/full_v1"
+DEFAULT_NARRATIVE_CORPUS_ROOT = "data/narrative/processed/chunking_strategies/C2/full_v1"
+DEFAULT_NARRATIVE_BACKEND = "hybrid"
 _NARRATIVE_RUNTIME_IMPLEMENTATIONS = {
     "finsight.agents.narrative.rag.collect_evidence:NarrativeEvidenceAgent",
     "finsight.agents.narrative.stub:NarrativeAgent",
@@ -216,7 +217,7 @@ class AgentRegistry:
             if slot in {"narrative", "retriever"} and impl_path in _NARRATIVE_RUNTIME_IMPLEMENTATIONS:
                 options = {
                     "corpus_root": os.getenv("FINSIGHT_NARRATIVE_CORPUS_ROOT") or DEFAULT_NARRATIVE_CORPUS_ROOT,
-                    "backend": os.getenv("FINSIGHT_NARRATIVE_BACKEND") or "bm25",
+                    "backend": os.getenv("FINSIGHT_NARRATIVE_BACKEND") or DEFAULT_NARRATIVE_BACKEND,
                 }
             impl = _load(impl_path)(**options)
             if not isinstance(impl, _PROTOCOLS[slot]):

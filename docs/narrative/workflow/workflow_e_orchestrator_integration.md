@@ -95,12 +95,12 @@ The orchestrator uses saved indexes; it does not choose a chunking strategy or r
 
 | Setting | Code default when no override is set | Example command below |
 |---|---|---|
-| Chunk/index location | `data/narrative/processed/chunking_strategies/C1/full_v1/<TICKER>/indexes/index.json` | Same C1 location |
-| Chunking | C1: 800-word target, 120-word overlap | C1 |
-| Retrieval backend | `bm25` (R1) | `bm25` (R1) |
+| Chunk/index location | `data/narrative/processed/chunking_strategies/C2/full_v1/<TICKER>/indexes/index.json` | Same C2 location |
+| Chunking | C2: fixed 300-word windows, 50-word overlap | C2 |
+| Retrieval backend | `hybrid` (BM25 + dense) | `hybrid` |
 | Returned passages per search direction | `5` before deduplication and LLM selection | `3` |
 
-These defaults apply when `AgentRegistry.from_config()` creates the built-in Narrative collector and retriever, including the LLM-preparing wrappers. Standalone RAG defaults remain unchanged. The C1 indexes must already exist; the application does not rebuild them or fall back to canonical indexes.
+These defaults are defined by `DEFAULT_NARRATIVE_CORPUS_ROOT` and `DEFAULT_NARRATIVE_BACKEND` in `finsight/config.py`. They apply when `AgentRegistry.from_config()` creates the built-in Narrative collector and retriever, including the LLM-preparing wrappers. Standalone RAG retains its own defaults. The C2 company indexes and matching Qdrant vectors must already exist; the application does not rebuild them or fall back to canonical indexes or BM25. Hybrid combines lexical and dense retrieval without the R4 cross-encoder.
 
 `FINSIGHT_NARRATIVE_CORPUS_ROOT` selects the saved chunk/index build, while `FINSIGHT_NARRATIVE_BACKEND` selects retrieval independently. Setting the backend to `r4` activates hybrid retrieval plus the cross-encoder; it does not select C4. An index template (`FINSIGHT_NARRATIVE_INDEX_TEMPLATE`) overrides the corpus-root index path. A Qdrant template overrides the corresponding vector path, so both must refer to matching artifacts. Existing environment overrides still take precedence. To use the defaults in a session with older settings, clear them before starting a new run:
 
@@ -127,8 +127,8 @@ Select matching chunks/indexes using [Workflow C, Step 1](workflow_c_rag.md#step
 ```powershell
 $env:FINSIGHT_IMPL_NARRATIVE = "finsight.agents.narrative.stub:NarrativeAgent"
 $env:FINSIGHT_IMPL_RETRIEVER = "finsight.agents.narrative.retriever_stub:NarrativeRetriever"
-$env:FINSIGHT_NARRATIVE_CORPUS_ROOT = "data/narrative/processed/chunking_strategies/C1/full_v1"
-$env:FINSIGHT_NARRATIVE_BACKEND = "bm25"
+$env:FINSIGHT_NARRATIVE_CORPUS_ROOT = "data/narrative/processed/chunking_strategies/C2/full_v1"
+$env:FINSIGHT_NARRATIVE_BACKEND = "hybrid"
 $env:FINSIGHT_NARRATIVE_TOP_K = "3"
 $env:FINSIGHT_NARRATIVE_CANDIDATE_K = "50"
 $env:FINSIGHT_NARRATIVE_ANALYSIS = "evidence"
@@ -159,7 +159,7 @@ not the shared client for all other agents.
 
 #### Python calling example
 
-After applying the connection/model settings above, the application can call the configured agent directly. This example uses the existing MSFT C1 index and does not require the evaluation CSV:
+After applying the connection/model settings above, the application can call the configured agent directly. This example uses the existing MSFT C2 index and matching vectors and does not require the evaluation CSV:
 
 ```python
 from datetime import date
@@ -200,7 +200,7 @@ Integration and regression tests are the checks used in this step. They verify r
 Use the current registry and evidence-preparation regression tests:
 
 ```powershell
-python -m pytest tests/test_narrative_entrypoints.py tests/test_narrative_evidence_summary.py -q
+python -m pytest tests/test_narrative_runtime_defaults.py tests/test_narrative_entrypoints.py tests/test_narrative_evidence_summary.py -q
 ```
 
 These tests use temporary indexes and controlled model responses to check registry wiring, company/cutoff handling, shared evidence fields, source-span/citation validation and preservation of original evidence on preparation failure. They do not establish live retrieval relevance, generated-summary quality or final-verdict accuracy. They were not rerun for this documentation edit.

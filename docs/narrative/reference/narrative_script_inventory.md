@@ -31,7 +31,7 @@ Helper modules, stubs and acquisition tools can be required by other modules eve
 | [stub.py](../../../finsight/agents/narrative/stub.py) | Registry adapter | Real Narrative Agent: collect candidates and prepare selected evidence, exact facts and a cited summary. | SubClaim/cutoff/feedback -> original EvidenceItems; preparation report saved separately. No stance/verdict. |
 | [retriever_stub.py](../../../finsight/agents/narrative/retriever_stub.py) | Registry adapter | Real scoped retriever; infers one company or accepts an explicit ticker. | Query/top-K/cutoff -> original EvidenceItems. No generated summary. |
 
-The filenames retain compatibility; these are active implementations. [Workflow E](../workflow/workflow_e_orchestrator_integration.md) documents registry selection, C1/BM25 end-to-end defaults and overrides.
+The filenames retain compatibility; these are active implementations. [Workflow E](../workflow/workflow_e_orchestrator_integration.md) documents registry selection, C2/hybrid end-to-end defaults and overrides.
 
 ## 2. Corpus preparation and BM25: 5 files
 

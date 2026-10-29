@@ -15,8 +15,10 @@ openai_api_key: "YOUR_OPENAI_API_KEY"
 # $env:FINSIGHT_CORPUS_PROFILE = "canonical"
 # $env:FINSIGHT_IMPL_NARRATIVE = "finsight.agents.narrative.stub:NarrativeAgent"
 # $env:FINSIGHT_IMPL_RETRIEVER = "finsight.agents.narrative.retriever_stub:NarrativeRetriever"
-# $env:FINSIGHT_NARRATIVE_BACKEND = "bm25"
-# End-to-end registry defaults: C1 full_v1 chunk indexes + BM25.
+# $env:FINSIGHT_NARRATIVE_CORPUS_ROOT = "data/narrative/processed/chunking_strategies/C2/full_v1"
+# $env:FINSIGHT_NARRATIVE_BACKEND = "hybrid"
+# End-to-end registry defaults: C2 full_v1 chunk indexes + hybrid (BM25 + dense).
+# Hybrid requires matching company Qdrant vectors and the retrieval dependencies.
 # FINSIGHT_NARRATIVE_CORPUS_ROOT and FINSIGHT_NARRATIVE_BACKEND override them.
 # Standalone RAG retains its separate defaults; see Workflow C.
 # $env:FINSIGHT_NARRATIVE_ANALYSIS = "evidence"
