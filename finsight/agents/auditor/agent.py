@@ -675,9 +675,10 @@ class AuditorAgent:
         stated_money = [] if threshold is not None else _money(sub_claim.text)
         content_money = _money(item.content)
         if len(stated_money) == 1 and content_money:
-            stated_amount, scale = stated_money[0], _bare_amount_scale(sub_claim.text, stated_money[0], content_money[0])
-            stated_amount *= scale                  # "$110 in Q1" is $110 billion when the record is $109,896m
-            tol = max(_money_half_unit(sub_claim.text) * scale, 1e-9 * abs(content_money[0]))   # rounding to stated precision
+            scale = _bare_amount_scale(sub_claim.text, stated_money[0], content_money[0])
+            stated_amount = stated_money[0] * scale  # "$110 in Q1" is $110 billion when the record is $109,896m
+            tol = max(                               # rounding to the precision the claim stated
+                _money_half_unit(sub_claim.text) * scale, 1e-9 * abs(content_money[0]))
             matches.append(abs(stated_amount - content_money[0]) <= tol)
             if stated_frac is None:
                 stated_frac = stated_money[0]       # the claimed dollar amount, shown next to the computed one

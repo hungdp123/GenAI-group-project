@@ -11,7 +11,8 @@ Run from the repo root (after the pull):
 Writes agent_run.csv (or --out) and prints a summary: how many lines got figures and why the rest got none.
 
 There are tens of thousands of lines, so this uses the rule-based reading by default (no model calls).
-Add --llm to let the model read the lines the rules find no measure in (costs money on a real provider; FINSIGHT_SPEND_LIMIT_USD applies).
+Add --llm to let the model read the lines the rules find no measure in
+(costs money on a real provider; FINSIGHT_SPEND_LIMIT_USD applies).
 """
 
 import argparse
@@ -50,7 +51,8 @@ def main():
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--with-number", action="store_true",
                     help="only lines that state a figure (a %% or an amount): the ones the Auditor can check")
-    ap.add_argument("--llm", action="store_true", help="rules first, the model only for lines the rules cannot read (default: rules only)")
+    ap.add_argument("--llm", action="store_true",
+                    help="rules first, the model only for lines the rules cannot read (default: rules only)")
     args = ap.parse_args()
     if not args.llm:
         os.environ["FINSIGHT_FINANCIAL_PLANNER"] = "rules"

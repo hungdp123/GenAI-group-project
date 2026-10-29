@@ -594,12 +594,14 @@ def test_ever_without_a_figure_stays_insufficient():
 
 def test_stated_amount_far_from_the_record_is_out_of_window_not_contradicted():
     """Item 17: "13.5 billion, up 101%" is a 2023 quarter; the latest record is $96.2bn (+105.9%)."""
-    rec = "Revenue was $96,221m in the quarter ended 2026-07-26 vs $46,743m in the quarter ended 2025-07-27 (+105.9% YoY)."
+    rec = ("Revenue was $96,221m in the quarter ended 2026-07-26 "
+           "vs $46,743m in the quarter ended 2025-07-27 (+105.9% YoY).")
     r = _audit("The next quarter arrived, Nvidia reported 13.5 billion of total revenue, up 101%.", rec, 1.0585)
     assert r.verdict is Verdict.INSUFFICIENT_EVIDENCE and r.passed
 
 
 def test_stated_amount_near_the_record_but_wrong_is_still_contradicted():
-    rec = "Revenue was $96,221m in the quarter ended 2026-07-26 vs $46,743m in the quarter ended 2025-07-27 (+105.9% YoY)."
+    rec = ("Revenue was $96,221m in the quarter ended 2026-07-26 "
+           "vs $46,743m in the quarter ended 2025-07-27 (+105.9% YoY).")
     r = _audit("Nvidia reported $80 billion of revenue, up 106%.", rec, 1.0585)
     assert r.verdict is Verdict.CONTRADICTED
