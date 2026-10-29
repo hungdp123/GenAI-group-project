@@ -103,9 +103,8 @@ def test_pipeline_attaches_clues_and_reports_the_mismatch(monkeypatch, tmp_path)
     recorder = _Recorder()
     out = execute("Joseph Carlson said Company X revenue grew 25% last quarter.", date(2025, 7, 31),
                   registry=demo_registry(financial=recorder))
-    assert recorder.seen, out.assessment.clarification_question or out.assessment.refusal_reason
-    sent = recorder.seen[0]
-    assert sent.text == LINE                                   # the post's line is the claim checked
-    assert "second quarter" in (sent.context or "")
-    assert "last quarter" in (sent.user_text or "")
-    assert "You said 25%; the post says 22%" in (out.assessment.checked_post or "")
+    assert not recorder.seen
+    assert out.assessment.clarification_question == (
+        "That line is not in this influencer's stored videos. "
+        "Restate the line, or resubmit with the video id."
+    )

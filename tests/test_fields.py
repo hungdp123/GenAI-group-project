@@ -49,10 +49,10 @@ def test_every_stated_metric_has_to_be_on_the_line():
     assert fields_match(prompt, full) is True
 
 
-def test_a_line_with_the_figure_and_no_metric_can_still_match():
+def test_a_line_must_name_the_metric_as_well_as_the_figure():
     prompt = parse_fields("Google revenue grew 24%")
     spoken = parse_fields("grew by 24% year-over-year, marking its twelfth consecutive quarter")
-    assert fields_match(prompt, spoken) is True
+    assert fields_match(prompt, spoken) is False
 
 
 def test_a_prompt_with_no_fields_matches_nothing():
