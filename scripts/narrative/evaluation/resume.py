@@ -46,6 +46,24 @@ LOCAL_DEFAULT_CODE_MIGRATIONS = {
      "dd91b756b076d57a9b5ad820abc205cf6e5e5746e8f10b111e9901949445fe9a"),
 }
 
+# The optional saved-retrieval branch leaves fresh-retrieval behavior unchanged.
+# Settings still have to match: an existing live-retrieval run cannot switch modes.
+SAVED_RETRIEVAL_CODE_MIGRATIONS = {
+    ("run_rag_comparison.py", "3eefe3fe512ae8fd14615dbe0cc59ea111d005e2ef7c0bb67b851023df2636ac",
+     "8a24c536501e6813ac56b28da1a580ed3a63281107316ed55864c4780bfaea5f"),
+    ("run_rag_pilot.py", "d614fc8d5d8c51362e2f82cf5042e81a7aef74db44fc3b31f9b6dfdcacb9d344",
+     "3b228895823792251b1260150f9d225d6662b6b8b273552282d25dc728a58631"),
+}
+
+# Optional row-range selection; default prefix selection and generation are unchanged.
+# Existing snapshot-prefix and settings checks still govern any scope extension.
+CASE_RANGE_CODE_MIGRATIONS = {
+    ("run_rag_comparison.py", "8a24c536501e6813ac56b28da1a580ed3a63281107316ed55864c4780bfaea5f",
+     "0d0ef60e8f9dcc5c912c2f5aef4f5b7bd20846afbf86c315df52b84455400792"),
+    ("run_rag_pilot.py", "3b228895823792251b1260150f9d225d6662b6b8b273552282d25dc728a58631",
+     "6061f91902c8a22e70e44847b4f640d4ad58b9e8360c77ff6e0be53a4b181f8c"),
+}
+
 # The source-span validator fix admits blank-only source segments omitted by the
 # existing generation protocol. Previously accepted samples and judge prompts are unchanged.
 EVALUATOR_INPUT_MIGRATIONS = {
@@ -73,7 +91,7 @@ def evaluator_compatible(previous: dict, current: dict) -> bool:
 def _migrated(name: str, previous: str, current: str) -> bool:
     reachable = {previous}
     migrations = (OUTPUT_PATH_MIGRATIONS | DATASET_PATH_MIGRATIONS | RECOVERY_CODE_MIGRATIONS
-                  | LOCAL_DEFAULT_CODE_MIGRATIONS)
+                  | LOCAL_DEFAULT_CODE_MIGRATIONS | SAVED_RETRIEVAL_CODE_MIGRATIONS | CASE_RANGE_CODE_MIGRATIONS)
     for _ in migrations:
         reachable.update(new for module, old, new in
                          migrations

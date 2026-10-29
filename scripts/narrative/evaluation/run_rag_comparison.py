@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import itertools
 import os
 from pathlib import Path
+import re
 
 from scripts.narrative.evaluation.evaluate_rag_pilot import load_cases, read_json, write_json
 from scripts.narrative.evaluation.model_options import add_model_options, configure_cli_model, describe_cli_model
@@ -13,24 +14,61 @@ from scripts.narrative.evaluation.resume import archive_state, matrix_compatible
 from scripts.narrative.evaluation.run_rag_pilot import run as run_configuration, sha
 
 
+def select_case_ranges(cases: list[dict], ranges: list[str]) -> list[dict]:
+    """Select inclusive 1-based data-row ranges, retaining original CSV order."""
+    rows = set()
+    for value in ranges:
+        if not re.fullmatch(r"\d+(?:-\d+)?", value):
+            raise ValueError(f"Invalid case range {value!r}; use 1-20 or a single row such as 38")
+        bounds = [int(n) for n in value.split("-")]
+        start, end = bounds[0], bounds[-1]
+        if not 1 <= start <= end <= len(cases):
+            raise ValueError(f"Case range {value!r} must be within 1-{len(cases)} and ascending")
+        selected = set(range(start, end + 1))
+        if rows & selected:
+            raise ValueError(f"Overlapping case range: {value!r}")
+        rows.update(selected)
+    if not rows:
+        raise ValueError("At least one case range is required")
+    return [case for row, case in enumerate(cases, 1) if row in rows]
+
+
 def run(args: argparse.Namespace) -> dict:
     cases = load_cases(args.cases)
-    count = len(cases) if args.all_cases else (args.limit if args.limit is not None else 2)
+    ranges = getattr(args, "case_ranges", None)
+    if ranges and (args.all_cases or args.limit is not None):
+        raise ValueError("Use only one of --case-ranges, --all-cases or --limit")
+    default_count = len(cases) if args.all_cases else (args.limit if args.limit is not None else 2)
+    selected = select_case_ranges(cases, ranges) if ranges else cases[:default_count]
+    count = len(selected) if ranges else default_count
     if not cases or not 1 <= count <= len(cases) or args.threads < 1:
         raise ValueError("Require available cases, a positive limit within the CSV, and threads >= 1")
     if len(set(args.strategies)) != len(args.strategies) or len(set(args.backends)) != len(args.backends):
         raise ValueError("Strategies and backends must be unique")
     pairs = list(itertools.product(args.strategies, args.backends))
     retrieval_only = getattr(args, "retrieval_only", False)
+    retrieval_run = getattr(args, "retrieval_run_dir", None)
+    if retrieval_run is not None:
+        from scripts.narrative.evaluation.saved_retrieval import source_configuration
+
+        retrieval_run = retrieval_run.resolve()
+        if retrieval_only:
+            raise ValueError("--retrieval-run-dir requires full RAG; omit --retrieval-only")
+        # Resolve all requested pairs before creating output or allowing model calls.
+        source_folders = {(arm, backend): source_configuration(retrieval_run, arm, backend)
+                          for arm, backend in pairs}
     retry_errors = getattr(args, "retry_generation_errors", False)
     if retry_errors and (not args.resume or retrieval_only):
         raise ValueError("--retry-generation-errors requires --resume and a full RAG run")
     output = args.output_dir.resolve()
+    if retrieval_run is not None and (output.is_relative_to(retrieval_run)
+                                      or retrieval_run.is_relative_to(output)):
+        raise ValueError("Generation output and saved retrieval folder must not overlap")
     if output.exists() and any(output.iterdir()) and not args.resume:
         raise ValueError("Output exists; use --resume with identical settings or a new output folder")
     configuration = {
         "dataset": str(args.cases.resolve()), "dataset_sha256": sha(args.cases),
-        "selected_case_ids": [c["id"] for c in cases[:count]],
+        "selected_case_ids": [c["id"] for c in selected],
         "case_count_per_configuration": count, "strategies": args.strategies, "backends": args.backends,
         "configurations": [{"strategy": arm, "backend": backend,
                             "folder": f"configurations/{arm}/{backend}"} for arm, backend in pairs],
@@ -43,6 +81,11 @@ def run(args: argparse.Namespace) -> dict:
         "retrieval_only": retrieval_only,
         "runner_sha256": sha(Path(__file__)),
     }
+    if retrieval_run is not None:
+        configuration["saved_retrieval"] = {
+            "run_dir": str(retrieval_run),
+            "matrix_sha256": sha(retrieval_run / "matrix_configuration.json"),
+        }
     output.mkdir(parents=True, exist_ok=True)
     lock = output / ".run.lock"
     try:
@@ -74,6 +117,8 @@ def run(args: argparse.Namespace) -> dict:
                 resume=True, prepare_only=True, model_cache=models,
                 retrieval_only=retrieval_only,
                 retry_generation_errors=retry_errors,
+                retrieval_source_dir=source_folders[arm, backend] if retrieval_run is not None else None,
+                selected_case_ids=[c["id"] for c in selected] if ranges else None,
             ))
         # Validate every requested dataset/build before the first model call.
         for job in jobs:
@@ -92,7 +137,7 @@ def run(args: argparse.Namespace) -> dict:
         if args.preflight_only:
             print("Preflight passed; no retrieval or model calls made. Use --resume to execute this matrix.")
             return report
-        if any(backend != "bm25" for backend in args.backends):
+        if retrieval_run is None and any(backend != "bm25" for backend in args.backends):
             import torch
 
             torch.set_num_threads(args.threads)
@@ -120,6 +165,8 @@ def build_parser() -> argparse.ArgumentParser:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--limit", type=int, help="First N CSV claims; defaults to two for a preview")
     group.add_argument("--all-cases", action="store_true", help="Explicitly select every CSV row")
+    group.add_argument("--case-ranges", nargs="+", metavar="START-END",
+                       help="Inclusive 1-based data rows, excluding the CSV header; e.g. 1-20 38-49")
     parser.add_argument("--strategies", nargs="+", choices=("C1", "C2", "C3", "C4", "contextual"),
                         default=["C1", "C2", "C3", "C4"])
     parser.add_argument("--backends", nargs="+", choices=("bm25", "dense", "hybrid", "r4"),
@@ -136,6 +183,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--retrieval-only", action="store_true",
                         help="Save and score retrieval rankings without any LLM generation calls")
+    parser.add_argument("--retrieval-run-dir", type=Path,
+                        help="Generate from an existing retrieval-only matrix; preserve saved candidates/rankings, "
+                             "without retrieval, embedding or reranking. Use a separate output folder.")
     parser.add_argument("--resume", action="store_true",
                         help="Reuse saved results; allow increasing the case limit with identical inputs/settings")
     parser.add_argument("--retry-generation-errors", action="store_true",
@@ -149,6 +199,8 @@ def main() -> None:
     args = parser.parse_args()
     configure_cli_model(args)
     print(describe_cli_model(args), flush=True)
+    if args.retrieval_run_dir is not None:
+        print(f"Saved retrieval: {args.retrieval_run_dir}; no retrieval, embedding or reranking calls.", flush=True)
     try:
         report = run(args)
     except (OSError, ValueError, KeyError, IndexError) as exc:
