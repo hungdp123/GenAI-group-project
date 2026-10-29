@@ -14,7 +14,8 @@ Run from the repo root (after the pull):
   python -m finsight.agents.financial.run_eval ... --trace                 also print the planner's steps
 
 The model comes from FINSIGHT_LLM_PROVIDER / FINSIGHT_LLM_MODEL (team LLM client). With the default mock
-provider the agent uses the rule-based reading. Set FINSIGHT_FINANCIAL_PLANNER=rules to force the rules.
+provider the agent uses the rule-based reading. The agent is rules-first: the model is only called when the rules
+find no measure (or on a retry). Set FINSIGHT_FINANCIAL_PLANNER=rules to never call it.
 """
 
 import argparse

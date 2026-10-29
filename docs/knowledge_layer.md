@@ -1,6 +1,6 @@
 # FinSight knowledge layer
 
-Update as of: 26 Oct 2026
+Update as of: 28 Oct 2026
 
 This is the complete rule book. The shorter version that will be called by FinSight itself is `finsight/knowledge/knowledge_layer.yaml`. 
 
@@ -14,7 +14,7 @@ The steps always run in this order:
 2. Initial screening reads that prompt only. It refuses advice, asks which influencer or company is missing, or stops an out-of-scope prompt. It does not call an agent.
 3. A prompt that passes goes to collect posts. That step reads a post already stored for that influencer and company. It does not start the orchestrator.
 4. If several posts state the same claim and the prompt names no video, show both lines. A named video uses that video. If the prompt asks whether that influencer has been consistent about that company, or asks for the accuracy of that influencer's claims about that company over time, do not ask which post. Check every stored post in the window. Each post keeps its own publication date as the cut-off. A date typed in the prompt does not replace a post date.
-5. Claim extraction reads that one post. Rules decide how a sentence splits and which company it is about. A model is used only when a figure's own sentence names neither a company nor a measure, and then only to fill those two labels. The model does not split a sentence and does not choose the route. Each kept quote gets one type. Extraction writes no label. If the prompt stated a claim, a stored row is checked only when it shares the measure and any stated figure. "Grew 24%" matches a row that contains 24%, not a row that contains 17%. The match is semantic. If no stored row is that close, the transcripts of that influencer's videos about the company are searched. One close spoken sentence is shown and the user is asked to confirm it. Several are shown and the user is asked which one. Nothing close asks the user to restate the line or name the video. A confirmed sentence is then checked. If the prompt stated no claim, the checkable claims about that company are checked.
+5. Claim extraction reads that one post. Rules decide how a sentence splits and which company it is about. A model is used only when a figure's own sentence names neither a company nor a measure, and then only to fill those two labels. The model does not split a sentence and does not choose the route. The type, and so the agent, comes from the rules in section 5, never from the model's measure word. Each kept quote gets one type. Extraction writes no label. If the prompt stated a claim, a stored row is checked only when it shares the measure and any stated figure. "Grew 24%" matches a row that contains 24%, not a row that contains 17%. The match is semantic. If no stored row is that close, the transcripts of that influencer's videos about the company are searched. One close spoken sentence is shown and the user is asked to confirm it. Several are shown and the user is asked which one. Nothing close asks the user to restate the line or name the video. A confirmed sentence is then checked. If the prompt stated no claim, the checkable claims about that company are checked.
 6. The orchestrator starts here. The YAML table chooses an agent for each claim. The choice is fixed by the claim's type. No model chooses or changes it. The financial agent and the narrative agent gather evidence. The auditor checks. One retry is allowed. The output advice screen rewrites any buy or sell wording and still releases the report. The report names the influencer, the post title, the post id, and the post date.
 
 Three rules apply everywhere:
@@ -142,6 +142,8 @@ A figure that appears only on a chart, a slide, or an image is not in the stored
 
 **Rules first, then a model for wider context.** The split and the company are decided by rules, in the order below. The first matching rule finishes the sentence. A model does not invent a claim, does not split a sentence, and does not choose the agent. A model is called only for a bare figure: a number whose own sentence names neither a company nor a measure. It is shown the sentences around that line, eight before it and one after it, and it writes one company and one measure onto that existing row. If the rules already named a company or a measure, the model is not called. When two earlier labels disagree, a check may see the same surrounding lines and still return one company and one measure for the whole row. The mock provider is not used for either call. Its canned reply would write the wrong company.
 
+**What the model's measure word may change.** The model answers with one word: revenue, profit, margin, cash, debt, or leverage. That word fills the measure. It sets the type only when the rules gave the sentence no type of its own, and then only through the table in section 5 (revenue, operating income or diluted EPS is historical growth; reported profit is net income growth; a margin is profitability; free cash flow or a cash-flow level is cash generation; debt-to-equity is leverage; a debt amount, gross profit, or a cash balance is not in the table). When the rules typed the sentence as a forecast, a segment figure, a result against estimates, a comparison, a cause, or a risk, that type stands and the model's word does not move the sentence to the financial agent.
+
 **One sentence, one or more claims.**
 
 1. A question, advice, a price remark, a guest line, a joke, or an "if" with would, could, or might and no figure is not stored.
@@ -159,7 +161,7 @@ For example, a kept summary "Revenue growth proves it is the biggest winner from
 
 Keep the post's words. Do not make a claim stronger, weaker, or add a claim from the model's own knowledge. Each claim stores the quote it came from in the post.
 
-This step runs when the corpus is built, once per post. It writes one record per kept claim: post id, company, quote, type, and the fields in section 8. A sentence that rule 3 or rule 4 splits is more than one record. The quote on each record is still the post's words. It writes no label. The table a question reads is `data/influencers/claims/claim_update_v3.jsonl`. A question does not extract the post again. The record is a table of claims. It is not the vector database. The vector database holds filing passages for the narrative agent. Until a post has this record, a question may extract it once. After the record exists, the question uses the record.
+This step runs when the corpus is built, once per post. It writes one record per kept claim: post id, company, quote, type, and the fields in section 8. A sentence that rule 3 or rule 4 splits is more than one record. The quote on each record is still the post's words. It writes no label. The table a question reads is `data/influencers/claims/claim_update_v3.jsonl`. A row whose type was corrected after it was built carries a `type_fix` field with the old type and the reason. A question does not extract the post again. The record is a table of claims. It is not the vector database. The vector database holds filing passages for the narrative agent. Until a post has this record, a question may extract it once. After the record exists, the question uses the record.
 
 The only claims the system may add beyond the post's own clauses are the expansions in section 6. Each added claim stores the original phrase and the name of the rule that expanded it. A company split is not one of those expansions. It stores each clause, and the full sentence on the parent.
 
@@ -187,18 +189,29 @@ If the same type, measure, and period appears twice, keep one claim. Keep the ea
 | Historical growth | Past change in total revenue, operating income, operating cash flow, or diluted earnings per share | "Revenue grew about 14% year over year." "Operating income is up 124%." "Operating cash flow grew." "Earnings per share declined." | Financial | Supported, from a filing only |
 | Net income growth | Past change in reported accounting profit | "Profits grew." | Financial | Supported, from a filing only |
 | Profitability | Operating margin, net margin, or gross margin, level and direction | "Margins are healthy and not falling." "Gross margin improved." | Financial | Supported, from a filing only |
-| Cash generation | Free cash flow, operating cash flow, or free cash flow margin, level and direction | "The company generates cash." "Free cash flow margin is 15%." | Financial | Supported, from a filing only |
+| Cash generation | Free cash flow or free cash flow margin, level and direction; the level of operating cash flow | "The company generates cash." "Free cash flow margin is 15%." | Financial | Supported, from a filing only |
 | Liquidity | Current ratio or cash ratio, level and direction | "Liquidity is solid." "The cash ratio is above 1." | Financial | Supported, from a filing only |
-| Leverage | Debt-to-equity, direction only | "Leverage is under control." | Financial | Insufficient Evidence until the financial agent returns the ratio. Supported once that filing ratio is calculated. |
+| Leverage | Debt-to-equity, direction only | "Leverage is under control." | Nobody (decided 28 Oct 2026): debt is not mapped in the SEC data, so neither agent can calculate the ratio | Insufficient Evidence |
 | Demand attribution | The post names the cause of a result, such as AI demand or a new product. The check is whether the company itself said that. | "Growth is from AI infrastructure demand." | Narrative | Supported only when a filing gives that cause's share of the result and names no other cause. Any weaker company statement is Partially Supported. |
 | Continuation | A forward-looking claim about demand or guidance | "This growth is just getting started." | Narrative | Partially Supported. The source is management's own remarks. |
-| Comparative | A ranking against other companies, or a comparison of one calculated measure | "Biggest winner." "Nvidia's revenue grew faster than AMD." | Nobody, when no measure is named. Financial, once per company, when both companies are in section 1 and the measure is in section 11. | Insufficient Evidence when no measure is named. Supported or Contradicted when the two calculated figures agree or disagree with the stated order. |
+| Comparative | A ranking against other companies with no calculated measure | "Biggest winner." "Better than Google." | Nobody | Insufficient Evidence. A comparison that names a section 11 measure and two section 1 companies ("Nvidia's revenue grew faster than AMD's") is not stored as this type: section 4 rule 4 makes one claim per company, of that measure's type, and the two calculated figures are then compared. |
 | Business risk | A risk named in the post | "Customer concentration is a risk." | Narrative | Supported only when a 10-K or 10-Q risk factor states it. An earnings-call remark can at most be Partially Supported. |
 | Not in the table | A company fact that matches no row above | "They bought back stock." "Attendance rose." | Narrative, in the documents stored for that company | Supported when a filing states it. An earnings remark can at most be Partially Supported. |
 
 A debt amount is not leverage. "Debt is over $100 billion" goes to the narrative agent, which quotes the figure from a stored filing. Debt tags differ across companies, so the financial agent does not add them up. The narrative agent does not calculate debt ÷ equity. That ratio stays a leverage claim.
 
 A result against analyst estimates is not historical growth. "Earnings per share came in lower than expected" and "Revenue beat estimates" compare with estimates, which are not stored. They are not forward-looking either. They go to the narrative agent, which can quote what the company said about the result. "Earnings report" and "earnings call" name the event, not profit. "In this earnings report, daily active users reached 3.6 billion" names no measure from section 11, so it goes to the narrative agent. The same holds for a cost or charge, such as "$2.4 billion in legal costs".
+
+**Where the boundaries fall.**
+
+- Operating cash flow. A stated change ("operating cash flow grew 20%") is historical growth. A level with no change ("operating cash flow was $174 billion") is cash generation.
+- Earnings per share and operating income are historical growth, not net income growth. "Profit" or "earnings" with no other word is net income growth.
+- Leverage means debt-to-equity only. "Operating leverage" and leverage as a verb ("leverage its data") are not leverage claims. A debt amount is not leverage either (below).
+- A segment or product figure is not in the table. That includes AWS, Azure, Google Cloud or any cloud business, YouTube, search, Services, iPhone, Mac, wearables, data center, gaming, advertising or ad revenue, automotive, energy, Reality Labs, Instagram, WhatsApp, Waymo, and subscriptions. It goes to the narrative agent, as section 11 says. A segment word counts only when it qualifies that measure: "Ad impressions are up 19%, and revenues are up 33%" is still company revenue.
+- A forecast is continuation, whatever measure it names. Forecast words are will, would, going to, expects, expected to, set to, guidance or guided, forecast, projected, outlook, next quarter, next year, and in five (or N) years. The word must apply to the figure: "The next quarter arrived, and Nvidia reported revenue up 101%" and "Planned investment will support momentum, including revenue growing 22% in Q1" are past results.
+- The influencer's own gains ("my Microsoft position is worth $82,000 with profits of $40,500") are not company profit. They are not in the table.
+- A financial type is kept only when the financial agent can calculate a section 11 measure from the sentence. Otherwise the claim is continuation (a forecast) or not in the table. The one exception is a bare figure the model labelled from the surrounding sentences (section 4). The word lists for forecasts, share-price moves, non-GAAP figures, "margin" in another sense, and the influencer's own gains are kept in one place, `finsight/knowledge/terms.py`, and claim extraction, the financial agent and the auditor all use them.
+- The claim's `measure` field and its type must agree. A row whose measure is `segment` is not in the table. A row whose measure is `guidance` is continuation.
 
 Operating-income growth, operating-cash-flow growth, and diluted earnings-per-share growth are historical growth. The financial agent calculates them from the consolidated figures. Gross-profit growth, a run rate, net income with gains removed, and a segment margin are not in section 11. They are not sent to the financial agent. The narrative agent searches the stored documents.
 
@@ -267,7 +280,7 @@ When the phrase names no measure, combine the four children into one label for t
 | source_span | The quote in the stored post |
 | parent_span | The full sentence when a claim is one clause of it: a section 6 expansion, or a company split from section 4. Empty when the claim is the whole sentence. |
 | expansion_rule | Set only for an expanded child, for example `financially_strong` |
-| measure | The measure that child tests, such as profitability, cash generation, liquidity, or leverage. For a turnaround, the measure the post names. |
+| measure | The measure that child tests, such as profitability, cash generation, liquidity, or leverage. For a turnaround, the measure the post names. `segment` and `guidance` mark a figure the financial agent does not calculate; their types are not-in-the-table and continuation. |
 | quote_time | A time in the stored post, such as 02:14. Empty when the post has no time. |
 | type | One type from section 5 |
 | cut_off | The post's publication date from section 3 |
@@ -329,7 +342,7 @@ Only these calculations may support a financial claim. The numbers come from the
 | Free cash flow margin | Free cash flow, revenue | Free cash flow ÷ revenue |
 | Current ratio | Short-term assets, short-term bills | Short-term assets ÷ short-term bills. A result of 1 means the assets cover the bills. |
 | Cash ratio | Cash, short-term bills | Cash ÷ short-term bills |
-| Debt-to-equity | Short-term debt, long-term debt, shareholders' equity | (Short-term debt + long-term debt) ÷ equity. For the "financially strong" test, only the direction from last year is used. The financial agent does not return this ratio yet, so a leverage claim is Insufficient Evidence. |
+| Debt-to-equity | Short-term debt, long-term debt, shareholders' equity | (Short-term debt + long-term debt) ÷ equity. For the "financially strong" test, only the direction from last year is used. The ratio is not calculated (debt is not mapped), so a leverage claim is sent to no agent and is Insufficient Evidence. |
 
 Use total revenue and total profit, not a segment. A segment growth rate presented as if it were the whole company is Insufficient Evidence. A segment figure stated as that segment, such as "AWS grew 17%," is checked as that segment. It is not sent through the total-revenue calculation. The report says it is about that segment, not the whole company. The lookup is a stored passage that states the figure. If no passage states it, the label is Insufficient Evidence.
 
@@ -357,7 +370,7 @@ Use total revenue and total profit, not a segment. A segment growth rate present
 - On a growth claim, "strong" and "explosive" mean the direction only, as in section 6. The output says the size was not tested.
 - A dollar amount matches after rounding to the precision the post stated. "$2.1 billion" matches a calculated amount from $2.05 billion to $2.15 billion.
 
-**Not calculated here.** A missing tag or a missing comparison period makes that calculated claim Insufficient Evidence. The gap is not filled from news, from the stored post, or from memory. Debt-to-equity is in the table above, and the financial agent returns no figure for it yet, so the label is Insufficient Evidence. The narrative agent is not asked to divide debt by equity.
+**Not calculated here.** A missing tag or a missing comparison period makes that calculated claim Insufficient Evidence. The gap is not filled from news, from the stored post, or from memory. Debt-to-equity is in the table above, but it is not calculated and a leverage claim is sent to no agent, so the label is Insufficient Evidence. The narrative agent is not asked to divide debt by equity.
 
 A debt amount, such as "debt is over $100 billion", is not one of these calculations. The narrative agent quotes that figure from a stored filing passage.
 
@@ -375,10 +388,10 @@ Adjusted EBITDA, buybacks, dividends, a cash balance, homes sold, attendance, us
 | Type | Supported when | Otherwise |
 |---|---|---|
 | Historical growth (revenue, operating income, operating cash flow, or diluted EPS), net income growth, profitability, cash, liquidity | The filing matches the value, the direction, and the period in section 11 | Missing period or missing tag: Insufficient Evidence |
-| Leverage | Never, until the financial agent returns debt ÷ equity | Insufficient Evidence. The narrative agent cannot calculate the ratio. |
+| Leverage | Never. No agent is called, because debt ÷ equity is not calculated | Insufficient Evidence. The narrative agent cannot calculate the ratio either. |
 | Demand attribution | A filing gives that driver's share of growth and names no other driver | Any weaker company statement: Partially Supported. A number with no driver: Insufficient Evidence |
 | Continuation | Never | Management says "expects" or gives guidance: Partially Supported. "Will" or "proves" overstates that. |
-| Comparative | A named measure across two companies in the table is checked once per company, then the figures are compared. A ranking with no measure, such as biggest winner, stays Insufficient Evidence. |
+| Comparative | Never: a ranking with no measure, such as biggest winner, stays Insufficient Evidence. A named measure across two companies in the table is split into one claim per company in section 4, checked as that measure, and the figures are compared. | Insufficient Evidence |
 | Not in the table | A stored filing states the claim | An earnings remark that states it: Partially Supported. Nothing in the stored filings or remarks: Insufficient Evidence. That is the out-of-scope judgment. |
 | Business risk | The 10-K or 10-Q risk factors state that risk | An earnings remark that states it: Partially Supported. Otherwise the passage can only count as counter-evidence on another claim. |
 

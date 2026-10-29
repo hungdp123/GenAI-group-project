@@ -268,8 +268,6 @@ def choose_line(
         if in_video:
             return LineChoice([item[1].text for item in in_video], confirmed_video)
         spoken = _transcript_hits(focus, posts, confirmed_video, ticker)
-        if not spoken:
-            spoken = _transcript_hits(focus, posts, confirmed_video, ticker, strict_figure=False)
         if spoken:
             return LineChoice([item.text for item in spoken], confirmed_video)
         lexical = _lexical_hits(focus, claims, posts, confirmed_video, ticker)
@@ -310,6 +308,11 @@ def _lines_to_check(
     return found[:8]
 
 
+def _states_figure(focus: str) -> bool:
+    """The prompt names a number. A different number is not checked until the user agrees."""
+    return any(parse_fields(part).values for part in _parts(focus))
+
+
 def _best_hit(
     focus: str,
     claims: list[tuple[SubClaim, str]],
@@ -324,7 +327,7 @@ def _best_hit(
         if spoken and agreement(focus, spoken[0].text, ticker) > agreement(focus, stored[0][1].text, ticker):
             return spoken[0].text, spoken[0].video_id
         return stored[0][1].text, stored[0][2]
-    if not spoken:
+    if not spoken and not _states_figure(focus):
         spoken = _transcript_hits(focus, posts, None, ticker, strict_figure=False)
     if spoken:
         return spoken[0].text, spoken[0].video_id

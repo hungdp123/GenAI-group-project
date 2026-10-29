@@ -24,6 +24,7 @@ from finsight.agents.claim_extraction.prepare import (
 )
 from finsight.agents.claim_extraction.thesaurus import COMPANY_NAMES, find_mentions, subject_ticker
 from finsight.agents.orchestrator.posts import in_window, load_posts
+from finsight.knowledge.terms import FORECAST_WORDS, NON_GAAP, PERSONAL_GAIN, mask_other_margins
 from finsight.agents.orchestrator.routing import INFLUENCER_CHANNELS
 
 _CHANNELS = frozenset(channel for group in INFLUENCER_CHANNELS.values() for channel in group)
@@ -59,11 +60,9 @@ _ADVICE_OR_PRICE = re.compile(
     flags=re.IGNORECASE,
 )
 _IF_MODAL = re.compile(r"\bif\b.*\b(would|could|might)\b", flags=re.IGNORECASE | re.DOTALL)
-_FORWARD = re.compile(
-    r"\b(guid(?:ed|ance)|expects|expected|forecast|next quarter|next year|"
-    r"just getting started|will continue|going forward|long-term target)\b",
-    flags=re.IGNORECASE,
-)
+# Forward-looking wording: the shared list in finsight/knowledge/terms.py (also used by the financial agent and
+# the Auditor). "As expected" alone is a past result, so bare "expected" is not in it.
+_FORWARD = re.compile(FORECAST_WORDS, flags=re.IGNORECASE)
 _COMPARE = re.compile(
     r"\b(biggest winner|better than|ahead of|cheaper than|dethrone|number two player)\b",
     flags=re.IGNORECASE,
@@ -572,8 +571,11 @@ class Kind:
 
 
 def _classify(text: str) -> Kind | None:
+    text = mask_other_margins(text)          # "margin buyers", "by a wide margin" are not profit margins
     if _ADVICE_OR_PRICE.search(text):
         return None
+    if PERSONAL_GAIN.search(text):
+        return Kind("OTHER")                 # the influencer's own investment gain, not company profit
     if _GARBLED.search(text):
         return Kind("OTHER", reason=GARBLED_REASON)
     if _SEGMENT.search(text) and _AS_COMPANY.search(text):
@@ -646,7 +648,7 @@ def _ocf_growth(text: str) -> bool:
 def _no_financial_formula(text: str) -> bool:
     """A figure the financial agent cannot calculate. Routing stays with the narrative agent."""
     if (_RUN_RATE.search(text) or _EXCLUDING_GAINS.search(text) or _SERVICES_MARGIN.search(text)
-            or _VS_ESTIMATES.search(text)):
+            or _VS_ESTIMATES.search(text) or NON_GAAP.search(text)):
         return True
     return bool(_GROSS_PROFIT.search(text) and not _MARGIN.search(text))
 

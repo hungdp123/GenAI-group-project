@@ -325,9 +325,8 @@ def prepare_narrative_evidence(
         "status": "NO_EVIDENCE" if not items else "PENDING",
         "assessment_status": "PENDING" if items else "ASSESSED",
         "stance": None if items else "UNSUPPORTED",
-        "stance_reason": (
-            None if items else "No source passages were retrieved; the claim cannot be confirmed from this run."
-        ),
+        "stance_reason": None if items else (
+            "No source passages were retrieved; the claim cannot be confirmed from this run."),
         "stance_reason_code": None if items else "NO_RELEVANT_EVIDENCE",
         "supporting_fact_indices": [],
         "contradicting_fact_indices": [],
@@ -349,9 +348,8 @@ def prepare_narrative_evidence(
         "citation_validation": {"passed": None, "errors": [], "status": "NOT_RUN"},
         "consistency_check": {
             "status": "NOT_APPLICABLE",
-            "reason": (
-                "No deterministic semantic or numeric stance correction; citation checks do not prove entailment."
-            ),
+            "reason": "No deterministic semantic or numeric stance correction; "
+                      "citation checks do not prove entailment.",
         },
     }
     if not items:

@@ -196,6 +196,39 @@ def test_nothing_close_asks_the_user_to_restate_the_line():
     assert choice.question == NOT_IN_STORED
 
 
+def test_a_stated_figure_absent_before_the_cutoff_retrieves_no_claim():
+    wrong = "Meta recently said the revenue run rate for video generation tools hits 10 billion in the fourth quarter."
+    prompt = "Meta booked $2.4 billion in costs related to legal proceedings last quarter."
+    choice = choose_line(prompt, [], [_post("DVOI6dxSumw", f"Meta is spending. {wrong}")], ticker="META")
+    assert choice.quotes == []
+    assert choice.question == NOT_IN_STORED
+    real = (
+        "what was not accounted for in the earnings per share estimates were "
+        "$2.4 billion in costs related to legal proceedings."
+    )
+    found = choose_line(prompt, [], [_post("B1BJJnJ0TTc", f"Meta reported earnings. {real}")], ticker="META")
+    assert found.question is None
+    assert any("2.4 billion" in quote for quote in found.quotes)
+
+
+def test_a_far_number_on_the_same_measure_retrieves_no_claim():
+    line = ("The stock so far is already growing substantially, but if we look at this on a trailing "
+            "12-month basis, their revenue has grown 22% in the last quarter.")
+    prompt = "Meta revenue grew 33% in the latest quarter."
+    post = _post("DVOI6dxSumw", f"Meta reported. {line}")
+    choice = choose_line(prompt, [], [post], ticker="META")
+    assert choice.quotes == []
+    assert choice.question == NOT_IN_STORED
+    agreed = choose_line(prompt, [], [post], confirmed_video="DVOI6dxSumw", ticker="META")
+    assert agreed.quotes == []
+    assert agreed.question == NOT_IN_STORED
+    close = choose_line(
+        "Meta revenue grew 22% in the latest quarter.", [], [post], ticker="META",
+    )
+    assert close.question is None
+    assert close.quotes == [line]
+
+
 def _post(video_id: str, transcript: str) -> dict:
     return {"video_id": video_id, "upload_date": "2026-07-24", "transcript": transcript}
 

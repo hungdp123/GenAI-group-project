@@ -58,7 +58,7 @@ It **does not give a verdict**. Every piece of evidence it returns has stance NE
 | `cutoff_date` | Resolved by the orchestrator; `None` = latest data | `date(2026, 4, 30)` |
 | `feedback` | `None`, or the Auditor's reason on the retry | `"period is quarter ended 2026-06-30 but the claim names Q1 2026"` |
 | `sub_claim.sub_claim_type` | Always present (required by `SubClaim`). Shown to the model as a hint only: it comes from keywords and is often wrong | `HISTORICAL_GROWTH` |
-| `sub_claim.measure` (optional) | When set, limits what this sub-claim may report. Set on a section 6 expansion (`profitability`, `cash_generation`, `liquidity`, `leverage`) and on a growth child split off a margin sentence (`operating_income`, `diluted_eps`, `operating_cash_flow`) | `"liquidity"` |
+| `sub_claim.measure` (optional) | When set, limits what this sub-claim may report. Set on a section 6 expansion (`profitability`, `cash_generation`, `liquidity`, `leverage`), on a growth child split off a margin sentence (`operating_income`, `diluted_eps`, `operating_cash_flow`), and on a per-measure split row (`revenue`, `net_income`, `operating_margin`, ...). `segment` / `guidance` / `gross_profit` mean nothing to compute | `"liquidity"` |
 | `sub_claim.parent_span` (optional) | The phrase an expansion came from; shown to the model | `"a very strong financial position"` |
 | `sub_claim.user_prompt`, `sub_claim.period` (optional) | Not in `SubClaim` yet (schema 0.5 forbids extra fields). Used when present; `period` is the last resort when the words name none | `"trailing 12-month"` |
 
@@ -66,18 +66,18 @@ One sentence can arrive as several sub-claims with the same `text` (an expansion
 
 ### How it understands the claim
 
-An LLM reads the claim and plans, Python computes, and code enforces the rules.
+Rules decide what to calculate first; the LLM is only the fallback. Python always computes, and code enforces the rules.
 
 | Step | Who | What happens |
 |---|---|---|
-| 1. Understand | The model (team LLM client, `planner.py`) | Its first action is always `understand`: from the words alone it lists each statement about the company (measure, period, stated figure, direction, in this sub-claim's scope or not). Code refuses any other action before it. Only then is the rule-based reading shown, as a cross-check, so the rules cannot steer the reading |
-| 2. Act | The model | Picks one action: `report_growth`, `report_level`, `report_streak`, `list_periods`, `skip` or `finish`, with a short "thought" saying why. A measure outside the sub-claim's `measure` scope is refused |
-| 3. Compute | Python (`tools.py`) | Carries out the action. The formulas, the cut-off, the window and the segment guardrail are enforced here; the model never writes a number |
-| 4. Observe | The model | Sees the result ("OK: +21.8% ...", "NO FIGURE: outside the window", "REFUSED: segment") and chooses the next action, until it finishes |
-| 5. Retry | The model | On a retry, the Auditor's feedback is in its input, so it can choose a different period or measure |
-| Fallback | Rules (`claim_reader.py`) | When no model answers in the action format (the mock provider, no API key, the spend limit), the rules decide |
+| 1. Rules first | `claim_reader.py` | Reads the claim (measure, company, period, exclusions). If it finds at least one measure to compute, those points are computed and **no model is called** (`mode = rules`). The same when it finds none but says why (segment, forecast, adjusted figure, another company's figure). A sub-claim with `measure` = `segment`, `guidance` or `gross_profit` is answered here with a reason and no model call |
+| 2. LLM fallback | The model (`planner.py`) | Called only when the rules find **nothing at all** (no measure and no reason to skip), or on a **retry** with the Auditor's feedback (the rules would give the same answer again). Its first action is always `understand`; then `report_growth`, `report_level`, `report_streak`, `list_periods`, `skip` or `finish`. The rule-based reading is shown to it as a cross-check (`mode = llm`) |
+| 3. Compute | Python (`tools.py`) | Carries out every point. The formulas, the cut-off, the window, the scope and the segment guardrail are enforced here; the model never writes a number |
+| No model available | Rules | The mock provider, no API key or the spend limit: the rules' result stands, and the trace says why the model was not used |
 
-`agent.traces[sub_claim_id]` holds the model's steps (thought, action, result); `agent.readings[sub_claim_id]` holds its `understand` parts; `agent.modes[sub_claim_id]` says `llm` or `rules`. Untrusted text (the claim, the prompt, the feedback) only goes inside the client's data blocks.
+Switches: `FINSIGHT_FINANCIAL_PLANNER=rules_first` (default), `llm` (the previous order: model first, rules as fallback), `rules` (never call the model). `FINSIGHT_FINANCIAL_LLM_ON_RETRY=0` keeps retries on the rules.
+
+`agent.traces[sub_claim_id]` holds the rule-based reading, or why the model was called and its steps (thought, action, result); `agent.readings[sub_claim_id]` holds its `understand` parts; `agent.modes[sub_claim_id]` says `llm` or `rules`. Untrusted text (the claim, the prompt, the feedback) only goes inside the client's data blocks.
 
 **What it reads from the words** (the model's instructions and the rule-based reading follow the same rules)
 

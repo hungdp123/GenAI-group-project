@@ -115,9 +115,7 @@ def fields_match(prompt: ClaimFields, candidate: ClaimFields, *, strict_value: b
         return False
     if prompt.direction and candidate.direction and prompt.direction != candidate.direction:
         return False
-    if prompt.metrics and candidate.metrics and not prompt.metrics <= candidate.metrics:
-        return False
-    if prompt.metrics and not candidate.metrics and not prompt.values:
+    if prompt.metrics and not (candidate.metrics and prompt.metrics <= candidate.metrics):
         return False
     if strict_value and prompt.values and not _values_match(prompt.values, candidate.values):
         return False

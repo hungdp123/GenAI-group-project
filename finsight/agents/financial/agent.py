@@ -7,19 +7,23 @@ Input (one claim per sub-claim; see README section 1):
   feedback                                                           the Auditor's reason on the retry, else None
   (optional) sub_claim.user_prompt                                 only needed when `text` is not narrowed to one claim
 
-How it works (an LLM understands the claim, Python computes, code enforces the rules):
-  1. Understand: the model (team LLM client) reads the claim and decides what it needs. Its first action is
-     always `understand`: from the words alone it lists each statement (measure, period, stated figure,
-     direction, in scope or not); only then is the rule-based reading shown, as a cross-check. It then works one
-     action at a time (planner.py), sees each result before its next step, and the Auditor's feedback on a
-     retry. Its steps are in `agent.traces[sub_claim_id]`, its reading in `agent.readings[sub_claim_id]`.
-     Scope: an explicit `measure` limits what it may report (see SCOPE_BY_MEASURE), because one sentence can
+How it works (rules decide what to calculate first, an LLM only fills the gaps, Python computes):
+  1. Rules first: the rule-based reading (claim_reader.py) reads the claim. When it finds at least one measure
+     to compute, those points are computed directly and no model is called (`agent.modes[...] = "rules"`). The
+     same when it finds none but says why (a segment, a forecast, an adjusted figure, another company's figure),
+     or when the sub-claim's `measure` is "segment", "guidance" or "gross_profit": nothing to compute.
+  2. LLM fallback: the model (planner.py) is called only when the rules find nothing at all, or on a retry
+     with the Auditor's feedback (the rules would only repeat themselves). Its first action is always
+     `understand`; it then works one action at a time and sees each result. The rule-based reading is shown to it
+     as a cross-check. `agent.modes[...] = "llm"`; its steps are in `agent.traces`, its reading in `agent.readings`.
+     If no model answers in the action format (the mock provider, no API key, the spend limit), the rules' result
+     stands (`"rules"`; the trace says why the model was not used).
+     Scope: an explicit `measure` limits what may be reported (see SCOPE_BY_MEASURE), because one sentence can
      arrive as several sub-claims with the same text ("good company" -> four). The type is only a hint.
-  2. Compute: every action runs through deterministic code (tools.py): the formulas, the cut-off and the window
+  3. Compute: every point runs through deterministic code (tools.py): the formulas, the cut-off and the window
      cannot be bypassed, and only tool results become evidence. The model never writes a number.
-  3. Fall back: when no model answers in the action format (the default mock provider, no API key, the spend
-     limit), the rule-based reading (claim_reader.py) decides instead. It is also the model's hint.
-     `agent.modes[sub_claim_id]` says which one was used. FINSIGHT_FINANCIAL_PLANNER=rules forces the rules.
+  FINSIGHT_FINANCIAL_PLANNER: "rules_first" (default, as above), "llm" (model first, rules as fallback: the
+  previous behaviour), "rules" (never call the model). FINSIGHT_FINANCIAL_LLM_ON_RETRY=0 keeps retries on rules.
 
 Measures (knowledge_layer.yaml v0.6):
   growth   revenue, operating income, operating cash flow, diluted EPS, net income: year-on-year growth
@@ -115,11 +119,31 @@ COMPANY_FIELD = "ticker"
 # merged PROFITABILITY_CASH_LEVERAGE split by keyword at load), and a type filter dropped a stated measure in 401
 # of 1,733 financial sub-claims, e.g. "less than 10% earnings growth" typed PROFITABILITY, "operating income shot up
 # 124% giving them a 66.2% operating margin" typed HISTORICAL_GROWTH. The type is shown to the model as a hint.
-SCOPE_BY_MEASURE = {"operating_income": {"OperatingIncome"}, "diluted_eps": {"DilutedEPS"},
+# Single-measure names come from Claim extraction's per-measure split (build.expand_stored_row: "-revenue",
+# "-net_income", "-operating_margin" ...). Without them such a row had no scope and could report its sibling's measure.
+SCOPE_BY_MEASURE = {"operating_income": {"OperatingIncome"}, "diluted_eps": {"DilutedEPS"}, "eps": {"DilutedEPS"},
                     "operating_cash_flow": {"OperatingCashFlow"}, "fcf_margin": {"fcf_margin"},
+                    "revenue": {"Revenue"}, "net_income": {"NetIncome"},
+                    "gross_margin": {"gross_margin"}, "operating_margin": {"operating_margin"},
+                    "net_margin": {"net_margin"}, "free_cash_flow": {"free_cash_flow"},
+                    "current_ratio": {"current_ratio"}, "cash_ratio": {"cash_ratio"},
                     "profitability": {"gross_margin", "operating_margin", "net_margin"},
                     "cash_generation": {"free_cash_flow", "fcf_margin", "OperatingCashFlow"},
                     "liquidity": {"current_ratio", "cash_ratio"}, "leverage": {LEVERAGE}}
+# Claim extraction's measures that mean "nothing for the SEC figures to compute" (knowledge layer: narrative agent).
+GUIDANCE_REASON = "A forecast or guidance: past filings cannot check it (the narrative agent checks guidance)."
+GROSS_PROFIT_REASON = "Gross profit is not a calculated measure; the narrative agent checks it."
+NOT_COMPUTED_MEASURES = {"segment": SEGMENT_REASON, "guidance": GUIDANCE_REASON, "gross_profit": GROSS_PROFIT_REASON}
+
+
+def planner_mode() -> str:
+    """"rules_first" (default), "llm" (model first) or "rules" (never the model)."""
+    mode = os.getenv("FINSIGHT_FINANCIAL_PLANNER", "rules_first").strip().lower()
+    return mode if mode in ("rules_first", "llm", "rules") else "rules_first"
+
+
+def llm_on_retry() -> bool:
+    return os.getenv("FINSIGHT_FINANCIAL_LLM_ON_RETRY", "1").strip().lower() not in ("0", "false", "no")
 
 
 def _type_name(sub_claim) -> str:
@@ -418,9 +442,9 @@ class XbrlFinancialAgent:
 
     # -------------------------------------------------------------- entry point
     def gather(self, sub_claim: SubClaim, cutoff_date: date, feedback: str | None) -> list[EvidenceItem]:
-        """Evidence for one claim. The model reads the claim and plans which figures to compute (planner.py);
-        the rule-based reading (claim_reader.py) is its hint and the fallback when no model is available.
-        `feedback` (the Auditor's note on a retry) is shown to the model."""
+        """Evidence for one claim. The rule-based reading (claim_reader.py) decides what to calculate first; the
+        model (planner.py) is the fallback when the rules find nothing to compute, or on a retry with the
+        Auditor's `feedback` (see the module docstring and FINSIGHT_FINANCIAL_PLANNER)."""
         sid = sub_claim.sub_claim_id
         for log in (self.reasons, self.traces, self.modes, self.readings):
             log.pop(sid, None)
@@ -429,24 +453,57 @@ class XbrlFinancialAgent:
             return self._nothing(sub_claim, "No company on the sub-claim.")
         if ticker not in self.store.tickers:
             return self._nothing(sub_claim, f"{ticker} is not in the SEC data.")
+        measure = getattr(sub_claim, "measure", None)
+        if measure in NOT_COMPUTED_MEASURES:
+            # Claim extraction already decided there is no SEC figure to compute (a rule, so no model call).
+            self.modes[sid] = "rules"
+            self.traces[sid] = f"Claim extraction set measure={measure!r}: nothing to compute."
+            return self._nothing(sub_claim, NOT_COMPUTED_MEASURES[measure])
         prompt = user_prompt(sub_claim)                         # optional: only when `text` is not one claim
         allowed = scope(sub_claim)
         reading = self._scoped(read_claim(text, ticker, prompt, period_field(sub_claim),
                                           context=getattr(sub_claim, "context", None)), allowed)
-        if os.getenv("FINSIGHT_FINANCIAL_PLANNER", "llm").lower() != "rules":
-            try:
-                items, notes, plan = self._plan(sub_claim, cutoff_date, feedback, prompt, reading, allowed)
-                self.modes[sid], self.traces[sid], self.readings[sid] = "llm", plan.trace(), plan.reading
-                return self._finish(sub_claim, items, notes)
-            except planner.PlannerUnavailable as e:
-                self.traces[sid] = f"Planner not used ({e}); the rule-based reading was used."
-        self.modes[sid] = "rules"
+        mode = planner_mode()
+        retry = bool(feedback) and llm_on_retry()
+
+        # 1. Rules first. They have decided when they found a measure to compute, or found none but said why
+        #    (a segment, a forecast, another company's figure ...). The model is asked only when the rules found
+        #    nothing at all, or on a retry with the Auditor's feedback (the rules would repeat themselves).
+        decided = bool(reading.points or reading.notes)
+        if mode == "rules" or (mode == "rules_first" and decided and not retry):
+            return self._by_rules(sub_claim, cutoff_date, reading,
+                                  "Rule-based reading: " + self._describe(reading))
+
+        # 2. LLM: the rules found nothing to compute, it is a retry with feedback, or mode == "llm".
+        why = ("model first (FINSIGHT_FINANCIAL_PLANNER=llm)" if mode == "llm"
+               else "retry with the Auditor's feedback" if retry and decided
+               else "the rules found no measure to compute")
+        try:
+            items, notes, plan = self._plan(sub_claim, cutoff_date, feedback, prompt, reading, allowed)
+        except planner.PlannerUnavailable as e:
+            return self._by_rules(sub_claim, cutoff_date, reading,
+                                  f"LLM fallback ({why}) not used ({e}); the rule-based reading stands: "
+                                  + self._describe(reading))
+        self.modes[sid], self.readings[sid] = "llm", plan.reading
+        self.traces[sid] = f"LLM ({why}).\n" + plan.trace()
+        return self._finish(sub_claim, items, notes)
+
+    def _by_rules(self, sub_claim: SubClaim, cutoff: date, reading: Reading, trace: str) -> list[EvidenceItem]:
+        """Compute every point of the rule-based reading."""
+        sid = sub_claim.sub_claim_id
+        self.modes[sid], self.traces[sid] = "rules", trace
         items, notes = [], list(reading.notes)
         for point in reading.points:
-            new, why = self._answer(sub_claim, cutoff_date, point)
+            new, why = self._answer(sub_claim, cutoff, point)
             items += new
             notes += why
         return self._finish(sub_claim, items, notes)
+
+    @staticmethod
+    def _describe(reading: Reading) -> str:
+        parts = [f"{p.measure} (period {p.period or 'none named'}"
+                 + (f", from {p.period_source}" if p.period_source else "") + ")" for p in reading.points]
+        return "; ".join(parts + reading.notes) or "nothing found"
 
     @staticmethod
     def _scoped(reading: Reading, allowed: set[str] | None) -> Reading:

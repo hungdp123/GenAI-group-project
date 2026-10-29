@@ -207,15 +207,12 @@ def test_single_llm_call_resolves_facts_but_never_accepts_truncated_output(monke
     ("UNSUPPORTED", "UNRESOLVED_CONFLICT", [0], [1], ["The sources disagree on launch scope."]),
 ])
 def test_stance_and_both_sides_keep_exact_source_references(monkeypatch, label, code, support, against, missing):
-    first = (
-        "The platform launched globally in June." if code == "UNRESOLVED_CONFLICT" else "The platform launched in June."
-    )
+    first = ("The platform launched globally in June." if code == "UNRESOLVED_CONFLICT"
+             else "The platform launched in June.")
     second = "Availability was not specified." if code == "PARTIAL_SUPPORT" else "The June launch was US-only."
     items = [item("date", first), item("scope", second)]
-    claim_text = (
-        "The platform launched in the US in June."
-        if label == "SUPPORTED" else "The platform launched globally in June."
-    )
+    claim_text = ("The platform launched in the US in June." if label == "SUPPORTED"
+                  else "The platform launched globally in June.")
     claim = SubClaim(sub_claim_id="sc1", text=claim_text,
                      company_ticker="AAPL", sub_claim_type=SubClaimType.OTHER)
     output = {"facts": [{"evidence_id": i.evidence_id, "source_span_id": "s1"} for i in items],
