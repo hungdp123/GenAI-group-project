@@ -2,6 +2,8 @@
 
 [Back to the full workflow](summary_full_narrative_agent_flow.md) | [Run RAG for a claim](workflow_c_rag.md)
 
+For the separate 108-claim v2 benchmark, see the [retrieval submission status and result locations](retrieval_submission_status.md) (snapshot: 29 October 2026).
+
 This workflow compares retrieval performance first, **without LLM generation**, then runs and evaluates RAG for selected configurations. It uses the current **126-claim CSV** and the **C1-C4 `full_v1` chunks and indexes**. `full_v1` is the index-build version, not the test-dataset name. It does not use the earlier development datasets or their saved scores.
 
 **Local by default:** `run_rag_comparison` and `evaluate_ragas` use Ollama with `qwen3-vl:4b-instruct`, host `http://localhost:11434` and context 20,000 when no model mode is specified. They do not fall back to OpenAI if Ollama is unavailable. API generation requires `--shared-llm`; an explicit `--judge-model` selects the shared provider for judging. Existing OpenAI result folders remain separate from local runs.
@@ -197,7 +199,62 @@ python -u -m scripts.narrative.evaluation.run_rag_comparison --all-cases --strat
 
 For an initial one-claim check, replace `--all-cases` with `--limit 1`; afterward use `--all-cases --resume` to add the remaining claims while preserving saved results. Keep the model/settings/code unchanged when extending the run.
 
-**Output:** saved rankings, exact LLM inputs/responses, selected evidence, quoted facts, cited summaries, citation validation and token/cost usage. Store these separately from the retrieval-only run. The current runner retrieves again for the selected configuration; it does not import the earlier rankings.
+**Output:** saved rankings, exact LLM inputs/responses, selected evidence, quoted facts, cited summaries, citation validation and token/cost usage. Store these separately from the retrieval-only run. By default the runner retrieves again. To generate from an existing capture instead, use `--retrieval-run-dir` as below.
+
+#### Generate from saved retrieval with GPT-5.4
+
+`--retrieval-run-dir` takes the **parent retrieval matrix folder** containing `matrix_configuration.json`. It preserves the saved support/counter rankings and the exact ordered candidate passages returned by the original collector, including any filtering that occurred after ranking. It does not run retrieval, embedding, reranking, or Qdrant. GPT-5.4 still makes paid generation calls when `--shared-llm` is selected.
+
+The source CSV identity, selected case rows, chunk/build, backend, top-k, candidate-k, rerank settings, source hashes, passage text, provenance and candidate order must match. All requested configurations/cases are preflighted before the first model call. The source matrix need not be globally complete when only a completed subset is selected (for example, C1/C2 in the interrupted `retrieval_all_v1` matrix).
+
+For the 108-claim v2 dataset, use these authoritative sources. Paths in the right column are relative to `data/narrative/evaluation/test_claims_v2_result/`:
+
+| Chunk / backends | `--retrieval-run-dir` |
+|---|---|
+| C1 or C2 / any backend | `retrieval_all_v1` |
+| C3 / any backend | `retrieval_C3_v1` |
+| C4 / bm25 or dense | `retrieval_C4_bm25_dense_v1` |
+| C4 / hybrid or r4 | `retrieval_C4_hybrid_r4_v1` |
+
+Start with six cases from C1/BM25:
+
+```powershell
+$env:FINSIGHT_LLM_PROVIDER = 'openai'
+$env:FINSIGHT_LLM_MODEL = 'gpt-5.4'
+
+# Use openai_api_key from private config.yaml instead of an environment key.
+Remove-Item Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
+
+$cases = 'data/narrative/evaluation/test_claims_v2/cases_combined.csv'
+$retrievalRun = 'data/narrative/evaluation/test_claims_v2_result/retrieval_all_v1'
+$ragRun = 'data/narrative/evaluation/test_claims_v2_result/rag_C1_bm25_gpt-5.4_saved_v1'
+
+python -u -m scripts.narrative.evaluation.run_rag_comparison `
+  --cases $cases `
+  --limit 6 `
+  --strategies C1 `
+  --backends bm25 `
+  --build-version full_v1 `
+  --top-k 10 `
+  --candidate-k 50 `
+  --threads 2 `
+  --max-tokens 3000 `
+  --rerank-overflow truncate `
+  --shared-llm `
+  --retrieval-run-dir $retrievalRun `
+  --output-dir $ragRun `
+  --resume
+```
+
+Add `--preflight-only` to validate without generation calls. After reviewing the pilot, replace `--limit 6` with `--all-cases`; keep the source, settings and output folder unchanged. A new model or retrieval source requires a separate output version. The `_saved_v1` suffix separates this mode from earlier runs that performed fresh retrieval.
+
+To select non-contiguous cases, replace `--limit 6` with `--case-ranges 1-20 38-49`. These are inclusive, 1-based **data-row positions in the original CSV**, excluding the header: 32 cases total. Do not combine this option with `--limit` or `--all-cases`. The original CSV remains unchanged, so saved-retrieval dataset hashes still match. Cases execute in original CSV order; invalid, out-of-bounds or overlapping ranges are rejected. For a separate subset experiment, use an output name such as `rag_C1_bm25_gpt-5.4_saved_rows1-20_38-49_v1`. Repeat the same selection with `--resume` to continue it. Changing selection in an existing folder is permitted only when the new case list extends its existing snapshot as an unchanged prefix; inserting previously skipped rows requires a new output folder.
+
+For parallel execution, use one window per chunk and process backends sequentially. Set the source for each backend using the table above; C4's backends come from two different source folders. Each chunk/backend/model combination must have its own generation output folder. Saved-retrieval mode only reads the source folders and does not open their Qdrant storage.
+
+Each generated case contains `retrieval_source.json` with source file hashes, a byte-for-byte copy of the original `retrieval.json`, and the normal `result.json`, `llm_input.json` and `llm_response.json` outputs. `result.json` records `retrieval_reuse` and `new_retrieval_requests: 0`; `retrieval.elapsed_ms` retains the original retrieval latency, not a newly measured search. Changed pinned source artifacts are rejected on resume. Gold fields remain evaluation inputs and are not supplied to the generation prompt.
+
+Score and judge the new `$ragRun` using Step 5. The original retrieval folders and their reports remain unchanged.
 
 ### Step 5. Evaluate selected RAG outputs
 
@@ -386,6 +443,29 @@ Import-Csv -LiteralPath "$ragRun/stance_confusion_matrix.csv" | Format-Table
 `ragas_report.json` contains per-metric status/reasons and coverage; `calls/` retains judge request/response checkpoints. Local token counts and timings are reported, with API cost recorded as zero; hardware/electricity costs are not measured. Do not combine local and OpenAI judge scores as if they came from the same evaluator model.
 
 **Resume and failures:** ordinary `--resume` reuses saved work and permits adding cases under unchanged settings. For generation failures, inspect the cause and add `--retry-generation-errors --resume`; failed attempts are archived and successful/invalid-format outputs are preserved. For failed/interrupted judge requests, inspect the error then use `--retry-errors --resume`. Source/reference, model/provider or substantive code changes require a new compatible output version. Run only one process per output folder. After forced termination, verify no process is running before removing its lock file.
+
+**Windows report-file locks:** the shared JSON writer stages a unique temporary
+file in the destination directory, closes it, then atomically replaces the report.
+Windows access/sharing/lock errors (5/32/33) are retried up to eight times with
+bounded backoff. A persistent failure retains the last good report and the staged
+payload; it does not delete saved case results. Close any viewer or other process
+holding the report and rerun the same command with `--resume` and unchanged
+settings. Already saved `result.json`/`retrieval.json` pairs are reused, and the
+progress report is rebuilt from them. Do not delete the output folder or rename
+a leftover temporary report over the real report manually. Other permission
+errors still fail immediately; retries do not bypass filesystem permissions.
+
+**Parallel dense/hybrid/R4 runs and local Qdrant:** separate result folders still
+share `<STRATEGY>/full_v1/<TICKER>/indexes/qdrant/storage`. Local Qdrant permits
+one open client per storage folder. The loader now waits up to 60 seconds for
+that specific native lock conflict and closes its client after searching or on
+validation failure. It does not bypass/delete Qdrant locks, rebuild vectors,
+change rankings or silently fall back to BM25. Parallel processes may wait when
+they reach the same company; different company/strategy stores remain independent.
+After updating this fix, restart both affected C4 split commands with `--resume`
+so both processes load the waiting behavior. Saved case pairs are reused in the
+same folders. If the timeout persists, check for another C4 process still using
+the store and let it finish or stop it. Do not delete the vector-storage lock.
 
 **Explicit API opt-in:** generation uses `--shared-llm` to select the shared provider/model from private configuration or environment. Judging uses `--judge-model gpt-4o-mini`, or `--shared-llm` for the configured shared model. These options may incur API charges; do not combine them with `--ollama-model`. Historical OpenAI results stay unchanged and require the original model/settings when resumed. The shared API spend guard remains process-specific; local execution does not consume that API budget.
 
