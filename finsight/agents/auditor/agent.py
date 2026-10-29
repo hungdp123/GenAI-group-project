@@ -89,9 +89,10 @@ _NOT_CHECKED = re.compile(r"\bnot checked\b", re.I)   # the financial agent coul
 
 
 def _is_long_history(text: str) -> bool:
-    if _LONG_HISTORY.search(text):
-        return True
-    return bool(_EVER.search(text)) and not (_pcts(text) or _money(text))
+    """A long-history phrase with no figure to check. With a figure, the figure is still audited."""
+    if _LONG_HISTORY.search(text) or _EVER.search(text):
+        return not (_pcts(text) or _money(text))
+    return False
 
 # -- wording -------------------------------------------------------------------------------------
 
@@ -541,10 +542,13 @@ class AuditorAgent:
                                evidence_stances=judged)
         verdict = self._verdict(sub_claim, used, run)
         if verdict is Verdict.SUPPORTED and agent_reason and _NOT_CHECKED.search(agent_reason):
-            verdict = Verdict.PARTIALLY_SUPPORTED   # part of the claim (e.g. "12 consecutive quarters") was not checked
+            verdict = Verdict.PARTIALLY_SUPPORTED
+        if verdict is Verdict.SUPPORTED and _LONG_HISTORY.search(sub_claim.text):
+            verdict = Verdict.PARTIALLY_SUPPORTED   # the long-history part ("all-time", "since 2004") cannot be verified
         return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
                            verdict=verdict, numeric_check=numeric,
                            citation_check=citation, evidence_stances=judged)
+
 
 
     # -- verdict --------------------------------------------------------------------------------
