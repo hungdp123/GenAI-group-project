@@ -1,4 +1,4 @@
-"""End-to-end C1/BM25 defaults and explicit configuration overrides."""
+"""End-to-end C2/hybrid defaults and explicit configuration overrides."""
 
 from pathlib import Path
 import shutil
@@ -11,7 +11,10 @@ from test_narrative_entrypoints import CUTOFF, corpus_root as corpus_root
 
 
 @pytest.mark.parametrize("use_wrappers", [False, True])
-def test_end_to_end_defaults_retrieve_from_c1_with_bm25(corpus_root, monkeypatch, use_wrappers):
+def test_end_to_end_defaults_select_c2_hybrid_for_both_slots(corpus_root, monkeypatch, use_wrappers):
+    from finsight.agents.narrative.corpus.processing.index import search_index
+    from finsight.agents.narrative.retrieval.retriever import CorpusRetriever
+
     monkeypatch.chdir(corpus_root)
     for key in (
         "FINSIGHT_NARRATIVE_CORPUS_ROOT", "FINSIGHT_NARRATIVE_BACKEND",
@@ -24,21 +27,34 @@ def test_end_to_end_defaults_retrieve_from_c1_with_bm25(corpus_root, monkeypatch
         monkeypatch.setenv("FINSIGHT_IMPL_NARRATIVE", "finsight.agents.narrative.stub:NarrativeAgent")
         monkeypatch.setenv("FINSIGHT_IMPL_RETRIEVER", "finsight.agents.narrative.retriever_stub:NarrativeRetriever")
     monkeypatch.setenv("FINSIGHT_NARRATIVE_ANALYSIS", "retrieval")
-    root = Path("data/narrative/processed/chunking_strategies/C1/full_v1")
+    root = Path("data/narrative/processed/chunking_strategies/C2/full_v1")
     monkeypatch.setenv("FINSIGHT_NARRATIVE_TICKER", "META")
     shutil.copytree(corpus_root / "META", root / "META")
+    searched = []
+
+    def vector_matches(self, payload, query, top_k, cutoff_date):
+        # Exercise registry/collector propagation without opening Qdrant or loading a model.
+        assert self.backend == self.last_backend == "hybrid"
+        assert self.index_path == root / "META/indexes/index.json"
+        assert self.qdrant_dir == root / "META/indexes/qdrant"
+        searched.append(query)
+        return search_index(payload, query, top_k, cutoff_date, self.company_ticker)
+
+    monkeypatch.setattr(CorpusRetriever, "_vector_matches", vector_matches)
     registry = AgentRegistry.from_config()
-    claim = SubClaim(sub_claim_id="c1-default", text="Daily active people June 2024",
+    claim = SubClaim(sub_claim_id="c2-default", text="Daily active people June 2024",
                      company_ticker="META", sub_claim_type=SubClaimType.OTHER)
     items = registry.narrative.gather(claim, CUTOFF, None)
     assert items and all(item.company == "META" for item in items)
-    assert registry.narrative.last_search["backend"] == "bm25"
+    assert registry.narrative.last_search["backend"] == "hybrid"
     assert registry.narrative.last_search["index"]["path"] == str((root / "META/indexes/index.json").resolve())
     # Both registry slots search the same selected build.
     if not use_wrappers:
         assert registry.retriever.index_path == root / "META/indexes/index.json"
-    assert registry.retriever.backend == "bm25"
+    assert registry.retriever.backend == "hybrid"
+    before = len(searched)
     assert registry.retriever.retrieve("META daily active people", 3, CUTOFF)
+    assert len(searched) == before + 1
 
 
 @pytest.mark.parametrize("use_wrappers", [False, True])

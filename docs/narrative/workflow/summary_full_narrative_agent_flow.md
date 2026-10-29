@@ -27,6 +27,12 @@ Workflow D evaluates recorded RAG inputs and outputs. Workflow E
 connects the orchestrator to the Narrative processing in Workflow C; its integration
 checks are run separately after configuration or interface changes.
 
+End-to-end calls through `python -m finsight run` default to the saved **C2 `full_v1`**
+company indexes and **hybrid (BM25 + dense)** retrieval. The defaults are defined in
+`finsight/config.py`; environment variables can override them. Matching C2 Qdrant
+vectors are required. See [Workflow E](workflow_e_orchestrator_integration.md#default-chunks-and-retrieval-backend)
+for configuration, session overrides and retrieval-log checks.
+
 ### 1.1 Workflow A — Collect source documents and create manifests
 
 ```mermaid
