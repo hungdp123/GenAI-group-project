@@ -7,6 +7,8 @@ import hashlib
 import json
 import re
 import statistics
+import tempfile
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -117,10 +119,27 @@ def read_json(path: Path) -> dict:
 
 
 def write_json(path: Path, value: dict) -> None:
+    """Publish a complete checkpoint atomically, tolerating brief Windows sharing locks.
+
+    Unique same-directory staging files avoid collisions. Persistent failures retain
+    both the last good destination and the new staging payload for inspection.
+    """
+    payload = json.dumps(value, indent=2, ensure_ascii=False) + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                     prefix=f".{path.name}.", suffix=".tmp", delete=False) as handle:
+        handle.write(payload)
+        temporary = Path(handle.name)
+    for attempt in range(8):
+        try:
+            temporary.replace(path)
+            return
+        except PermissionError as exc:
+            # Access denied / sharing violation / lock violation can be transient
+            # when Windows readers or background scanners hold the destination.
+            if getattr(exc, "winerror", None) not in {5, 32, 33} or attempt == 7:
+                raise
+            time.sleep(min(0.1 * 2 ** attempt, 0.8))
 
 
 def load_cases(path: Path) -> list[dict]:

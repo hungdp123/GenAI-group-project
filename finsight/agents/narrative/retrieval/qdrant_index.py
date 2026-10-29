@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -16,6 +17,33 @@ from finsight.agents.narrative.retrieval.retrieval_experiments import EmbeddingB
 QDRANT_SCHEMA_VERSION = "1.0"
 QDRANT_COLLECTION = "narrative_chunks"
 RRF_K = 60
+
+
+def _open_local_client(client_type: Any, storage: Path, lock_timeout: float) -> Any:
+    """Let Qdrant's native exclusive lock serialize readers in separate processes.
+
+    Output folders do not isolate the underlying company vector store. Retry only
+    this store's lock-conflict error; never bypass the lock or change retrieval.
+    """
+    if lock_timeout < 0:
+        raise ValueError("Qdrant lock timeout must be nonnegative")
+    deadline = time.monotonic() + lock_timeout
+    while True:
+        try:
+            return client_type(path=str(storage))
+        except RuntimeError as exc:
+            message = str(exc)
+            if not (message.startswith("Storage folder ") and str(storage) in message
+                    and " is already accessed by another instance of Qdrant client." in message):
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(
+                    f"Timed out after {lock_timeout:g}s waiting for Qdrant storage {storage}. "
+                    "Another process still owns it. Let that search finish or stop the conflicting "
+                    "run, then resume; do not delete Qdrant's storage lock."
+                ) from exc
+            time.sleep(min(0.2, remaining))
 
 
 def _qdrant_modules():
@@ -128,6 +156,7 @@ def load_qdrant_index(
     *,
     expected_model_name: str | None = None,
     expected_dimension: int | None = None,
+    lock_timeout: float = 60.0,
 ) -> QdrantVectorIndex:
     QdrantClient, _ = _qdrant_modules()
     metadata = json.loads((output_dir / "qdrant_metadata.json").read_text(encoding="utf-8"))
@@ -148,25 +177,27 @@ def load_qdrant_index(
     expected_ids = [chunk["chunk_id"] for chunk in index_payload["chunks"]]
     if metadata.get("chunk_ids") != expected_ids:
         raise ValueError("Qdrant chunk order differs from the BM25 index")
-    client = QdrantClient(path=str(output_dir / "storage"))
-    collection_name = metadata["collection_name"]
-    collection = client.get_collection(collection_name)
-    if collection.points_count != len(expected_ids):
+    client = _open_local_client(QdrantClient, output_dir / "storage", lock_timeout)
+    try:
+        collection_name = metadata["collection_name"]
+        collection = client.get_collection(collection_name)
+        if collection.points_count != len(expected_ids):
+            raise ValueError("Qdrant vector count differs from metadata")
+        vector_config = collection.config.params.vectors
+        collection_dimension = getattr(vector_config, "size", None)
+        if collection_dimension is not None and int(collection_dimension) != int(metadata["dimension"]):
+            raise ValueError("Qdrant collection dimension differs from metadata")
+        return QdrantVectorIndex(
+            client=client,
+            collection_name=collection_name,
+            corpus_fingerprint=metadata["corpus_fingerprint"],
+            model_name=metadata["embedding_model"],
+            chunk_ids=metadata["chunk_ids"],
+            dimension=int(metadata["dimension"]),
+        )
+    except BaseException:
         client.close()
-        raise ValueError("Qdrant vector count differs from metadata")
-    vector_config = collection.config.params.vectors
-    collection_dimension = getattr(vector_config, "size", None)
-    if collection_dimension is not None and int(collection_dimension) != int(metadata["dimension"]):
-        client.close()
-        raise ValueError("Qdrant collection dimension differs from metadata")
-    return QdrantVectorIndex(
-        client=client,
-        collection_name=collection_name,
-        corpus_fingerprint=metadata["corpus_fingerprint"],
-        model_name=metadata["embedding_model"],
-        chunk_ids=metadata["chunk_ids"],
-        dimension=int(metadata["dimension"]),
-    )
+        raise
 
 
 def search_qdrant(

@@ -13,6 +13,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import shutil
 import time
 from unittest.mock import patch
 
@@ -40,6 +41,16 @@ def run(args: argparse.Namespace) -> dict:
     resume = getattr(args, "resume", False)
     prepare_only = getattr(args, "prepare_only", False)
     retrieval_only = getattr(args, "retrieval_only", False)
+    source_dir = getattr(args, "retrieval_source_dir", None)
+    saved_source, saved_origins = None, {}
+    if source_dir is not None:
+        from scripts.narrative.evaluation import saved_retrieval
+
+        source_dir = source_dir.resolve()
+        if retrieval_only:
+            raise ValueError("Saved retrieval inputs require full RAG generation")
+        if output.is_relative_to(source_dir) or source_dir.is_relative_to(output):
+            raise ValueError("Generation output and saved retrieval configuration must not overlap")
     retry_errors = getattr(args, "retry_generation_errors", False)
     if retry_errors and (not resume or retrieval_only):
         raise ValueError("--retry-generation-errors requires --resume and a full RAG run")
@@ -53,13 +64,23 @@ def run(args: argparse.Namespace) -> dict:
         raise ValueError("CSV case IDs must be unique")
     if args.limit < 1:
         raise ValueError("Case limit must be positive")
-    selected = cases[:args.limit]
+    requested_ids = getattr(args, "selected_case_ids", None)
+    if requested_ids is None:
+        selected = cases[:args.limit]
+    else:
+        requested = set(requested_ids)
+        selected = [case for case in cases if case["id"] in requested]
+        if (len(requested) != len(requested_ids) or len(selected) != len(requested_ids)
+                or [case["id"] for case in selected] != requested_ids):
+            raise ValueError("Selected case IDs must exist uniquely and retain original CSV order")
     if len(selected) != args.limit:
         raise ValueError("CSV has fewer cases than the requested pilot limit")
     # Validate the entire selected date column before reading/building any corpus artifacts.
     # Do not infer a date here: cutoff controls look-ahead eligibility and dataset identity.
     bad_dates = []
-    for csv_row, case in enumerate(selected, 2):
+    csv_rows = {case["id"]: row for row, case in enumerate(cases, 2)}
+    for case in selected:
+        csv_row = csv_rows[case["id"]]
         value = case["cut_off"]
         try:
             if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
@@ -71,6 +92,8 @@ def run(args: argparse.Namespace) -> dict:
         examples = "; ".join(bad_dates[:8])
         raise ValueError(f"{args.cases}: {len(bad_dates)} selected cases have a missing/invalid cut_off. "
                          f"Use the reviewed claim/video publication cutoff in YYYY-MM-DD format. {examples}")
+    if source_dir is not None:
+        saved_source = saved_retrieval.validate_configuration(source_dir, args, selected, workspace)
     preflights, reference_cache = {}, {}
     for case in selected:
         if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", case["id"])
@@ -85,7 +108,7 @@ def run(args: argparse.Namespace) -> dict:
                 or build["index_sha256"] != sha(folder / "indexes/index.json")):
             raise ValueError(f"Incomplete or stale build for {case['company']}")
         reference, _, chunks = load_reference(case, workspace, corpus, reference_cache)
-        if args.backend != "bm25":
+        if source_dir is None and args.backend != "bm25":
             vectors = read_json(folder / "indexes/qdrant/qdrant_metadata.json")
             if (vectors["corpus_fingerprint"] != build["corpus_fingerprint"]
                     or vectors["chunk_ids"] != [c["chunk_id"] for c in chunks]
@@ -103,6 +126,15 @@ def run(args: argparse.Namespace) -> dict:
                if "spans" in reference else {}),
             "semantic_labels": "NOT_INDEPENDENTLY_ADJUDICATED",
         }
+        if source_dir is not None:
+            saved_origins[case["id"]] = saved_retrieval.validate_case(
+                source_dir, case, preflights[case["id"]], chunks, args)
+            pinned = output / "cases" / case["id"] / "retrieval_source.json"
+            if pinned.exists() and read_json(pinned) != saved_origins[case["id"]]:
+                raise ValueError(f"Pinned saved retrieval changed for {case['id']}; use a new output version")
+            if not pinned.exists() and any((pinned.parent / name).exists() for name in
+                                           ("result.json", "retrieval.json", "llm_input.json", "llm_response.json")):
+                raise ValueError(f"Missing saved retrieval provenance for existing work: {case['id']}")
     settings = get_settings()
     if not prepare_only and not retrieval_only and not args.ollama_model and settings.llm_provider == "mock":
         raise ValueError("Select --ollama-model or configure a real shared LLM provider")
@@ -136,6 +168,10 @@ def run(args: argparse.Namespace) -> dict:
             Path("finsight/llm/client.py"),
         ]},
     }
+    if saved_source is not None:
+        configuration["saved_retrieval"] = saved_source
+        configuration["code_hashes"]["scripts/narrative/evaluation/saved_retrieval.py"] = sha(
+            Path(saved_retrieval.__file__))
     if (output / "configuration.json").exists():
         previous = read_json(output / "configuration.json")
 
@@ -160,6 +196,8 @@ def run(args: argparse.Namespace) -> dict:
     for case in selected:
         preflight = output / "cases" / case["id"] / "preflight.json"
         write_json(preflight, preflights[case["id"]])
+        if source_dir is not None:
+            write_json(preflight.parent / "retrieval_source.json", saved_origins[case["id"]])
     if prepare_only:
         return {"status": "PREFLIGHT_PASSED", "case_count": len(selected), "records": []}
     original_collector = basic_rag.NarrativeEvidenceAgent
@@ -173,6 +211,11 @@ def run(args: argparse.Namespace) -> dict:
 
     class CapturedCollector(original_collector):
         def __init__(self, *positional, **keywords):
+            if source_dir is not None:
+                # Do not initialize a live collector or any retrieval/model backend.
+                captured["collector"] = self
+                self.last_search = None
+                return
             super().__init__(*positional, **keywords)
             captured["collector"] = self
             if args.backend != "bm25":
@@ -201,6 +244,20 @@ def run(args: argparse.Namespace) -> dict:
                     )
 
                 self.retriever_factory = factory
+
+        def gather(self, sub_claim, cutoff_date, feedback=None):
+            if source_dir is None:
+                return super().gather(sub_claim, cutoff_date, feedback)
+            result, trace, _ = saved_retrieval.read_payload(
+                source_dir, case["id"], saved_origins[case["id"]])
+            # Freeze the validated original trace before permitting a model call.
+            source_trace = source_dir / "cases" / case["id"] / "retrieval.json"
+            shutil.copyfile(source_trace, current / "retrieval.json")
+            if sha(current / "retrieval.json") != saved_origins[case["id"]]["sha256"]["retrieval.json"]:
+                raise ValueError(f"Saved retrieval trace changed while copying {case['id']}")
+            self.last_search = trace
+            captured["saved_result"] = result
+            return saved_retrieval.evidence_items(result)
 
     def save_response(response):
         write_json(current / "llm_response.json", asdict(response))
@@ -255,7 +312,15 @@ def run(args: argparse.Namespace) -> dict:
                     retrieval_only=retrieval_only,
                 )
                 trace = captured["collector"].last_search
-                write_json(current / "retrieval.json", trace)
+                if source_dir is None:
+                    write_json(current / "retrieval.json", trace)
+                else:
+                    # Keep the original directional rankings byte-for-byte. Candidate
+                    # filtering/order was captured in the source result, not recomputed.
+                    result["retrieval"] = captured["saved_result"]["retrieval"]
+                    result["retrieval_reuse"] = {**saved_source, **saved_origins[case["id"]],
+                                                "new_retrieval_requests": 0,
+                                                "elapsed_ms_note": "Original saved retrieval latency; no new search"}
                 write_json(current / "result.json", result)
             records.append({"id": case["id"], "status": result["status"],
                             "reused": reused,
@@ -269,6 +334,9 @@ def run(args: argparse.Namespace) -> dict:
                       "unknown_usage_cases": sum(r["llm"].get("input_tokens") is None for r in records),
                       "retrieval_only": retrieval_only,
                       "ragas": "NOT_RUN"}
+            if source_dir is not None:
+                report["saved_retrieval"] = saved_source
+                report["new_retrieval_requests"] = 0
             write_json(output / "report.json", report)
             print(f"{case['id']}: {result['status']}", flush=True)
             fatal = ("SpendLimitExceeded", "insufficient_quota", "credit_balance_exhausted", "MissingAPIKey",
