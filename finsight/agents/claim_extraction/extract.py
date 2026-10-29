@@ -94,6 +94,35 @@ def stored_rows(path: Path):
         yield from expand_stored_row(row)
 
 
+# The claim catalog (claim_update_v3.jsonl, ~30 MB) is read and indexed by video once per process, and re-read only
+# when the file changes. Splitting a row (expand_stored_row) is the slow part (~10 s for every row), so only the rows of
+# the videos a question needs are split. A run used to read and split the whole file 2-4 times per question.
+_CATALOG_CACHE: dict[str, tuple[tuple[float, int], dict[str, list[tuple[int, dict]]]]] = {}
+
+
+def _rows_by_video(path: Path) -> dict[str, list[tuple[int, dict]]]:
+    """{video id: [(line number, row), ...]} for the whole catalog, cached until the file changes."""
+    stat = path.stat()
+    key, stamp = str(path.resolve()), (stat.st_mtime, stat.st_size)
+    cached = _CATALOG_CACHE.get(key)
+    if cached is None or cached[0] != stamp:
+        index: dict[str, list[tuple[int, dict]]] = {}
+        for number, row in enumerate(iter_claim_records(path)):
+            index.setdefault(str(row.get("video_id") or ""), []).append((number, row))
+        _CATALOG_CACHE[key] = cached = (stamp, index)
+    return cached[1]
+
+
+def video_rows(path: Path, video_ids: set[str]) -> list[dict]:
+    """The stored rows of these videos, split into one row per result, in file order (as stored_rows gives them).
+    Callers must not modify the returned rows: they are shared with the cache."""
+    from finsight.agents.claim_extraction.build import expand_stored_row
+
+    index = _rows_by_video(path)
+    picked = sorted((pair for vid in video_ids for pair in index.get(str(vid), [])), key=lambda pair: pair[0])
+    return [piece for _number, row in picked for piece in expand_stored_row(row)]
+
+
 def load_stored_claims(path: Path, video_id: str | None, company_ticker: str | None) -> list[SubClaim] | None:
     """Sentences stored for this post when the corpus was built.
 
@@ -104,9 +133,7 @@ def load_stored_claims(path: Path, video_id: str | None, company_ticker: str | N
         return None
     found = False
     claims: list[SubClaim] = []
-    for row in stored_rows(path):
-        if str(row.get("video_id") or "") != video_id:
-            continue
+    for row in video_rows(path, {video_id}):
         found = True
         ticker = row.get("company_ticker")
         if company_ticker and ticker and ticker != company_ticker:
@@ -137,10 +164,8 @@ def load_claim_rows(
     if not video_ids or not path.exists():
         return []
     rows: list[tuple[SubClaim, str]] = []
-    for row in stored_rows(path):
+    for row in video_rows(path, {str(v) for v in video_ids}):
         video_id = str(row.get("video_id") or "")
-        if video_id not in video_ids:
-            continue
         ticker = row.get("company_ticker")
         if company_ticker and ticker and ticker != company_ticker:
             continue
@@ -217,9 +242,7 @@ def load_stored_reasons(path: Path, video_id: str | None, company_ticker: str | 
     if not video_id or not path.exists():
         return {}
     reasons: dict[str, str] = {}
-    for row in stored_rows(path):
-        if str(row.get("video_id") or "") != video_id:
-            continue
+    for row in video_rows(path, {video_id}):
         ticker = row.get("company_ticker")
         if company_ticker and ticker and ticker != company_ticker:
             continue
