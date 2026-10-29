@@ -597,14 +597,24 @@ class Nodes:
                 screened.append(item)
         return screened
 
+    def _agent_reason(self, state: FinSightState, sub_claim_id: str) -> str | None:
+        """What the financial agent said it could not check (it keeps this in `reasons`)."""
+        if "financial" not in state.routing_plan[sub_claim_id].collectors:
+            return None
+        reasons = getattr(self.ctx.registry.financial, "reasons", None)
+        return reasons.get(sub_claim_id) if isinstance(reasons, dict) else None
+
+
     # -- 7. audit -----------------------------------------------------------
 
     def audit(self, state: FinSightState) -> dict[str, Any]:
         sub_claims = {c.sub_claim_id: c for c in state.sub_claims}
 
         def run(sub_claim_id: str) -> tuple[str, AuditResult | None, Exception | None]:
+            reason = self._agent_reason(state, sub_claim_id)
+            extra = (reason,) if reason else ()
             result, error = self._call("auditor", self.ctx.registry.auditor.audit, sub_claims[sub_claim_id],
-                                       state.evidence.get(sub_claim_id, []), sub_claim_id=sub_claim_id)
+                                       state.evidence.get(sub_claim_id, []), *extra, sub_claim_id=sub_claim_id)
             if error is None and not (isinstance(result, AuditResult) and result.sub_claim_id == sub_claim_id):
                 error = TypeError("auditor did not return an AuditResult for this sub-claim")
             return sub_claim_id, result, error

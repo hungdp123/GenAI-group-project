@@ -85,6 +85,7 @@ _LONG_HISTORY = re.compile(
 # "best quarter ever, $81.6 billion, up 85%": the superlative cannot be checked, but the figures can. "ever" only
 # short-circuits to INSUFFICIENT when the line states no figure the record could confirm.
 _EVER = re.compile(r"\bever\b", re.I)
+_NOT_CHECKED = re.compile(r"\bnot checked\b", re.I)   # the financial agent could not check part of the claim
 
 
 def _is_long_history(text: str) -> bool:
@@ -339,7 +340,9 @@ def _threshold(text: str) -> _Threshold | None:
 
 def _multiple(text: str) -> tuple[float, float] | None:
     for stem, band in _MULTIPLE.items():
-        if re.search(rf"\b{stem}\w*", text, re.I):
+        # "double-digit growth" is a size of growth, not "revenue doubled"
+        if re.search(rf"\b{stem}\w*\b(?![\s-]*digit)", text, re.I):
+
             return band
     return None
 
@@ -462,7 +465,8 @@ class AuditorAgent:
         self._use_llm = use_llm
 
     # -- entry point ----------------------------------------------------------------------------
-    def audit(self, sub_claim: SubClaim, evidence: list[EvidenceItem]) -> AuditResult:
+    def audit(self, sub_claim: SubClaim, evidence: list[EvidenceItem],
+          agent_reason: str | None = None) -> AuditResult:
         if not evidence:
             return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
                                verdict=Verdict.INSUFFICIENT_EVIDENCE)
@@ -535,9 +539,13 @@ class AuditorAgent:
                                verdict=Verdict.INSUFFICIENT_EVIDENCE, failure_reasons=reasons,
                                numeric_check=numeric, citation_check=citation, feedback_for_retry=feedback,
                                evidence_stances=judged)
+        verdict = self._verdict(sub_claim, used, run)
+        if verdict is Verdict.SUPPORTED and agent_reason and _NOT_CHECKED.search(agent_reason):
+            verdict = Verdict.PARTIALLY_SUPPORTED   # part of the claim (e.g. "12 consecutive quarters") was not checked
         return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
-                           verdict=self._verdict(sub_claim, used, run), numeric_check=numeric,
+                           verdict=verdict, numeric_check=numeric,
                            citation_check=citation, evidence_stances=judged)
+
 
     # -- verdict --------------------------------------------------------------------------------
     @staticmethod
