@@ -437,6 +437,68 @@ def test_llm_can_challenge_a_passage_that_shares_no_words_with_the_sub_claim():
     assert r.passed and r.evidence_stances["N1"] is Stance.CHALLENGING and r.verdict is Verdict.CONTRADICTED
 
 
+def test_spoken_filler_does_not_hide_a_stated_data_center_figure():
+    claim = SubClaim(
+        sub_claim_id="amd",
+        text="But look specifically at data center revenue which reached 6.7 billion that climbed 107% year-over-year.",
+        sub_claim_type=SubClaimType.OTHER, company_ticker="AMD", measure="segment",
+    )
+    passage = (
+        "Data Center net revenue of $6.7 billion for the three months ended June 27, 2026 "
+        "increased by 107%, compared with $3.2 billion in the prior year period."
+    )
+    r = AuditorAgent(use_llm=False).audit(claim, [_text_item("amd", passage, company="AMD")])
+    assert r.passed and r.verdict is Verdict.SUPPORTED
+    assert r.evidence_stances["N1"] is Stance.SUPPORTING
+
+
+def test_llm_rejects_a_percent_match_when_now_is_unestablished():
+    seen = {}
+
+    def responder(system, prompt):
+        seen["prompt"] = prompt
+        return "NEUTRAL"
+
+    set_mock_responder(responder)
+    claim = SubClaim(
+        sub_claim_id="amd", text="Now AMD data center revenue 107% growth.",
+        sub_claim_type=SubClaimType.OTHER, company_ticker="AMD", measure="segment",
+    )
+    passage = "AMD data center revenue grew 107% year-over-year."
+    review = {
+        "stance": "UNSUPPORTED",
+        "stance_reason": "Now is not established by the filing.",
+        "summary": ["Data center revenue grew 107%."],
+    }
+    r = AuditorAgent(use_llm=True).audit(
+        claim, [_text_item("amd", passage, company="AMD")],
+        "A segment or product figure: the SEC data only has company-wide totals.",
+        review,
+    )
+    assert r.evidence_stances["N1"] is Stance.NEUTRAL
+    assert not r.passed
+    assert r.review_note is not None
+    assert "Narrative UNSUPPORTED" in r.review_note and "N1 NEUTRAL" in r.review_note
+    assert '<data name="narrative_reason">' in seen["prompt"]
+    assert '<data name="financial_note">' in seen["prompt"]
+
+
+def test_llm_entailment_keeps_the_percent_match_and_records_the_disagreement():
+    set_mock_responder(lambda system, prompt: "ENTAILS")
+    claim = SubClaim(
+        sub_claim_id="amd", text="Now AMD data center revenue 107% growth.",
+        sub_claim_type=SubClaimType.OTHER, company_ticker="AMD", measure="segment",
+    )
+    review = {"stance": "UNSUPPORTED", "stance_reason": "Now is not established by the filing.", "summary": []}
+    r = AuditorAgent(use_llm=True).audit(
+        claim, [_text_item("amd", "AMD data center revenue grew 107% year-over-year.", company="AMD")],
+        narrative_review=review,
+    )
+    assert r.passed and r.evidence_stances["N1"] is Stance.SUPPORTING
+    assert r.review_note is not None and "Narrative UNSUPPORTED" in r.review_note
+    assert "N1 ENTAILS" in r.review_note
+
+
 def test_llm_neutral_on_an_off_topic_passage_is_still_ignored():
     set_mock_responder(lambda system, prompt: "NEUTRAL")
     item = _text_item("sc1", "The company declared a quarterly dividend payable in September.")

@@ -35,8 +35,9 @@ evidence: `comparison_value` (the prior-year figure of a level metric) when pres
 (percents, dollar amounts, or a plain pair such as "2.60 vs 2.98").
 
 Entailment ("does the cited passage support the sub-claim?") is rule-based in mock mode so the tests are
-deterministic. With a real LLM provider, `complete()` is asked as well; it can only downgrade a SUPPORTING
-judgment or add CHALLENGING, never create support on its own.
+deterministic. With a real LLM provider, `complete()` also reads the financial skip reason and the narrative
+stance, reason, and summary. It can downgrade a keyword match or add CHALLENGING. It cannot create support
+the rules did not already find, and it cannot change a number check. OpenAI calls use gpt-5.4.
 """
 
 from __future__ import annotations
@@ -120,10 +121,13 @@ _QOQ_CLAIM = _QOQ
 
 _STOP = set("a an the of in on at to for by is are was were be been being it its this that these those and or but "
             "with as from into than then so such not no over under per also has have had will would can may "
-            "company x year years quarter strongly very".split())
+            "company x year years quarter strongly very "
+            "look looking specifically which just really actually here basically".split())
 _SYNONYMS = {
     "grew": "grow", "growth": "grow", "growing": "grow", "increase": "grow", "increased": "grow",
     "increases": "grow", "rose": "grow", "rise": "grow", "rising": "grow", "up": "grow",
+    "climbed": "grow", "climb": "grow", "climbing": "grow", "climbs": "grow",
+    "reached": "", "reach": "", "reaches": "", "reaching": "",
     "driven": "driv", "drive": "driv", "drives": "driv", "driving": "driv", "due": "driv",
     "attributable": "driv", "result": "driv", "resulting": "driv", "reflecting": "driv", "fueled": "driv",
     "primarily": "", "mainly": "", "largely": "",
@@ -259,7 +263,7 @@ def _stem(word: str) -> str:
 
 def _stems(text: str, drop: set[str] | None = None) -> set[str]:
     out = set()
-    for word in re.findall(r"[A-Za-z][A-Za-z\-]+|\d+", text):
+    for word in re.findall(r"[A-Za-z]{2,}|\d+", text):
         if word.lower() in _STOP:
             continue
         stem = _stem(word)
@@ -453,6 +457,7 @@ class _Run:
     numeric_checks: list[NumericCheck] = field(default_factory=list)
     citation_checks: list[CitationCheck] = field(default_factory=list)
     numeric_ok: list[bool] = field(default_factory=list)   # stated-number comparisons that were possible
+    model_words: list[str] = field(default_factory=list)
 
     def add(self, item: EvidenceItem, reason: str, hint: str) -> None:
         self.defects.append(_Defect(item.evidence_id, reason, hint))
@@ -467,17 +472,19 @@ class AuditorAgent:
 
     # -- entry point ----------------------------------------------------------------------------
     def audit(self, sub_claim: SubClaim, evidence: list[EvidenceItem],
-          agent_reason: str | None = None) -> AuditResult:
+          agent_reason: str | None = None, narrative_review: dict | None = None) -> AuditResult:
+        note = _review_note(narrative_review, [])
         if not evidence:
             return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
-                               verdict=Verdict.INSUFFICIENT_EVIDENCE)
+                               verdict=Verdict.INSUFFICIENT_EVIDENCE, review_note=note)
         if _is_long_history(sub_claim.text):
             return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
-                               verdict=Verdict.INSUFFICIENT_EVIDENCE)
+                               verdict=Verdict.INSUFFICIENT_EVIDENCE, review_note=note)
         if _out_of_window(sub_claim, evidence):     # the stated amount belongs to a period the record does not cover
             return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
                                verdict=Verdict.INSUFFICIENT_EVIDENCE,
-                               evidence_stances={i.evidence_id: Stance.NEUTRAL for i in evidence})
+                               evidence_stances={i.evidence_id: Stance.NEUTRAL for i in evidence},
+                               review_note=note)
         run = _Run()
         stances: list[Stance] = []
         expected = _expected_concepts(sub_claim)
@@ -497,7 +504,10 @@ class AuditorAgent:
                 stances.append(Stance.NEUTRAL)          # an extra metric next to the right one: ignore it, no retry
                 unusable.append((item, f"metric {item.metric_name} is not what the sub-claim is about"))
                 continue
-            stance, why = self._numeric_stance(sub_claim, item) if numeric else self._text_stance(sub_claim, item)
+            stance, why = (
+                self._numeric_stance(sub_claim, item) if numeric
+                else self._text_stance(sub_claim, item, run, agent_reason, narrative_review)
+            )
             if stance is Stance.NEUTRAL and item.stance is Stance.CHALLENGING:
                 stance, why = Stance.CHALLENGING, ""    # collector flagged counter-evidence we cannot confirm: keep it
             stances.append(stance)
@@ -532,22 +542,24 @@ class AuditorAgent:
             return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=False,
                                verdict=Verdict.INSUFFICIENT_EVIDENCE, failure_reasons=reasons,
                                numeric_check=numeric, citation_check=citation, feedback_for_retry=hint,
-                               evidence_stances=judged)
+                               evidence_stances=judged, review_note=_review_note(narrative_review, run.model_words))
         if run.defects:
             reasons = [f"{d.evidence_id}: {d.reason}" for d in run.defects]
             feedback = " ".join(f"{d.evidence_id}: {d.hint}" for d in run.defects)
             return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=False,
                                verdict=Verdict.INSUFFICIENT_EVIDENCE, failure_reasons=reasons,
                                numeric_check=numeric, citation_check=citation, feedback_for_retry=feedback,
-                               evidence_stances=judged)
+                               evidence_stances=judged, review_note=_review_note(narrative_review, run.model_words))
         verdict = self._verdict(sub_claim, used, run)
         if verdict is Verdict.SUPPORTED and agent_reason and _NOT_CHECKED.search(agent_reason):
             verdict = Verdict.PARTIALLY_SUPPORTED
         if verdict is Verdict.SUPPORTED and _LONG_HISTORY.search(sub_claim.text):
-            verdict = Verdict.PARTIALLY_SUPPORTED   # the long-history part ("all-time", "since 2004") cannot be verified
+            # "all-time" or "since 2004" cannot be verified from the corpus window.
+            verdict = Verdict.PARTIALLY_SUPPORTED
         return AuditResult(sub_claim_id=sub_claim.sub_claim_id, passed=True,
                            verdict=verdict, numeric_check=numeric,
-                           citation_check=citation, evidence_stances=judged)
+                           citation_check=citation, evidence_stances=judged,
+                           review_note=_review_note(narrative_review, run.model_words))
 
 
 
@@ -746,12 +758,15 @@ class AuditorAgent:
         backs = change > 0 if direction == "up" else change < 0
         return (Stance.SUPPORTING if backs else Stance.CHALLENGING), ""
 
-    def _text_stance(self, sub_claim: SubClaim, item: EvidenceItem) -> tuple[Stance, str]:
+    def _text_stance(
+        self, sub_claim: SubClaim, item: EvidenceItem, run: _Run,
+        agent_reason: str | None, narrative_review: dict | None,
+    ) -> tuple[Stance, str]:
         """SUPPORTING if the passage states the sub-claim, CHALLENGING if it rules it out or says the opposite,
         otherwise NEUTRAL with the reason. Rule-based; with a real LLM the model may only downgrade or challenge."""
         text, passage = sub_claim.text, item.content
         if sub_claim.sub_claim_type.value == "CONTINUATION":
-            return self._continuation_stance(sub_claim, item)
+            return self._continuation_stance(sub_claim, item, run, agent_reason, narrative_review)
         # Words that only say WHEN ("Q4 2025") or HOW MUCH the bound is ("over 100%") are not the topic: leave them
         # out of the key words, or a passage that states the claim in other words fails the coverage test.
         threshold = _threshold(text)
@@ -791,16 +806,24 @@ class AuditorAgent:
             rules_ok, why = False, f"only {coverage:.0%} of the sub-claim's key words appear"
         if self._llm_enabled():     # no word-overlap gate: a challenge often shares no words with the claim;
             # an off-topic passage comes back NEUTRAL and is ignored, and the model can never create support.
-            verdict = self._ask_llm(text, passage)
+            verdict = self._ask_llm(text, passage, agent_reason, narrative_review)
+            if verdict:
+                run.model_words.append(f"{item.evidence_id} {verdict}")
             if verdict == "CONTRADICTS":
                 return Stance.CHALLENGING, "the model judged the passage contradicts the sub-claim"
             if rules_ok and verdict not in (None, "ENTAILS"):
                 return Stance.NEUTRAL, f"the model judged the passage {verdict.lower()}"
+            # Filler can miss the word-overlap bar. ENTAILS may confirm a passage that already has the figure.
+            if verdict == "ENTAILS" and not rules_ok and why.startswith("only "):
+                return Stance.SUPPORTING, ""
         if rules_ok:
             return Stance.SUPPORTING, ""
         return Stance.NEUTRAL, f"the passage does not state or contradict the sub-claim ({why})"
 
-    def _continuation_stance(self, sub_claim: SubClaim, item: EvidenceItem) -> tuple[Stance, str]:
+    def _continuation_stance(
+        self, sub_claim: SubClaim, item: EvidenceItem, run: _Run,
+        agent_reason: str | None, narrative_review: dict | None,
+    ) -> tuple[Stance, str]:
         """"Growth is just getting started": what counts is a forward-looking statement (guidance, outlook, "expects"),
         not word overlap with the claim's wording. Pressure / decline / "remain elevated" in it is counter-evidence.
         Rule-based approximation; the knowledge layer caps this type at PARTIALLY_SUPPORTED, Tier 2."""
@@ -812,7 +835,9 @@ class AuditorAgent:
         if stance is None:
             return Stance.NEUTRAL, "the forward-looking statement says nothing about growth continuing or slowing"
         if self._llm_enabled():
-            verdict = self._ask_llm(sub_claim.text, passage)
+            verdict = self._ask_llm(sub_claim.text, passage, agent_reason, narrative_review)
+            if verdict:
+                run.model_words.append(f"{item.evidence_id} {verdict}")
             if verdict == "CONTRADICTS":
                 return Stance.CHALLENGING, "the model judged the passage contradicts the sub-claim"
             if stance is Stance.SUPPORTING and verdict not in (None, "ENTAILS"):
@@ -824,13 +849,53 @@ class AuditorAgent:
             return self._use_llm
         return get_settings().llm_provider != "mock"
 
-    @staticmethod
-    def _ask_llm(sub_claim_text: str, passage: str) -> str | None:
+    def _ask_llm(
+        self, sub_claim_text: str, passage: str,
+        agent_reason: str | None, narrative_review: dict | None,
+    ) -> str | None:
+        """Ask whether the passage establishes the claim. A shared percent is not enough.
+
+        OpenAI uses gpt-5.4. Other providers keep the configured model. The answer is one word.
+        """
+        blocks = [data_block("sub_claim", sub_claim_text), data_block("passage", passage)]
+        if agent_reason:
+            blocks.append(data_block("financial_note", agent_reason))
+        review = narrative_review or {}
+        if review.get("stance"):
+            blocks.append(data_block("narrative_stance", str(review["stance"])))
+        if review.get("stance_reason"):
+            blocks.append(data_block("narrative_reason", str(review["stance_reason"])))
+        summary = [sentence for sentence in (review.get("summary") or []) if isinstance(sentence, str) and sentence]
+        if summary:
+            blocks.append(data_block("narrative_summary", " ".join(summary)))
+        model = "gpt-5.4" if get_settings().llm_provider == "openai" else None
         resp = complete(
-            system=DATA_SAFETY_PREAMBLE + "You check whether a quoted passage states, or directly supports, a "
-                   "sub-claim. Answer with exactly one word: ENTAILS, NEUTRAL or CONTRADICTS.",
-            prompt=data_block("sub_claim", sub_claim_text) + "\n" + data_block("passage", passage),
-            max_tokens=200,
+            system=DATA_SAFETY_PREAMBLE + (
+                "You check whether a quoted passage establishes a sub-claim. "
+                "A shared percentage or a few shared words is not enough. "
+                "Weigh every material part of the sentence. "
+                "Now at the start of a spoken sentence is a change of topic, unless the sentence uses it "
+                "to claim the result is happening at the present moment rather than reporting a figure. "
+                "A financial note and a narrative stance are other agents' work. Read them, then decide yourself. "
+                "Answer with exactly one word: ENTAILS, NEUTRAL or CONTRADICTS."
+            ),
+            prompt="\n".join(blocks),
+            model=model,
+            max_tokens=1000,
         )
         match = re.search(r"\b(ENTAILS|NEUTRAL|CONTRADICTS)\b", resp.text.upper())
         return match.group(1) if match else None
+
+
+def _review_note(narrative_review: dict | None, model_words: list[str]) -> str | None:
+    """The narrative stance beside the auditor model's word. Neither one is the verdict by itself."""
+    parts: list[str] = []
+    review = narrative_review or {}
+    stance = review.get("stance")
+    if isinstance(stance, str) and stance:
+        reason = review.get("stance_reason")
+        parts.append(f"Narrative {stance}" + (f": {reason}" if isinstance(reason, str) and reason else ""))
+    if model_words:
+        parts.append("Auditor model: " + "; ".join(model_words))
+    text = " ".join(parts).strip()
+    return text or None

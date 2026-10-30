@@ -49,7 +49,10 @@ class NarrativeAgent(Protocol):
 class Auditor(Protocol):
     """Person 3. Verify numbers by calculation and narrative sub-claims by citation."""
 
-    def audit(self, sub_claim: SubClaim, evidence: list[EvidenceItem]) -> AuditResult: ...
+    def audit(
+        self, sub_claim: SubClaim, evidence: list[EvidenceItem],
+        agent_reason: str | None = None, narrative_review: dict | None = None,
+    ) -> AuditResult: ...
 
 
 @runtime_checkable

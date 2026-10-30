@@ -164,6 +164,8 @@ class StageReporter:
                 from finsight.agents.orchestrator.render import fmt_numeric_check
                 extra += f" numeric {fmt_numeric_check(a.numeric_check)}"
             lines.append(f"{sid:<4} {state}, proposes {a.verdict.value}{extra}")
+            if getattr(a, "review_note", None):
+                lines.append(f"{sid:<4} review {a.review_note}")
             lines.extend(self._stance_lines(sid, a))
         return lines
 

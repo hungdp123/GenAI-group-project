@@ -393,6 +393,7 @@ function checkBody(row) {
       <p>${esc(claim.sub_claim_id)} · ${esc(claim.sub_claim_type)}${claim.measure ? ` · ${esc(claim.measure)}` : ""} · tier ${esc(tier)} · retries ${esc(row.retries_used)}</p>
       ${claim.source_span ? `<p>Quote: ${esc(claim.source_span)}</p>` : ""}
       ${row.rationale ? `<p>Audit: ${esc(row.rationale)}</p>` : ""}
+      ${audit.review_note ? `<p>Review: ${esc(audit.review_note)}</p>` : ""}
       ${row.capped_by ? `<p>Capped: ${esc(row.capped_by)}</p>` : ""}
       ${audit.numeric_label ? `<p>Number: ${esc(audit.numeric_label)}</p>` : ""}
       ${stanceLines(audit)}

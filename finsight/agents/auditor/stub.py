@@ -35,7 +35,10 @@ class StubAuditor:
     def __init__(self) -> None:
         self._attempts: dict[str, int] = defaultdict(int)
 
-    def audit(self, sub_claim: SubClaim, evidence: list[EvidenceItem]) -> AuditResult:
+    def audit(
+        self, sub_claim: SubClaim, evidence: list[EvidenceItem],
+        agent_reason: str | None = None, narrative_review: dict | None = None,
+    ) -> AuditResult:
         self._attempts[sub_claim.sub_claim_id] += 1
         if self._attempts[sub_claim.sub_claim_id] <= _forced_failures().get(sub_claim.sub_claim_id, 0):
             return AuditResult(

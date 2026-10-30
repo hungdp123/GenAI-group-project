@@ -29,7 +29,8 @@ from pydantic import BaseModel, ConfigDict, Field
 # 0.9: SubClaim.context + user_text (period clues); EvidenceItem.period_source (where its period came from).
 
 # 0.10: FinSightState.narrative_reports (stance, reason, and summary from narrative evidence preparation).
-SCHEMA_VERSION = "0.10"
+# 0.11: AuditResult.review_note (narrative stance and the auditor model's judgment; optional).
+SCHEMA_VERSION = "0.11"
 
 
 class _Strict(BaseModel):
@@ -217,6 +218,8 @@ class AuditResult(_Strict):
     feedback_for_retry: str | None = None
     # The Auditor's own judgment of every evidence item (evidence_id -> stance towards the sub-claim).
     evidence_stances: dict[str, Stance] = Field(default_factory=dict)
+    # What the narrative step claimed, and what the auditor's model decided. Empty in mock mode.
+    review_note: str | None = None
 
 
 class AdviceDecision(_Strict):
