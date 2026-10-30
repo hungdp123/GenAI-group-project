@@ -248,6 +248,56 @@ function stageHtml(stage) {
     </li>`;
 }
 
+const POST_NOTES = [
+  "A figure that appears only on a chart, a slide, or an image is not in the stored text, so it was not checked.",
+  "The transcript does not mark who is speaking, so the speaker was not separated.",
+  "This transcript has no timestamps, so the report cannot point to a moment in the video.",
+  "Checked the lines in this post that match the claim in the prompt.",
+];
+const ADVICE_NOTE = "A sentence that told you to buy or sell was removed. The claim and the labels are unchanged.";
+
+function splitCheckedPost(text) {
+  const source = String(text || "");
+  const cuts = [];
+  for (const note of POST_NOTES) {
+    const at = source.indexOf(note);
+    if (at >= 0) cuts.push({ at, text: note, video: "" });
+  }
+  const videoAt = source.indexOf("Video: ");
+  if (videoAt >= 0) {
+    const rest = source.slice(videoAt + "Video: ".length);
+    const url = (rest.split(/\s/)[0] || "").replace(/[.)]+$/, "");
+    cuts.push({ at: videoAt, text: "", video: url });
+  }
+  cuts.sort((left, right) => left.at - right.at);
+  const leadEnd = cuts.length ? cuts[0].at : source.length;
+  return {
+    lead: source.slice(0, leadEnd).trim(),
+    notes: cuts.filter((cut) => cut.text).map((cut) => cut.text),
+    video: (cuts.find((cut) => cut.video) || {}).video || "",
+  };
+}
+
+function splitSummary(text) {
+  const source = String(text || "");
+  if (source.startsWith(ADVICE_NOTE)) {
+    return { advice: ADVICE_NOTE, text: source.slice(ADVICE_NOTE.length).trim() };
+  }
+  return { advice: "", text: source };
+}
+
+function postHtml(assessment) {
+  const parts = splitCheckedPost(assessment.checked_post);
+  if (!parts.lead && !parts.notes.length && !parts.video) return "";
+  const link = parts.video
+    ? `<p class="post-line"><a href="${esc(parts.video)}" target="_blank" rel="noopener">${esc(parts.video)}</a></p>`
+    : "";
+  const notes = parts.notes.length
+    ? `<details class="payload-wrap"><summary>Notes about this video</summary><ul class="video-notes">${parts.notes.map((note) => `<li>${esc(note)}</li>`).join("")}</ul></details>`
+    : "";
+  return `${parts.lead ? `<p class="post-line">${esc(parts.lead)}</p>` : ""}${link}${notes}`;
+}
+
 function renderResult(view) {
   const assessment = view.assessment;
   const head = headline(view);
@@ -272,8 +322,9 @@ function renderResult(view) {
         <a href="#checks">Checks and citations</a>
         <a href="#traceCard">Trace</a>
       </div>
-      ${assessment.checked_post ? `<p class="post-line">${esc(assessment.checked_post)}</p>` : ""}
-      <p class="summary">${esc(assessment.summary || assessment.refusal_reason || assessment.clarification_question || "No summary.")}</p>
+      ${postHtml(assessment)}
+      <p class="summary">${esc(splitSummary(assessment.summary || assessment.refusal_reason || assessment.clarification_question || "No summary.").text)}</p>
+      ${splitSummary(assessment.summary || "").advice ? `<p class="reason">${esc(ADVICE_NOTE)}</p>` : ""}
       ${assessment.as_of_date ? `<p class="reason">Information up to ${esc(assessment.as_of_date)}${view.cutoff_note ? ` — ${esc(view.cutoff_note)}` : ""}.</p>` : ""}
       ${assessment.refusal_reason && !(assessment.summary || "").includes(assessment.refusal_reason) ? `<p class="reason">${esc(assessment.refusal_reason)}</p>` : ""}
       <div class="gate-row">${gates}</div>

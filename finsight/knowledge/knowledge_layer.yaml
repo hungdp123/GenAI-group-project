@@ -19,7 +19,8 @@
 # Sub-claim types not listed here (and OTHER) fall back to `fallback` below.
 #
 # Decided 5 Oct 2026. See docs/decision_rationale.md.
-#   D16  BUSINESS_RISK and claims not in the table: Tier 1 can Support. A Tier 2 remark can at most Partially Support.
+#   D16  BUSINESS_RISK and claims not in the table: a Tier 1 filing or a Tier 2 company remark can Support.
+#        Tier 3 news cannot raise a label.
 #   D22  retry_collectors are empty. A retry does not call the other specialist.
 # Updated 28 Oct 2026: LEVERAGE has no collector (the financial agent cannot calculate debt-to-equity).
 # Updated 26 Oct 2026: the route comes only from this table (no LLM router). A result against analyst
@@ -99,12 +100,12 @@ rules:
   - sub_claim_type: BUSINESS_RISK
     collectors: [narrative]
     retry_collectors: []
-    # DECISION D16: SUPPORTED needs a Tier 1 risk factor. A Tier 2 remark can at most Partially Support.
-    # Tier 1 or Tier 2 challenging evidence blocks SUPPORTED.
+    # DECISION D16: a Tier 1 risk factor or a Tier 2 company remark can Support.
+    # Tier 1 or Tier 2 challenging evidence blocks SUPPORTED. Tier 3 cannot raise a label.
     highest_verdict: SUPPORTED
     tier_requirement: [TIER_1, TIER_2]
     counter_evidence_only: true
-    note: "Supported only when a 10-K or 10-Q risk factor states the risk. A Tier 2 remark is at most Partially Supported. Tier 1 or Tier 2 counter-evidence blocks SUPPORTED. Do not add the financial agent on retry."
+    note: "Supported when a 10-K or 10-Q risk factor states the risk, or when the company's own earnings release or investor remarks state it. Tier 1 or Tier 2 counter-evidence blocks SUPPORTED. News cannot raise the label. Do not add the financial agent on retry."
 
   - sub_claim_type: PERSONALIZED_ADVICE
     collectors: []
@@ -120,4 +121,4 @@ fallback:
   highest_verdict: SUPPORTED
   tier_requirement: [TIER_1, TIER_2]
   counter_evidence_only: true
-  note: "Not labeled out of scope up front. Search the stored documents. Supported only when a Tier 1 passage states the claim. A Tier 2 remark is at most Partially Supported. Nothing in Tier 1 or Tier 2 means INSUFFICIENT_EVIDENCE. Do not invent a formula. Gross-profit growth, a run rate, net income excluding gains, a segment margin, a cost or charge, user counts, and a result against analyst estimates stay here."
+  note: "Not labeled out of scope up front. Search the stored documents. A Tier 1 filing or a Tier 2 company remark that states the claim can Support it. News cannot raise the label. Nothing in Tier 1 or Tier 2 means INSUFFICIENT_EVIDENCE. Do not invent a formula. Gross-profit growth, a run rate, net income excluding gains, a segment margin, a cost or charge, user counts, and a result against analyst estimates stay here."

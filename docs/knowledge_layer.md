@@ -218,7 +218,7 @@ Operating-income growth, operating-cash-flow growth, and diluted earnings-per-sh
 A sentence that fits none of the rows will be checked against the documents stored for that company, then determined whether Out of Scope or not. For example:
 
 - A filing passage that states the claim can Support it.
-- An earnings remark or investor-relations comment can at most Partially Support it.
+- An earnings remark or investor-relations comment that states the claim can Support it.
 - News may be shown. It does not move the label.
 - No new calculation is invented. If the claim needs a number section 11 does not calculate, and no stored passage states that number, the label is Insufficient Evidence.
 - If the filings and the company's own remarks say nothing about the claim, then it is Out of scope. The label is Insufficient Evidence.
@@ -293,7 +293,7 @@ Every stored passage has a trust level from the day it was loaded. A passage wit
 | Level | Source | What it may do |
 |---|---|---|
 | 1 | SEC filings and their tagged numbers: 10-K, 10-Q, the filed management discussion, and the risk factors | Support a past fact when the calculated figure matches the value, the direction, and the period. |
-| 2 | The company's earnings release or investor-relations remarks | Partially Support a forward-looking claim. "Expects" stays "expects." The same remark can Partially Support a business-risk claim, or a claim that is not in the type table, when the remark states it. It cannot support a past number that section 11 calculates. |
+| 2 | The company's earnings release or investor-relations remarks | Support a claim the company stated, including a business-risk claim or a claim that is not in the type table. "Expects" stays "expects." It cannot replace a past number that section 11 calculates from a Tier 1 filing. |
 | 3 | Yahoo Finance company news, up to 10 articles, loaded with the corpus | Context only. It may be shown. It does not move a label up or down. |
 | None | The stored influencer post | The claim under test. A number that appears only here is not evidence. |
 
@@ -301,7 +301,7 @@ When a filing and a press release or a news article disagree, keep the filing's 
 
 A quote must be an exact span of a passage stored at load time. A quote that cannot be found there is blocked.
 
-If the earnings release is in the corpus and the 10-Q is not yet, report the press-release figure as what the company said. The best label is Partially Supported until the filing confirms it.
+If the earnings release is in the corpus and the 10-Q is not yet, the press-release figure is what the company said. That remark can Support the claim. A section 11 number is still taken from the Tier 1 filing when that filing is the check.
 
 A risk-factor passage retrieved while checking some other claim counts as counter-evidence for that claim. It can keep that claim from reaching Supported. It does not replace a Tier 1 number.
 

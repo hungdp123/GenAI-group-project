@@ -546,16 +546,11 @@ def enforce_tier_requirement(
 def cap_tier2_only_support(
     verdict: Verdict, evidence: list[EvidenceItem], rule: KnowledgeRule
 ) -> tuple[Verdict, str | None]:
-    """Tier 2 may support a positive verdict, but SUPPORTED still needs a Tier 1 supporting item."""
-    if verdict is not Verdict.SUPPORTED:
-        return verdict, None
-    if SourceTier.TIER_1 not in rule.tier_requirement or SourceTier.TIER_2 not in rule.tier_requirement:
-        return verdict, None
-    support = eligible_support(evidence, rule)
-    if any(e.source_tier is SourceTier.TIER_1 for e in support):
-        return verdict, None
-    if any(e.source_tier is SourceTier.TIER_2 for e in support):
-        return Verdict.PARTIALLY_SUPPORTED, "Tier 2 evidence can at most Partially Support"
+    """A Tier 2 company remark can Support. Only Tier 3 is barred from raising a label.
+
+    Kept as a guard so the call site stays stable. It no longer lowers Supported.
+    """
+    del evidence, rule
     return verdict, None
 
 

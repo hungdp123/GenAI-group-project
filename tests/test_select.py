@@ -231,6 +231,26 @@ def test_a_stated_figure_absent_before_the_cutoff_retrieves_no_claim():
     assert any("2.4 billion" in quote for quote in found.quotes)
 
 
+def test_a_line_with_only_one_of_two_figures_is_not_the_match():
+    bare = "In fact, 22% this most recent quarter."
+    full = "Alphabet's revenue growing 22% year-over-year to $110 in Q1."
+    only_percent = choose_line(
+        "Alphabet revenue grew 22% to $110 billion last quarter",
+        [],
+        [_post("april", f"Google reported. {bare}")],
+        ticker="GOOGL",
+    )
+    assert only_percent.quotes == []
+    assert only_percent.question == NOT_IN_STORED
+    both = choose_line(
+        "Alphabet revenue grew 22% to $110 billion last quarter",
+        [],
+        [_post("april", f"Google reported. {bare}"), _post("june", full)],
+        ticker="GOOGL",
+    )
+    assert both.quotes == [full]
+
+
 def test_a_named_segment_is_not_offered_against_a_different_product():
     focus = stated_claim(
         "Joseph Carlson said AWS grew 24% year over year in Q4 2025 with a $142 billion revenue run rate.",
