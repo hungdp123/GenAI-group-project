@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from enum import Enum
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,7 +33,9 @@ from pydantic import BaseModel, ConfigDict, Field
 # 0.11: AuditResult.review_note (narrative stance and the auditor model's judgment; optional).
 # 0.12: Claim matching. SubClaim.alignment, FactAlignment, ClaimMatch, FinalAssessment.match +
 #       headline_sub_claim_ids, FinSightState.match. All optional; older payloads still validate.
-SCHEMA_VERSION = "0.12"
+# 0.13: EvidenceItem.source_page + source_url_requirement (optional paid-source provenance).
+SCHEMA_VERSION = "0.13"
+PAID_SOURCE_URL_EXCEPTION = "not_required_user_approved_paid_source"
 
 
 class _Strict(BaseModel):
@@ -215,6 +218,10 @@ class EvidenceItem(_Strict):
     publication_date_precision: str = "day"
     publication_date_basis: str | None = None
     url: str | None = None
+    source_page: str | None = Field(
+        default=None, description="Publisher/platform page, not an individual document URL.")
+    source_url_requirement: str | None = Field(
+        default=None, description="URL exception recorded in canonical source metadata, never inferred by an LLM.")
     citation_span: str | None = None
     produced_by: str = Field(description="Name of the agent that produced this item")
     computed_value: float | None = None
@@ -228,6 +235,18 @@ class EvidenceItem(_Strict):
     period_source: str | None = Field(
         default=None, description="Where the period came from: the line, the preceding sentences, the stated "
                                   "amount, the user's prompt, or the default (latest fiscal year).")
+
+    @property
+    def publisher_page(self) -> str | None:
+        """An explicitly approved HTTP(S) publisher page; it is not a document link."""
+        if self.source_url_requirement != PAID_SOURCE_URL_EXCEPTION:
+            return None
+        page = (self.source_page or "").strip()
+        try:
+            parsed = urlsplit(page)
+        except ValueError:
+            return None
+        return page if parsed.scheme in {"http", "https"} and parsed.netloc else None
 
 
 # ---------------------------------------------------------------------------

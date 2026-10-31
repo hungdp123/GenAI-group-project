@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from finsight.contracts.schemas import (
     SCHEMA_VERSION,
+    ClaimMatch,
     SubClaim,
     SubClaimType,
     DecisionLog,
@@ -17,7 +18,7 @@ from finsight.contracts.schemas import (
 
 
 def test_schema_version():
-    assert SCHEMA_VERSION == "0.12"
+    assert SCHEMA_VERSION == "0.13"
 
 
 def test_extra_fields_forbidden():
@@ -62,3 +63,20 @@ def test_verdict_and_tier_ordering():
 def test_state_and_log_defaults():
     assert FinSightState().sub_claims == []
     assert DecisionLog(request_id="r", input="x").total_tokens == 0
+
+
+def test_paid_source_fields_coexist_with_claim_matching():
+    item = EvidenceItem(
+        evidence_id="e1", sub_claim_id="sc1", stance=Stance.NEUTRAL, content="A quoted statement.",
+        source_tier=SourceTier.TIER_3, doc_type="earnings_call_transcript", company="AMZN",
+        publication_date=date(2026, 4, 29), produced_by="narrative",
+        source_page="https://example.test/", source_url_requirement="not_required_user_approved_paid_source",
+    )
+    claim = SubClaim(sub_claim_id="sc1", text="A quoted statement.", sub_claim_type=SubClaimType.OTHER,
+                     alignment="both")
+    state = FinSightState(
+        sub_claims=[claim], evidence={"sc1": [item]},
+        match=ClaimMatch(status="MATCHED", user_claim=claim.text, quotes=[claim.text], quote_ids=["sc1"]),
+    )
+    assert FinSightState.model_validate_json(state.model_dump_json()) == state
+    assert state.evidence["sc1"][0].publisher_page == "https://example.test/"
