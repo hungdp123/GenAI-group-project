@@ -77,9 +77,12 @@ def _as_of(fa: FinalAssessment) -> str:
 def _evidence(e: EvidenceItem) -> list[str]:
     lines = _wrap(f'"{e.content.strip()}"', indent="        ", first="      - ")
     lines += _wrap(f"Source: {source_label(e)}", indent="          ", first="        ")
-    where = "; ".join(x for x in (e.citation_span, e.url) if x)
+    url = (e.url or "").strip()
+    where = "; ".join(x for x in (e.citation_span, url) if x)
     if where:
         lines += _wrap(f"Where: {where}", indent="          ", first="        ")
+    if not url and e.publisher_page:
+        lines += _wrap(f"Publisher/platform: {e.publisher_page}", indent="          ", first="        ")
     return lines
 
 
@@ -169,7 +172,10 @@ def _cite(e: EvidenceItem) -> str:
     tier = e.source_tier.value.replace("TIER_", "T")
     span = f" [{e.citation_span}]" if e.citation_span else ""
     period = f" (period from {e.period_source})" if e.period_source else ""
-    return f"[{tier} {e.doc_type} {e.publication_date}] {e.content}{period}{span} <{e.url or e.evidence_id}>"
+    url = (e.url or "").strip()
+    link = (f"<{url}>" if url else f"Publisher/platform: <{e.publisher_page}>" if e.publisher_page
+            else f"<{e.evidence_id}>")
+    return f"[{tier} {e.doc_type} {e.publication_date}] {e.content}{period}{span} {link}"
 
 
 def render_technical(fa: FinalAssessment, *, show_evidence: bool = True) -> str:
