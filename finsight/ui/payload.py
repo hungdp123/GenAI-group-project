@@ -99,6 +99,7 @@ def _result(row: SubClaimResult, audit: dict[str, Any] | None) -> dict[str, Any]
 
 def _evidence(item: EvidenceItem) -> dict[str, Any]:
     data = item.model_dump(mode="json")
+    data["publisher_page"] = item.publisher_page
     data["source_label"] = source_label(item)
     data["computed_label"] = fmt_figure(item.computed_value) if item.computed_value is not None else None
     if item.comparison_value is not None:
