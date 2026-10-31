@@ -472,8 +472,13 @@ function evidenceGroup(items, title, tone) {
 }
 
 function evidenceCard(item) {
-  const link = typeof item.url === "string" && /^https?:\/\//.test(item.url)
-    ? `<p class="link"><span>Link</span> <a href="${esc(item.url)}" target="_blank" rel="noopener">${esc(item.url)}</a></p>`
+  const documentUrl = typeof item.url === "string" && /^https?:\/\//.test(item.url) ? item.url : null;
+  const publisherUrl = typeof item.publisher_page === "string" && /^https?:\/\//.test(item.publisher_page)
+    ? item.publisher_page : null;
+  const sourceUrl = documentUrl || publisherUrl;
+  const linkLabel = documentUrl ? "Link" : "Publisher/platform";
+  const link = sourceUrl
+    ? `<p class="link"><span>${linkLabel}</span> <a href="${esc(sourceUrl)}" target="_blank" rel="noopener">${esc(sourceUrl)}</a></p>`
     : "";
   const where = item.citation_span
     ? `<p class="where"><span>Citation</span> ${esc(item.citation_span)}</p>`

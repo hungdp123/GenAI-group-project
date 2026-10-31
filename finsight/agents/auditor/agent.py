@@ -585,7 +585,7 @@ class AuditorAgent:
 
     # -- checks that apply to every item --------------------------------------------------------
     def _hygiene(self, sub_claim: SubClaim, item: EvidenceItem, run: _Run) -> None:
-        if not item.url or not item.citation_span:
+        if not ((item.url or "").strip() or item.publisher_page) or not (item.citation_span or "").strip():
             run.add(item, "no url or citation span, so the quote cannot be checked against its source",
                     "give the source url and the exact citation span.")
         aliases = {a.lower() for a in CORPUS_COMPANIES.get(sub_claim.company_ticker or "", [])}
