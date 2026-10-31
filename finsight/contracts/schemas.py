@@ -10,7 +10,6 @@ from __future__ import annotations
 from datetime import date, datetime
 from enum import Enum
 from typing import Any, Literal
-from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,9 +30,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # 0.10: FinSightState.narrative_reports (stance, reason, and summary from narrative evidence preparation).
 # 0.11: AuditResult.review_note (narrative stance and the auditor model's judgment; optional).
-# 0.12: EvidenceItem.source_page + source_url_requirement (optional paid-source provenance).
+# 0.12: Claim matching. SubClaim.alignment, FactAlignment, ClaimMatch, FinalAssessment.match +
+#       headline_sub_claim_ids, FinSightState.match. All optional; older payloads still validate.
 SCHEMA_VERSION = "0.12"
-PAID_SOURCE_URL_EXCEPTION = "not_required_user_approved_paid_source"
 
 
 class _Strict(BaseModel):
@@ -143,6 +142,40 @@ class ClaimRequest(_Strict):
     requested_cutoff: date | None = None
 
 
+# How one fact in the user's prompt lines up with what the influencer said.
+#   both        the user and the influencer state the same fact          -> verified, counts for the headline
+#   conflict    same fact, different figure or direction                 -> the influencer's version is verified,
+#                                                                           counts for the headline, mismatch shown
+#   quote_only  the influencer said it, the user did not ask about it    -> verified, shown as "also said"
+#   user_only   the user typed it, the influencer did not say it         -> never verified as the influencer's claim
+AlignmentBucket = Literal["both", "conflict", "quote_only", "user_only"]
+
+
+class FactAlignment(_Strict):
+    bucket: AlignmentBucket
+    user_span: str | None = Field(default=None, description="What the user typed for this fact.")
+    quote_span: str | None = Field(default=None, description="What the influencer said for this fact (verbatim).")
+    sub_claim_id: str | None = Field(default=None, description="The sub-claim that checks quote_span.")
+    note: str | None = Field(
+        default=None, description="Plain-language mismatch note, e.g. 'You said 40%; they said 18.3%.'")
+
+
+class ClaimMatch(_Strict):
+    """Which stored influencer line(s) the user's prompt points to, and how the facts line up."""
+
+    status: Literal["MATCHED", "NONE", "ASK"]
+    method: Literal["rules", "llm"] = "rules"
+    user_claim: str = Field(description="The prompt with the influencer name, cut-off and instructions removed.")
+    video_id: str | None = None
+    title: str | None = None
+    upload_date: date | None = None
+    quotes: list[str] = Field(default_factory=list, description="The matched lines, verbatim.")
+    quote_ids: list[str] = Field(default_factory=list, description="Catalog sub_claim_id of each matched line.")
+    facts: list[FactAlignment] = Field(default_factory=list)
+    candidates_considered: int = 0
+    question: str | None = Field(default=None, description="Set when status is ASK or NONE.")
+
+
 class SubClaim(_Strict):
     sub_claim_id: str
     text: str
@@ -163,6 +196,9 @@ class SubClaim(_Strict):
         default=None, description="The 1-2 sentences before this line in the post (often where the period is set).")
     user_text: str | None = Field(
         default=None, description="What the user typed about the claim. A period hint only; never the claim checked.")
+    alignment: AlignmentBucket | None = Field(
+        default=None,
+        description="both / conflict = the user asked about it; quote_only = the influencer also said it.")
 
 
 class EvidenceItem(_Strict):
@@ -179,10 +215,6 @@ class EvidenceItem(_Strict):
     publication_date_precision: str = "day"
     publication_date_basis: str | None = None
     url: str | None = None
-    source_page: str | None = Field(
-        default=None, description="Publisher/platform page, not an individual document URL.")
-    source_url_requirement: str | None = Field(
-        default=None, description="URL exception recorded in canonical source metadata, never inferred by an LLM.")
     citation_span: str | None = None
     produced_by: str = Field(description="Name of the agent that produced this item")
     computed_value: float | None = None
@@ -196,18 +228,6 @@ class EvidenceItem(_Strict):
     period_source: str | None = Field(
         default=None, description="Where the period came from: the line, the preceding sentences, the stated "
                                   "amount, the user's prompt, or the default (latest fiscal year).")
-
-    @property
-    def publisher_page(self) -> str | None:
-        """An explicitly approved HTTP(S) publisher page; it is not a document link."""
-        if self.source_url_requirement != PAID_SOURCE_URL_EXCEPTION:
-            return None
-        page = (self.source_page or "").strip()
-        try:
-            parsed = urlsplit(page)
-        except ValueError:
-            return None
-        return page if parsed.scheme in {"http", "https"} and parsed.netloc else None
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +328,11 @@ class FinalAssessment(_Strict):
     refusal_reason: str | None = None
     clarification_question: str | None = Field(
         default=None, description="Set when status is NEEDS_CLARIFICATION: ask the user this.")
+    match: ClaimMatch | None = Field(
+        default=None, description="You asked / they said: the matched line and fact alignment.")
+    headline_sub_claim_ids: list[str] = Field(
+        default_factory=list,
+        description="Sub-claims the overall verdict is based on (the facts the user asked about).")
 
 
 # ---------------------------------------------------------------------------
@@ -412,6 +437,8 @@ class FinSightState(_Strict):
     focus_quotes: list[str] = Field(default_factory=list)
     # Publication date of the video that was checked. A cut-off typed in the prompt stays on the request.
     post_published: date | None = None
+    # The matched influencer line(s) and how each fact in the prompt lines up with them.
+    match: ClaimMatch | None = None
     cutoff_from_prompt: bool = False
     # Set when a one-letter name was corrected, so the report can say who was checked.
     influencer_note: str | None = None

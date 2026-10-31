@@ -16,6 +16,7 @@ from finsight.contracts.schemas import (
     RoutePlanEntry,
     SourceTier,
     Stance,
+    SubClaimType,
     Verdict,
 )
 
@@ -114,9 +115,18 @@ def detect_company(claim: str, companies: dict[str, list[str]], hint: str | None
     """Ticker of the corpus company named in the claim (or the explicit hint, if it is in the corpus)."""
     if hint:
         return hint.upper() if hint.upper() in companies else None
+    # The company named first is the subject: "Starbucks is cutting its reliance on Microsoft" is Starbucks.
+    first: tuple[int, str] | None = None
     for ticker, aliases in companies.items():
-        if any(has_alias(claim, alias) for alias in aliases):
-            return ticker
+        for alias in aliases:
+            if not has_alias(claim, alias):
+                continue
+            hit = re.search(rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])", claim, flags=re.IGNORECASE)
+            at = hit.start() if hit else len(claim)
+            if first is None or at < first[0]:
+                first = (at, ticker)
+    if first is not None:
+        return first[1]
     mentioned = list(dict.fromkeys(ticker for ticker, _surface, _start in find_mentions(claim)))
     if len(mentioned) == 1 and mentioned[0] in companies:
         return mentioned[0]
@@ -546,11 +556,18 @@ def enforce_tier_requirement(
 def cap_tier2_only_support(
     verdict: Verdict, evidence: list[EvidenceItem], rule: KnowledgeRule
 ) -> tuple[Verdict, str | None]:
-    """A Tier 2 company remark can Support. Only Tier 3 is barred from raising a label.
-
-    Kept as a guard so the call site stays stable. It no longer lowers Supported.
-    """
-    del evidence, rule
+    """A business-risk claim needs a Tier 1 risk factor for SUPPORTED; a Tier 2 remark alone gives at most
+    PARTIALLY_SUPPORTED (D16). Other claims are not capped: a figure the company states in its own earnings
+    release (Tier 2) can be SUPPORTED (team decision, 31 Oct 2026)."""
+    if verdict is not Verdict.SUPPORTED or rule.sub_claim_type is not SubClaimType.BUSINESS_RISK:
+        return verdict, None
+    if SourceTier.TIER_1 not in rule.tier_requirement or SourceTier.TIER_2 not in rule.tier_requirement:
+        return verdict, None
+    support = eligible_support(evidence, rule)
+    if any(e.source_tier is SourceTier.TIER_1 for e in support):
+        return verdict, None
+    if any(e.source_tier is SourceTier.TIER_2 for e in support):
+        return Verdict.PARTIALLY_SUPPORTED, "Tier 2 evidence can at most Partially Support"
     return verdict, None
 
 

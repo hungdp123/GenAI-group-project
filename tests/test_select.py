@@ -1,16 +1,13 @@
-"""A stated claim selects a stored row that shares its figure. A transcript line is confirmed first."""
+"""Extraction helpers kept in select.py. Matching tests are in test_claim_matching.py."""
 
 import json
 from datetime import date
 
 from finsight.agents.claim_extraction.extract import extract_claims
 from finsight.agents.claim_extraction.select import (
-    NOT_IN_STORED,
     NOT_IN_VIDEO,
-    choose_line,
     explain_miss,
     matching_claims,
-    shares_figure,
     stated_claim,
 )
 from finsight.contracts.schemas import SubClaim, SubClaimType
@@ -128,193 +125,16 @@ def test_the_cap_of_8_applies_after_the_match():
     assert out.dropped_by_cap
 
 
-def test_a_stated_percentage_does_not_match_a_different_percentage():
-    assert shares_figure("revenue grew 24%", "search revenue increased by 17%") is False
-    assert shares_figure("revenue grew 24%", "23% revenue growth") is False
-    assert shares_figure("revenue grew 24%", "revenue grew by 24% year-over-year") is True
-    assert shares_figure("revenue was up about 100%", "up 106% year-over-year") is True
-    assert shares_figure("revenue doubled", "up 106% year-over-year") is True
 
 
-def test_one_stored_row_is_checked_without_asking():
-    focus = "revenue doubled"
-    choice = choose_line(focus, [(REVENUE, "vid1"), (MARGIN, "vid1")], [_post("vid1", REVENUE.text)])
-    assert choice.question is None
-    assert choice.video_id == "vid1"
-    assert choice.quotes == [REVENUE.text]
 
 
-def test_24_percent_does_not_attach_to_the_17_percent_row():
-    search = _claim("search", "Google search revenue increased by 17%.", SubClaimType.HISTORICAL_GROWTH)
-    spoken = "Revenue grew by 24% year-over-year, marking its twelfth consecutive quarter of double-digit growth."
-    choice = choose_line(
-        "Google revenue grew 24% last quarter, its twelfth straight quarter of double-digit growth.",
-        [(search, "vid1")],
-        [_post("vid1", f"{search.text} {spoken}")],
-        ticker="GOOGL",
-    )
-    assert choice.question is None
-    assert choice.video_id == "vid1"
-    assert any("24%" in quote for quote in choice.quotes)
-    assert all("17%" not in quote for quote in choice.quotes)
 
 
-def test_reported_all_time_highs_beat_a_leading_to_sentence():
-    thesis = (
-        "We have a company that is investing leading to higher revenues, higher operating profits, "
-        "and bigger operating margins."
-    )
-    results = (
-        "Revenues are at all-time highs, operating profits at all-time highs, operating margins are at 41% "
-        "trailing only 2024 when margins reached 42% over the course of the past 7 years."
-    )
-    transcript = f"Shares of Meta are down 8% after reporting. {thesis} Q1 revenue came in at 56 billion. {results}"
-    choice = choose_line(
-        "Mark Roussin said Meta's Q1 2026 revenue, operating profit and operating margin all went up.",
-        [],
-        [_post("1-jC6oE5Ffo", transcript)],
-        ticker="META",
-    )
-    assert choice.question is None
-    assert choice.quotes == [results]
 
 
-def test_a_company_stays_in_force_until_another_company_is_named():
-    transcript = " ".join([
-        "Shares of Meta are down 8% after reporting.",
-        "Investors got spooked and hit the sell button.",
-        "How about operating profits?",
-        "We have a company that is investing leading to higher revenues, higher operating profits, "
-        "and bigger operating margins.",
-        "Getting back to Amazon, revenues are at all-time highs and operating margins are at all-time highs.",
-    ])
-    choice = choose_line(
-        "revenue, operating profit and operating margin all went up",
-        [],
-        [_post("vid1", transcript)],
-        ticker="META",
-    )
-    assert any("bigger operating margins" in quote for quote in choice.quotes)
-    assert all("Amazon" not in quote for quote in choice.quotes)
 
 
-def test_one_spoken_sentence_is_shown_before_it_is_checked():
-    spoken = "Did Company X revenue double?"
-    choice = choose_line("revenue doubled", [(MARGIN, "vid1")], [_post("vid1", spoken)])
-    assert choice.question is None
-    assert choice.quotes == [spoken]
-    confirmed = choose_line(
-        "revenue doubled", [(MARGIN, "vid1")], [_post("vid1", spoken)], confirmed_video="vid1",
-    )
-    assert confirmed.question is None
-    assert confirmed.quotes == [spoken]
-
-
-def test_nothing_close_asks_the_user_to_restate_the_line():
-    choice = choose_line("opened a factory in Ohio", [(MARGIN, "vid1")], [_post("vid1", MARGIN.text)])
-    assert choice.quotes == []
-    assert choice.question == NOT_IN_STORED
-
-
-def test_a_stated_figure_absent_before_the_cutoff_retrieves_no_claim():
-    wrong = "Meta recently said the revenue run rate for video generation tools hits 10 billion in the fourth quarter."
-    prompt = "Meta booked $2.4 billion in costs related to legal proceedings last quarter."
-    choice = choose_line(prompt, [], [_post("DVOI6dxSumw", f"Meta is spending. {wrong}")], ticker="META")
-    assert choice.quotes == []
-    assert choice.question == NOT_IN_STORED
-    real = (
-        "what was not accounted for in the earnings per share estimates were "
-        "$2.4 billion in costs related to legal proceedings."
-    )
-    found = choose_line(prompt, [], [_post("B1BJJnJ0TTc", f"Meta reported earnings. {real}")], ticker="META")
-    assert found.question is None
-    assert any("2.4 billion" in quote for quote in found.quotes)
-
-
-def test_a_line_with_only_one_of_two_figures_is_not_the_match():
-    bare = "In fact, 22% this most recent quarter."
-    full = "Alphabet's revenue growing 22% year-over-year to $110 in Q1."
-    only_percent = choose_line(
-        "Alphabet revenue grew 22% to $110 billion last quarter",
-        [],
-        [_post("april", f"Google reported. {bare}")],
-        ticker="GOOGL",
-    )
-    assert only_percent.quotes == []
-    assert only_percent.question == NOT_IN_STORED
-    both = choose_line(
-        "Alphabet revenue grew 22% to $110 billion last quarter",
-        [],
-        [_post("april", f"Google reported. {bare}"), _post("june", full)],
-        ticker="GOOGL",
-    )
-    assert both.quotes == [full]
-
-
-def test_a_named_segment_is_not_offered_against_a_different_product():
-    focus = stated_claim(
-        "Joseph Carlson said AWS grew 24% year over year in Q4 2025 with a $142 billion revenue run rate.",
-        "joseph_carlson",
-        ["Amazon", "AMZN", "AWS", "Amazon Web Services"],
-    )
-    assert focus is not None and "aws" in focus.lower()
-    aws = "In Q4 of 2025, AWS reported 24% year-over-year growth with a $142 billion revenue run rate."
-    chip = (
-        "They say that their revenue run rate for their chip business is 20 billion, "
-        "triple-digit year-over-year growth."
-    )
-    choice = choose_line(
-        focus, [], [_post("DVOI6dxSumw", f"Amazon reported. {chip} {aws}")], ticker="AMZN",
-    )
-    assert choice.question is None
-    assert choice.quotes == [aws]
-
-
-def test_a_bare_figure_is_used_only_when_no_line_names_the_measure():
-    bare = _claim("bare", "22% is massive.", SubClaimType.HISTORICAL_GROWTH)
-    bare = bare.model_copy(update={"company_ticker": "GOOGL"})
-    margin = _claim("margin", "operating margin is 22%.", SubClaimType.PROFITABILITY)
-    margin = margin.model_copy(update={"company_ticker": "GOOGL"})
-    named = _claim("named", "Alphabet revenue grew by 22% last quarter.", SubClaimType.HISTORICAL_GROWTH)
-    named = named.model_copy(update={"company_ticker": "GOOGL"})
-    only_bare = choose_line(
-        "Alphabet revenue grew 22%",
-        [(bare, "april"), (margin, "april")],
-        [_post("april", f"{bare.text} {margin.text}")],
-        ticker="GOOGL",
-    )
-    assert only_bare.question is None
-    assert only_bare.quotes == [bare.text]
-    both = choose_line(
-        "Alphabet revenue grew 22%",
-        [(bare, "april"), (named, "june")],
-        [_post("april", bare.text), _post("june", named.text)],
-        ticker="GOOGL",
-    )
-    assert both.quotes == [named.text]
-    assert both.video_id == "june"
-
-
-def test_a_far_number_on_the_same_measure_retrieves_no_claim():
-    line = ("The stock so far is already growing substantially, but if we look at this on a trailing "
-            "12-month basis, their revenue has grown 22% in the last quarter.")
-    prompt = "Meta revenue grew 33% in the latest quarter."
-    post = _post("DVOI6dxSumw", f"Meta reported. {line}")
-    choice = choose_line(prompt, [], [post], ticker="META")
-    assert choice.quotes == []
-    assert choice.question == NOT_IN_STORED
-    agreed = choose_line(prompt, [], [post], confirmed_video="DVOI6dxSumw", ticker="META")
-    assert agreed.quotes == []
-    assert agreed.question == NOT_IN_STORED
-    close = choose_line(
-        "Meta revenue grew 22% in the latest quarter.", [], [post], ticker="META",
-    )
-    assert close.question is None
-    assert close.quotes == [line]
-
-
-def _post(video_id: str, transcript: str) -> dict:
-    return {"video_id": video_id, "upload_date": "2026-07-24", "transcript": transcript}
 
 
 def test_stored_record_round_trip_still_skips_the_decomposer(tmp_path):
@@ -330,19 +150,3 @@ def test_stored_record_round_trip_still_skips_the_decomposer(tmp_path):
     out = _extract(REVENUE.text, stored, None)
     assert out.sub_claims[0].sub_claim_type is SubClaimType.HISTORICAL_GROWTH
     assert out.miss is None
-
-
-def test_direction_agreement_beats_word_overlap():
-    """'Meta's free cash flow went down': the line that says FCF is going down wins over a line that repeats
-    'free cash flow' but is about margins, even when only the second one is in the claims catalog."""
-    from finsight.agents.claim_extraction.select import choose_line
-    from finsight.contracts.schemas import SubClaim, SubClaimType
-
-    wanted = "So, free cash flow is going down because Meta doesn't have enough money to pay for this CapEx."
-    other = ("So, CapEx going up a little bit, revenue staying the same, equals a stock that's going to have even "
-             "lower margins, more of a drag on the free cash flow, even more negative free cash flow.")
-    post = {"video_id": "v1", "upload_date": "2026-04-30", "transcript": f"Meta is spending a lot. {other} {wanted}"}
-    stored = [(SubClaim(sub_claim_id="t272", text=other, sub_claim_type=SubClaimType.HISTORICAL_GROWTH,
-                        company_ticker="META"), "v1")]
-    choice = choose_line("Meta's free cash flow went down last quarter.", stored, [post], ticker="META")
-    assert choice.quotes and choice.quotes[0] == wanted

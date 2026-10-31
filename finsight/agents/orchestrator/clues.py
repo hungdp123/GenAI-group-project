@@ -15,7 +15,7 @@ from finsight.agents.claim_extraction.fields import _values_match, parse_fields
 from finsight.agents.financial.claim_reader import context_period, named_period
 from finsight.contracts.schemas import SubClaim
 
-CONTEXT_SENTENCES = 2
+CONTEXT_SENTENCES = 3
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -42,9 +42,13 @@ def with_clues(sub_claims: list[SubClaim], transcript: str, user_text: str | Non
     out = []
     for claim in sub_claims:
         update = {}
-        if not claim.context:
+        split_fact = bool(claim.parent_span and claim.context == claim.parent_span and not claim.expansion_rule)
+        if not claim.context or split_fact:
             context = preceding_sentences(transcript, claim.source_span or claim.text)
-            if context:
+            # A fact split out of a longer line keeps the whole line as its nearest context, so a period named
+            # elsewhere in the line ("reported earnings a week ago ... $81.6 billion") still applies.
+            context = " ".join(part for part in (context, claim.context if split_fact else None) if part)
+            if context and context != claim.context:
                 update["context"] = context
         if user_text and not claim.user_text:
             update["user_text"] = user_text.strip()

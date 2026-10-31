@@ -218,7 +218,7 @@ Operating-income growth, operating-cash-flow growth, and diluted earnings-per-sh
 A sentence that fits none of the rows will be checked against the documents stored for that company, then determined whether Out of Scope or not. For example:
 
 - A filing passage that states the claim can Support it.
-- An earnings remark or investor-relations comment that states the claim can Support it.
+- An earnings remark or investor-relations comment can at most Partially Support it.
 - News may be shown. It does not move the label.
 - No new calculation is invented. If the claim needs a number section 11 does not calculate, and no stored passage states that number, the label is Insufficient Evidence.
 - If the filings and the company's own remarks say nothing about the claim, then it is Out of scope. The label is Insufficient Evidence.
@@ -293,7 +293,7 @@ Every stored passage has a trust level from the day it was loaded. A passage wit
 | Level | Source | What it may do |
 |---|---|---|
 | 1 | SEC filings and their tagged numbers: 10-K, 10-Q, the filed management discussion, and the risk factors | Support a past fact when the calculated figure matches the value, the direction, and the period. |
-| 2 | The company's earnings release or investor-relations remarks | Support a claim the company stated, including a business-risk claim or a claim that is not in the type table. "Expects" stays "expects." It cannot replace a past number that section 11 calculates from a Tier 1 filing. |
+| 2 | The company's earnings release or investor-relations remarks | Partially Support a forward-looking claim. "Expects" stays "expects." The same remark can Partially Support a business-risk claim, or a claim that is not in the type table, when the remark states it. It cannot support a past number that section 11 calculates. |
 | 3 | Yahoo Finance company news, up to 10 articles, loaded with the corpus | Context only. It may be shown. It does not move a label up or down. |
 | None | The stored influencer post | The claim under test. A number that appears only here is not evidence. |
 
@@ -301,7 +301,7 @@ When a filing and a press release or a news article disagree, keep the filing's 
 
 A quote must be an exact span of a passage stored at load time. A quote that cannot be found there is blocked.
 
-If the earnings release is in the corpus and the 10-Q is not yet, the press-release figure is what the company said. That remark can Support the claim. A section 11 number is still taken from the Tier 1 filing when that filing is the check.
+If the earnings release is in the corpus and the 10-Q is not yet, report the press-release figure as what the company said. The best label is Partially Supported until the filing confirms it.
 
 A risk-factor passage retrieved while checking some other claim counts as counter-evidence for that claim. It can keep that claim from reaching Supported. It does not replace a Tier 1 number.
 
@@ -349,7 +349,7 @@ Use total revenue and total profit, not a segment. A segment growth rate present
 **Which period.**
 
 - No period named: latest fiscal year against the year before.
-- "Recent" or "quarter": latest quarter against the same quarter a year earlier.
+- "Recent", "quarter", or the latest earnings call or report ("on their latest earnings call", "reported earnings"): latest quarter against the same quarter a year earlier. (Earnings call/report added 30 Oct 2026; team to confirm.)
 - "Last two quarters": the two latest quarters that end on or before the cut-off, each against the same quarter a year earlier, unless the post said quarter over quarter.
 - Cash flow in a quarterly report is year-to-date. A single quarter's free cash flow is this year-to-date figure minus the prior quarter's year-to-date figure in the same fiscal year. The first quarter's year-to-date figure is the quarter.
 - The fourth quarter has no report of its own. It is the full year minus the year-to-date figure through the third quarter. If either figure is missing, the fourth quarter is unavailable.
@@ -368,7 +368,9 @@ Use total revenue and total profit, not a segment. A segment growth rate present
 - "Doubled" matches when the later amount is from 1.9 times to 2.1 times the earlier amount.
 - "Double-digit" matches when the size of the change is at least 10%.
 - On a growth claim, "strong" and "explosive" mean the direction only, as in section 6. The output says the size was not tested.
-- A dollar amount matches after rounding to the precision the post stated. "$2.1 billion" matches a calculated amount from $2.05 billion to $2.15 billion.
+- A dollar amount matches after rounding to the precision the post stated. "$2.1 billion" matches a calculated amount from $2.05 billion to $2.15 billion. The "$" may be missing ("10 billion in free cash flow").
+- "Nearly", "almost", "close to" or "just under" an amount also matches up to 10% below it: "nearly $10 billion" matches $9.0 billion to $10.05 billion. (Added 30 Oct 2026; team to confirm.)
+- "From X to Y" is checked as two amounts: X against the earlier period, Y against the later one.
 
 **Not calculated here.** A missing tag or a missing comparison period makes that calculated claim Insufficient Evidence. The gap is not filled from news, from the stored post, or from memory. Debt-to-equity is in the table above, but it is not calculated and a leverage claim is sent to no agent, so the label is Insufficient Evidence. The narrative agent is not asked to divide debt by equity.
 

@@ -131,7 +131,9 @@ _YEAR = r"'?(\d{4}|\d{2})"
 _FISCAL = r"(?:fy|fiscal(?: year)?)\s*"
 _TTM = r"\b(ttm|ltm|trailing (?:12|twelve)[- ]months?|(?:last|past|prior) (?:12|twelve) months)\b"
 _LAST_N_QUARTERS = r"\b(?:last|past|latest|recent|previous|prior) (two|three|four|2|3|4) quarters\b"
-_LATEST_QUARTER = r"\bquarter(ly)?\b|\brecent(ly)?\b"           # rule book: "recent" or "quarter"
+# rule book: "recent", "quarter", or the latest earnings call / report (earnings are reported quarterly)
+_LATEST_QUARTER = (r"\bquarter(ly)?\b|\brecent(ly)?\b|\bearnings (?:call|report|release)s?\b"
+                   r"|\b(?:reported|reports|posted) (?:their |its )?earnings\b")
 _LATEST_YEAR = r"\b(annual|yearly|full[- ]year|fiscal year|in a (?:single )?year|last year)\b"
 
 

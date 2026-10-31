@@ -248,56 +248,6 @@ function stageHtml(stage) {
     </li>`;
 }
 
-const POST_NOTES = [
-  "A figure that appears only on a chart, a slide, or an image is not in the stored text, so it was not checked.",
-  "The transcript does not mark who is speaking, so the speaker was not separated.",
-  "This transcript has no timestamps, so the report cannot point to a moment in the video.",
-  "Checked the lines in this post that match the claim in the prompt.",
-];
-const ADVICE_NOTE = "A sentence that told you to buy or sell was removed. The claim and the labels are unchanged.";
-
-function splitCheckedPost(text) {
-  const source = String(text || "");
-  const cuts = [];
-  for (const note of POST_NOTES) {
-    const at = source.indexOf(note);
-    if (at >= 0) cuts.push({ at, text: note, video: "" });
-  }
-  const videoAt = source.indexOf("Video: ");
-  if (videoAt >= 0) {
-    const rest = source.slice(videoAt + "Video: ".length);
-    const url = (rest.split(/\s/)[0] || "").replace(/[.)]+$/, "");
-    cuts.push({ at: videoAt, text: "", video: url });
-  }
-  cuts.sort((left, right) => left.at - right.at);
-  const leadEnd = cuts.length ? cuts[0].at : source.length;
-  return {
-    lead: source.slice(0, leadEnd).trim(),
-    notes: cuts.filter((cut) => cut.text).map((cut) => cut.text),
-    video: (cuts.find((cut) => cut.video) || {}).video || "",
-  };
-}
-
-function splitSummary(text) {
-  const source = String(text || "");
-  if (source.startsWith(ADVICE_NOTE)) {
-    return { advice: ADVICE_NOTE, text: source.slice(ADVICE_NOTE.length).trim() };
-  }
-  return { advice: "", text: source };
-}
-
-function postHtml(assessment) {
-  const parts = splitCheckedPost(assessment.checked_post);
-  if (!parts.lead && !parts.notes.length && !parts.video) return "";
-  const link = parts.video
-    ? `<p class="post-line"><a href="${esc(parts.video)}" target="_blank" rel="noopener">${esc(parts.video)}</a></p>`
-    : "";
-  const notes = parts.notes.length
-    ? `<details class="payload-wrap"><summary>Notes about this video</summary><ul class="video-notes">${parts.notes.map((note) => `<li>${esc(note)}</li>`).join("")}</ul></details>`
-    : "";
-  return `${parts.lead ? `<p class="post-line">${esc(parts.lead)}</p>` : ""}${link}${notes}`;
-}
-
 function renderResult(view) {
   const assessment = view.assessment;
   const head = headline(view);
@@ -318,13 +268,13 @@ function renderResult(view) {
         <button type="button" class="text-btn" data-download="log">Decision log JSON</button>
       </div>
       <div class="jump-row">
+        ${view.match ? `<a href="#matchCard">You asked · they said</a>` : ""}
         <a href="#stepCard">Steps</a>
         <a href="#checks">Checks and citations</a>
         <a href="#traceCard">Trace</a>
       </div>
-      ${postHtml(assessment)}
-      <p class="summary">${esc(splitSummary(assessment.summary || assessment.refusal_reason || assessment.clarification_question || "No summary.").text)}</p>
-      ${splitSummary(assessment.summary || "").advice ? `<p class="reason">${esc(ADVICE_NOTE)}</p>` : ""}
+      ${assessment.checked_post ? `<p class="post-line">${esc(assessment.checked_post)}</p>` : ""}
+      <p class="summary">${esc(assessment.summary || assessment.refusal_reason || assessment.clarification_question || "No summary.")}</p>
       ${assessment.as_of_date ? `<p class="reason">Information up to ${esc(assessment.as_of_date)}${view.cutoff_note ? ` — ${esc(view.cutoff_note)}` : ""}.</p>` : ""}
       ${assessment.refusal_reason && !(assessment.summary || "").includes(assessment.refusal_reason) ? `<p class="reason">${esc(assessment.refusal_reason)}</p>` : ""}
       <div class="gate-row">${gates}</div>
@@ -334,6 +284,7 @@ function renderResult(view) {
       ${assessment.status === "COMPLETED" ? `<p class="disclaimer">${esc(view.limits || "")}</p>` : ""}
       ${view.cli ? `<p class="cli-label">Repeat this run</p><pre class="cli">${esc(view.cli)}</pre>` : ""}
     </article>
+    ${matchHtml(view.match, view.assessment.status, view.assessment.claim)}
     ${clarificationHtml(view)}
     ${recordHtml(view.record)}
     <section class="card" id="checks">
@@ -356,6 +307,53 @@ function statHtml(stats) {
     ["cut-off leaks", stats.temporal_violations],
   ];
   return bits.map(([label, value]) => `<span class="stat">${esc(label)} ${esc(value)}</span>`).join("");
+}
+
+const BUCKET_CLASS = { both: "b-both", conflict: "b-conflict", quote_only: "b-also", user_only: "b-not" };
+
+function matchHtml(match, status, typed) {
+  if (!match) return "";
+  const quotes = (match.quotes || []).map((text) => `<blockquote class="said">${esc(text)}</blockquote>`).join("");
+  const when = match.upload_date ? esc(match.upload_date) : "undated";
+  const source = match.video_id
+    ? `<p class="said-src">${esc(match.title || match.video_id)} · ${when} · <a href="${esc(match.url)}" target="_blank" rel="noopener">${esc(match.video_id)}</a> <span class="tag">matched by ${esc(match.method)}</span></p>`
+    : "";
+  const counts = match.counts || {};
+  const legend = ["both", "conflict", "quote_only", "user_only"]
+    .filter((key) => counts[key])
+    .map((key) => `<span class="bucket ${BUCKET_CLASS[key]}">${esc(counts[key])} ${esc({ both: "same", conflict: "different", quote_only: "also said", user_only: "not said" }[key])}</span>`)
+    .join("");
+  const rows = (match.facts || []).map((fact) => `
+    <tr class="fact ${BUCKET_CLASS[fact.bucket] || ""}">
+      <td><span class="bucket ${BUCKET_CLASS[fact.bucket] || ""}" title="${esc(fact.hint)}">${esc(fact.label)}</span></td>
+      <td>${fact.user_span ? esc(fact.user_span) : `<span class="muted">—</span>`}</td>
+      <td>${fact.quote_span ? `“${esc(fact.quote_span)}”` : `<span class="muted">not in the line</span>`}</td>
+      <td>${fact.verdict ? `<a href="#check-${esc(fact.sub_claim_id)}" class="verdict ${verdictClass(fact.verdict)}">${esc(fact.verdict_label)}</a>` : `<span class="muted">${fact.bucket === "user_only" ? "not checked" : "—"}</span>`}</td>
+    </tr>
+    ${fact.note ? `<tr class="fact-note"><td></td><td colspan="3">${esc(fact.note)}</td></tr>` : ""}`).join("");
+  const waiting = status === "NEEDS_CLARIFICATION" && !(match.quotes || []).length;
+  return `
+    <section class="card match" id="matchCard">
+      <div class="section-head">
+        <h2>You asked · they said</h2>
+        <div class="gate-row">${legend}</div>
+      </div>
+      <p class="card__hint">FinSight checks the influencer's own words. Your text is only used to find them, so a figure you remembered differently is shown, not checked.</p>
+      <div class="match-grid">
+        <div>
+          <p class="scope-h">You asked</p>
+          <blockquote class="asked">${esc(typed || match.user_claim)}</blockquote>
+          <p class="said-src tech">Matched on: ${esc(match.user_claim)}</p>
+        </div>
+        <div>
+          <p class="scope-h">They said</p>
+          ${quotes || `<p class="ops__note">${waiting ? "No single line yet — answer the question below." : "No stored line matched."}</p>`}
+          ${source}
+        </div>
+      </div>
+      ${rows ? `<table class="facts"><thead><tr><th></th><th>You</th><th>They</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table>` : ""}
+      <p class="tech">Candidates considered: ${esc(match.candidates_considered)} · line ids ${esc((match.quote_ids || []).join(", ") || "—")}</p>
+    </section>`;
 }
 
 function clarificationHtml(view) {
@@ -420,19 +418,28 @@ function checksHtml(view) {
   if (!units.length) {
     return `<p class="ops__note">No sub-claim was checked. The status above is the whole result.</p>`;
   }
-  const gaps = (view.assessment.evidence_gaps || []).map((gap) => `<p class="reason">Gap: ${esc(gap)}</p>`).join("");
-  return gaps + units.map((unit) => {
+  const gaps = (view.assessment.evidence_gaps || []).map((gap) => `<p class="reason tech">Gap: ${esc(gap)}</p>`).join("");
+  const card = (unit) => {
     const children = unit.ids.map((id) => rows[id]).filter(Boolean);
     const reason = unit.partial_reason ? ` · ${unit.partial_reason}` : "";
+    const bucket = unit.alignment ? `<span class="bucket ${BUCKET_CLASS[unit.alignment] || ""}">${esc({ both: "same", conflict: "different", quote_only: "also said" }[unit.alignment] || unit.alignment)}</span>` : "";
     return `
-      <article class="check">
+      <article class="check" id="check-${esc(unit.ids[0])}">
         <div class="check__head">
-          <p class="check__text">${esc(unit.heading)}</p>
+          <p class="check__text">${bucket} ${esc(unit.heading)}</p>
           <span class="verdict ${verdictClass(unit.verdict)}">${esc(unit.label)}${esc(reason)}</span>
         </div>
         ${children.map(checkBody).join("")}
       </article>`;
-  }).join("");
+  };
+  const asked = units.filter((unit) => unit.group !== "also");
+  const also = units.filter((unit) => unit.group === "also");
+  if (!also.length) return gaps + units.map(card).join("");
+  return `${gaps}
+    <h3 class="group-h">What you asked about <small>counts toward the verdict</small></h3>
+    ${asked.map(card).join("")}
+    <h3 class="group-h">Also in that line <small>checked, not counted in the verdict</small></h3>
+    <div class="also">${also.map(card).join("")}</div>`;
 }
 
 function checkBody(row) {
@@ -472,13 +479,8 @@ function evidenceGroup(items, title, tone) {
 }
 
 function evidenceCard(item) {
-  const documentUrl = typeof item.url === "string" && /^https?:\/\//.test(item.url) ? item.url : null;
-  const publisherUrl = typeof item.publisher_page === "string" && /^https?:\/\//.test(item.publisher_page)
-    ? item.publisher_page : null;
-  const sourceUrl = documentUrl || publisherUrl;
-  const linkLabel = documentUrl ? "Link" : "Publisher/platform";
-  const link = sourceUrl
-    ? `<p class="link"><span>${linkLabel}</span> <a href="${esc(sourceUrl)}" target="_blank" rel="noopener">${esc(sourceUrl)}</a></p>`
+  const link = typeof item.url === "string" && /^https?:\/\//.test(item.url)
+    ? `<p class="link"><span>Link</span> <a href="${esc(item.url)}" target="_blank" rel="noopener">${esc(item.url)}</a></p>`
     : "";
   const where = item.citation_span
     ? `<p class="where"><span>Citation</span> ${esc(item.citation_span)}</p>`

@@ -77,12 +77,9 @@ def _as_of(fa: FinalAssessment) -> str:
 def _evidence(e: EvidenceItem) -> list[str]:
     lines = _wrap(f'"{e.content.strip()}"', indent="        ", first="      - ")
     lines += _wrap(f"Source: {source_label(e)}", indent="          ", first="        ")
-    url = (e.url or "").strip()
-    where = "; ".join(x for x in (e.citation_span, url) if x)
+    where = "; ".join(x for x in (e.citation_span, e.url) if x)
     if where:
         lines += _wrap(f"Where: {where}", indent="          ", first="        ")
-    if not url and e.publisher_page:
-        lines += _wrap(f"Publisher/platform: {e.publisher_page}", indent="          ", first="        ")
     return lines
 
 
@@ -96,17 +93,25 @@ def render_assessment(fa: FinalAssessment, *, show_evidence: bool = True, techni
     if fa.checked_post:
         lines += _wrap(fa.checked_post, indent="  ", first="")
         lines.append("")
+    lines += match_block(fa)
 
     lines += ["SUMMARY"]
     if fa.status is AssessmentStatus.COMPLETED:
         lines += _wrap(fa.summary or f"Overall: {verdict_label(fa.overall_verdict)}.", indent="  ", first="  ")
-        units = report_units(fa.sub_claim_results)
-        if units:
+        asked, also = split_headline(fa)
+        number = 0
+        for title, group in (("What you asked about", asked), ("Also in that line (not counted)", also)):
+            units = report_units(group)
+            if not units:
+                continue
             lines.append("")
+            if also:
+                lines.append(f"  {title}")
             width = max(len(_tagged(unit)) for unit in units)
-            for i, unit in enumerate(units, start=1):
+            for unit in units:
+                number += 1
                 tag = f"[{_tagged(unit)}]".ljust(width + 1)
-                lines += _wrap(unit_heading(unit), indent=" " * (6 + width + 1), first=f"  {i}. {tag} ")
+                lines += _wrap(unit_heading(unit), indent=" " * (6 + width + 1), first=f"  {number}. {tag} ")
     else:
         lines += _wrap(fa.summary or (fa.clarification_question or fa.refusal_reason or ""), indent="  ", first="  ")
 
@@ -132,6 +137,42 @@ def render_assessment(fa: FinalAssessment, *, show_evidence: bool = True, techni
         lines += _wrap(REPORT_LIMITS, indent="  ", first="  ")
     lines += [f"Reference: {fa.request_id}"]
     return "\n".join(lines)
+
+
+_BUCKET_MARK = {"both": "same", "conflict": "DIFFERENT", "quote_only": "they also said", "user_only": "NOT SAID"}
+
+
+def split_headline(fa: FinalAssessment) -> tuple[list[SubClaimResult], list[SubClaimResult]]:
+    """(results the overall verdict covers, results shown as "also said")."""
+    ids = set(fa.headline_sub_claim_ids)
+    if not ids:
+        return list(fa.sub_claim_results), []
+    asked = [row for row in fa.sub_claim_results if row.sub_claim.sub_claim_id in ids]
+    also = [row for row in fa.sub_claim_results if row.sub_claim.sub_claim_id not in ids]
+    return asked, also
+
+
+def match_block(fa: FinalAssessment) -> list[str]:
+    """You asked / they said, and how each fact lines up. Empty when no stored line was matched."""
+    match = fa.match
+    if match is None or not match.quotes:
+        return []
+    lines = ["YOU ASKED vs THEY SAID"]
+    lines += _wrap(f'You asked: "{(fa.claim or match.user_claim).strip()}"', indent="             ", first="  ")
+    when = friendly_date(match.upload_date) if match.upload_date else "undated"
+    for index, quote in enumerate(match.quotes):
+        head = "They said: " if index == 0 else "           "
+        lines += _wrap(f'{head}"{quote}"', indent="             ", first="  ")
+    lines += _wrap(f"({match.video_id}, {when}; matched by {match.method})", indent="             ",
+                   first="             ")
+    for fact in match.facts:
+        mark = _BUCKET_MARK.get(fact.bucket, fact.bucket)
+        said = fact.quote_span or "-"
+        typed = fact.user_span or "-"
+        text = f"[{mark}] you: {typed}  |  they: {said}" + (f"  ({fact.note})" if fact.note else "")
+        lines += _wrap(text, indent="      ", first="    ")
+    lines.append("")
+    return lines
 
 
 def _tagged(unit) -> str:
@@ -172,10 +213,7 @@ def _cite(e: EvidenceItem) -> str:
     tier = e.source_tier.value.replace("TIER_", "T")
     span = f" [{e.citation_span}]" if e.citation_span else ""
     period = f" (period from {e.period_source})" if e.period_source else ""
-    url = (e.url or "").strip()
-    link = (f"<{url}>" if url else f"Publisher/platform: <{e.publisher_page}>" if e.publisher_page
-            else f"<{e.evidence_id}>")
-    return f"[{tier} {e.doc_type} {e.publication_date}] {e.content}{period}{span} {link}"
+    return f"[{tier} {e.doc_type} {e.publication_date}] {e.content}{period}{span} <{e.url or e.evidence_id}>"
 
 
 def render_technical(fa: FinalAssessment, *, show_evidence: bool = True) -> str:

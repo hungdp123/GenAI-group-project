@@ -42,6 +42,7 @@ the rules did not already find, and it cannot change a number check. OpenAI call
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -167,6 +168,45 @@ def _money(text: str) -> list[float]:
         value = float(m.group(2).replace(",", "")) * _UNIT[unit]
         out.append(-value if m.group(1) else value)
     return out
+
+
+_CLAIM_AMOUNT_RE = re.compile(
+    rf"(?P<hedge>\b(?:nearly|almost|close to|just under|roughly|about|around)\s+(?:over\s+)?)?"
+    rf"(?P<neg>\bnegative\s+|-\s?)?\$?\s?(?P<num>{_NUM})\s?(?P<unit>bn|billion|million|trillion)\b"
+    rf"(?:\s+dollars)?", re.I)
+_FROM_TO_RE = re.compile(r"\bfrom\b.+?\bto\b", re.I)
+_LOWER_HEDGE = ("nearly", "almost", "close to", "just under")
+
+
+@dataclass
+class _Amount:
+    value: float          # signed, in dollars
+    half_unit: float      # rounding to the stated precision
+    hedged_below: bool    # "nearly $10 billion": the figure may sit a little under the stated amount
+
+
+def _claim_amounts(text: str) -> list[_Amount]:
+    """Dollar amounts a sub-claim states, with or without "$": "$110 billion", "18 billion dollars",
+    "negative 7.6 billion", "nearly 10 billion"."""
+    out = []
+    for m in _CLAIM_AMOUNT_RE.finditer(text or ""):
+        raw = m.group("num").replace(",", "")
+        decimals = len(raw.split(".")[1]) if "." in raw else 0
+        scale = {"bn": 1e9, "billion": 1e9, "million": 1e6, "trillion": 1e12}[m.group("unit").lower()]
+        value = float(raw) * scale
+        hedge = re.sub(r"\s+over$", "", (m.group("hedge") or "").strip().lower())
+        out.append(_Amount(-value if m.group("neg") else value, 0.5 * 10 ** (-decimals) * scale,
+                           hedge in _LOWER_HEDGE))
+    return out
+
+
+def _amount_matches(amount: _Amount, record: float) -> bool:
+    """Rounding to the stated precision; "nearly X" also accepts up to 10% under X (knowledge layer section 11)."""
+    if abs(amount.value - record) <= amount.half_unit + 1e-9 * abs(record):
+        return True
+    if amount.hedged_below and amount.value > 0:
+        return amount.value * 0.9 <= record <= amount.value
+    return False
 
 
 def _money_half_unit(text: str) -> float:
@@ -444,6 +484,12 @@ def _is_margin(metric_name: str) -> bool:
     return _concept(metric_name) in MARGINS
 
 
+def _is_money_metric(metric_name: str) -> bool:
+    """A level in dollars (revenue, free cash flow, net income...), not a growth rate, margin or ratio."""
+    name = metric_name.lower()
+    return not (_is_growth(name) or _is_margin(name) or "ratio" in name or "eps" in name or "margin" in name)
+
+
 @dataclass
 class _Defect:
     evidence_id: str
@@ -585,7 +631,7 @@ class AuditorAgent:
 
     # -- checks that apply to every item --------------------------------------------------------
     def _hygiene(self, sub_claim: SubClaim, item: EvidenceItem, run: _Run) -> None:
-        if not ((item.url or "").strip() or item.publisher_page) or not (item.citation_span or "").strip():
+        if not item.url or not item.citation_span:
             run.add(item, "no url or citation span, so the quote cannot be checked against its source",
                     "give the source url and the exact citation span.")
         aliases = {a.lower() for a in CORPUS_COMPANIES.get(sub_claim.company_ticker or "", [])}
@@ -698,12 +744,25 @@ class AuditorAgent:
                 matches.append(any(abs(stated_frac - c) <= MATCH_BAND + 1e-9 for c in candidates))
         stated_money = [] if threshold is not None else _money(sub_claim.text)
         content_money = _money(item.content)
+        amounts = [] if threshold is not None else _claim_amounts(sub_claim.text)
+        if not stated_money and amounts and content_money and _is_money_metric(metric):
+            # Amounts written without "$" ("nearly 10 billion", "from 18 billion dollars to negative 7.6 billion")
+            # are still compared. "From X to Y" is the prior figure, then the current one.
+            if len(amounts) == 2 and _FROM_TO_RE.search(sub_claim.text) and len(content_money) >= 2:
+                matches.append(_amount_matches(amounts[0], content_money[1])
+                               and _amount_matches(amounts[1], content_money[0]))
+                stated_frac = stated_frac if stated_frac is not None else amounts[1].value
+            elif len(amounts) == 1:
+                matches.append(_amount_matches(amounts[0], content_money[0]))
+                stated_frac = stated_frac if stated_frac is not None else amounts[0].value
         if len(stated_money) == 1 and content_money:
             scale = _bare_amount_scale(sub_claim.text, stated_money[0], content_money[0])
             stated_amount = stated_money[0] * scale  # "$110 in Q1" is $110 billion when the record is $109,896m
             tol = max(                               # rounding to the precision the claim stated
                 _money_half_unit(sub_claim.text) * scale, 1e-9 * abs(content_money[0]))
-            matches.append(abs(stated_amount - content_money[0]) <= tol)
+            hedged = bool(re.search(r"\b(?:nearly|almost|close to|just under)\s+\$", sub_claim.text, re.I))
+            matches.append(abs(stated_amount - content_money[0]) <= tol
+                           or (hedged and stated_amount * 0.9 <= content_money[0] <= stated_amount))
             if stated_frac is None:
                 stated_frac = stated_money[0]       # the claimed dollar amount, shown next to the computed one
         if not matches:
@@ -868,7 +927,8 @@ class AuditorAgent:
         summary = [sentence for sentence in (review.get("summary") or []) if isinstance(sentence, str) and sentence]
         if summary:
             blocks.append(data_block("narrative_summary", " ".join(summary)))
-        model = "gpt-5.4" if get_settings().llm_provider == "openai" else None
+        # Pinned to gpt-5.4 on OpenAI; FINSIGHT_AUDITOR_MODEL overrides it (the model-strength experiment).
+        model = os.getenv("FINSIGHT_AUDITOR_MODEL") or ("gpt-5.4" if get_settings().llm_provider == "openai" else None)
         resp = complete(
             system=DATA_SAFETY_PREAMBLE + (
                 "You check whether a quoted passage establishes a sub-claim. "

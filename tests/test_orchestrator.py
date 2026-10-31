@@ -295,14 +295,18 @@ def test_a_stated_claim_checks_the_matching_line_only(tmp_path, monkeypatch):
     out = execute("Joseph Carlson said Company X revenue doubled.", DEMO_CUTOFF)
     fa = out.assessment
     assert fa.status is AssessmentStatus.COMPLETED
-    assert [row.sub_claim.sub_claim_id for row in fa.sub_claim_results] == ["rev"]
+    # The revenue line is split per fact: "up 106%" is what the user asked ("doubled"); "$96.2 billion" is
+    # something the influencer also said. The margin line is not matched at all.
+    ids = [row.sub_claim.sub_claim_id for row in fa.sub_claim_results]
+    assert ids == ["rev-f1", "rev-f2"]
+    assert fa.headline_sub_claim_ids == ["rev-f2"]
+    assert {row.sub_claim.alignment for row in fa.sub_claim_results} == {"quote_only", "both"}
     assert "match the claim in the prompt" in (fa.checked_post or "")
     agents = [call.agent for call in out.decision_log.agent_calls]
     assert "decomposer" not in agents
-    # Only the matching line is gathered: the margin line never reaches the financial agent. The fixture has
-    # no fiscal-year filing (no period named = latest fiscal year), so the tier check may retry once (D22).
-    financial = [call.sub_claim_id for call in out.decision_log.agent_calls if call.agent == "financial"]
-    assert financial == ["rev"] * (1 + fa.sub_claim_results[0].retries_used)
+    # Only the matching line is gathered: the margin line never reaches the financial agent.
+    financial = {call.sub_claim_id for call in out.decision_log.agent_calls if call.agent == "financial"}
+    assert financial == {"rev-f1", "rev-f2"}
 
 
 def test_a_prompt_with_no_claim_checks_the_video(tmp_path, monkeypatch):

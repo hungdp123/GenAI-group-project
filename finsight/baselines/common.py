@@ -12,25 +12,53 @@ from pydantic import BaseModel, Field
 from finsight.contracts.schemas import AgentCall, Verdict
 from finsight.llm.client import DATA_SAFETY_PREAMBLE
 
-# DECISION: baselines get the same refusal and scope policy as FinSight, so the comparison measures
-# the architecture rather than which system was told the rules.
-BASELINE_INSTRUCTIONS = (
+_SCOPE = (
     "You evaluate a company-level investment claim using only information available on or before {cutoff}. "
     "Do NOT give personalized investment advice. Reply with exactly one line 'REFUSED: <reason>' and nothing "
     "else if the user asks what they personally should buy, sell or invest, if the claim is a stock price "
     "prediction, or if it is about the macro economy or a market index rather than a specific company.\n"
+)
+_CLARIFY_WITH_PERIOD_RULES = (
     "If the claim does not say which company it is about, or contains no checkable sub-claim, reply with exactly "
-    "one line 'CLARIFY: <one question for the user>' and nothing else.\n"
+    "one line 'CLARIFY: <one question for the user>' and nothing else. Do not ask for anything else: in "
+    "particular never ask which period is meant.\n"
+    # DECISION (30 Oct 2026): the same period and evidence rules FinSight applies (knowledge_layer.md sections 11-12),
+    # so a baseline loses on reliability, not on an instruction it was never given.
+    "Periods: 'last quarter', 'this quarter', 'recent' or 'latest earnings' mean the latest quarter that ended on "
+    "or before {cutoff}, compared with the same quarter a year earlier. A claim that names no period means the "
+    "latest fiscal year that ended on or before {cutoff}, compared with the year before.\n"
+    "If the information you have cannot verify a sub-claim, label it Insufficient Evidence; do not ask the user.\n"
+)
+# The prompt before 30 Oct 2026 (experiment: do the period rules matter?). FINSIGHT_BASELINE_PERIOD_RULES=0.
+_CLARIFY_WITHOUT_PERIOD_RULES = (
+    "If the claim is ambiguous (for example the company or period is unclear) or contains no checkable sub-claim, "
+    "reply with exactly one line 'CLARIFY: <one question for the user>' and nothing else.\n"
+)
+_OUTPUT = (
     "Otherwise split the claim into atomic sub-claims (one checkable statement each, including sub-claims the "
-    "claim implies) and output one line per sub-claim:\n"
+    "claim implies) and output one line per sub-claim. Check the company facts only: who said the claim is not a "
+    "sub-claim, so write each sub-claim without the speaker ('Microsoft revenue grew 18%', not 'X said "
+    "Microsoft revenue grew 18%'):\n"
     "SUB-CLAIM: <sub-claim> | VERDICT: <Supported | Partially Supported | Contradicted | Insufficient Evidence>\n"
     "then one line 'OVERALL: <verdict>', then a short explanation citing the provided data."
 )
+# DECISION: baselines get the same refusal and scope policy as FinSight, so the comparison measures
+# the architecture rather than which system was told the rules.
+BASELINE_INSTRUCTIONS = _SCOPE + _CLARIFY_WITH_PERIOD_RULES + _OUTPUT
+BASELINE_INSTRUCTIONS_NO_PERIOD_RULES = _SCOPE + _CLARIFY_WITHOUT_PERIOD_RULES + _OUTPUT
+
+
+def period_rules_on() -> bool:
+    """Experiment switch: FINSIGHT_BASELINE_PERIOD_RULES=0 gives the baselines the old prompt without them."""
+    import os
+
+    return os.getenv("FINSIGHT_BASELINE_PERIOD_RULES", "1").strip() not in ("0", "false", "no", "off")
 
 
 def baseline_system_prompt(cutoff: date) -> str:
     """Trusted instructions only. The claim and documents go in data blocks in the user prompt."""
-    return DATA_SAFETY_PREAMBLE + BASELINE_INSTRUCTIONS.format(cutoff=cutoff.isoformat())
+    template = BASELINE_INSTRUCTIONS if period_rules_on() else BASELINE_INSTRUCTIONS_NO_PERIOD_RULES
+    return DATA_SAFETY_PREAMBLE + template.format(cutoff=cutoff.isoformat())
 
 
 class ParsedSubClaim(BaseModel):
@@ -50,6 +78,10 @@ class BaselineResult(BaseModel):
     agent_calls: list[AgentCall] = Field(default_factory=list)
     latency_ms: float = 0.0
     error: str | None = None
+    # What the model was given besides the claim (filings text, retrieved passages, the influencer's line).
+    # The comparison report checks the answer's numbers against it (made-up number rate).
+    sources_text: str = ""
+    retrieved_after_cutoff: int = 0
 
 
 _VERDICT_WORDS = [  # order matters: check the more specific phrase first
@@ -97,8 +129,53 @@ def apply_output(result: BaselineResult, text: str) -> None:
         result.refused, result.refusal_reason, result.sub_claims, result.overall_verdict = parse_output(text)
 
 
-def xbrl_facts_as_text(cutoff: date) -> str:
-    """Frozen XBRL facts filed on/before cutoff, rendered as plain text for the direct baseline."""
+SEC_FACTS = "data/sec/processed/facts.csv"
+_SEC_CONCEPTS = ("Revenue", "GrossProfit", "OperatingIncome", "NetIncome", "OperatingCashFlow", "CapitalExpenditure",
+                 "DilutedEPS")
+
+
+def sec_facts_as_text(ticker: str, cutoff: date, path: str = SEC_FACTS, quarters: int = 6,
+                      years: int = 3) -> str | None:
+    """The real XBRL facts for one company filed on or before the cut-off (latest quarters and fiscal years),
+    as plain text. None when the SEC store is not on this machine or has nothing for the company."""
+    import csv
+    from pathlib import Path
+
+    file = Path(path)
+    if not file.exists():
+        return None
+    best: dict[tuple, dict] = {}
+    with file.open(encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            if row["ticker"] != ticker or row["concept"] not in _SEC_CONCEPTS or row["period_class"] not in ("Q", "FY"):
+                continue
+            if date.fromisoformat(row["filed"]) > cutoff:
+                continue
+            key = (row["concept"], row["period_class"], row["period_end"])
+            if key not in best or row["filed"] > best[key]["filed"]:
+                best[key] = row
+    if not best:
+        return None
+    lines = []
+    for concept in _SEC_CONCEPTS:
+        for cls, keep in (("Q", quarters), ("FY", years)):
+            rows = sorted((r for k, r in best.items() if k[0] == concept and k[1] == cls),
+                          key=lambda r: r["period_end"], reverse=True)[:keep]
+            for r in rows:
+                value = float(r["value"])
+                shown = f"{value:.2f} USD/share" if concept == "DilutedEPS" else f"${value / 1e6:,.0f}m"
+                lines.append(f"{ticker} {concept} {'quarter' if cls == 'Q' else 'fiscal year'} "
+                             f"{r['period_start']}..{r['period_end']} = {shown} ({r['form']} filed {r['filed']})")
+    return "\n".join(lines)
+
+
+def xbrl_facts_as_text(cutoff: date, ticker: str | None = None) -> str:
+    """XBRL facts filed on/before cutoff, as plain text for the LLM + filings baseline: the real SEC store for the
+    claim's company when it is on this machine, otherwise the frozen placeholder facts."""
+    if ticker:
+        real = sec_facts_as_text(ticker, cutoff)
+        if real:
+            return real
     raw = json.loads(resources.files("finsight.data").joinpath("xbrl_facts.json").read_text("utf-8"))
     lines = []
     for ticker, block in raw.items():

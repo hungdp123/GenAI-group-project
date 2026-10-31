@@ -76,6 +76,40 @@ def build_view(out: RunOutput) -> dict[str, Any]:
         "cutoff_note": cutoff_note(assessment),
         "overall_label": verdict_label(assessment.overall_verdict),
         "limits": REPORT_LIMITS,
+        "match": match_view(assessment),
+    }
+
+
+BUCKET_LABELS = {
+    "both": ("Same", "You and the influencer state the same fact. It counts toward the verdict."),
+    "conflict": ("Different", "Same fact, different figure or direction. The influencer's version is checked."),
+    "quote_only": ("Also said", "The influencer said this too. It is checked but not counted in the verdict."),
+    "user_only": ("Not said", "You typed this, but the matched line does not say it. It is not checked."),
+}
+
+
+def match_view(assessment: FinalAssessment) -> dict[str, Any] | None:
+    """You asked / they said, with each fact's bucket and (when checked) its verdict."""
+    match = assessment.match
+    if match is None:
+        return None
+    verdicts = {row.sub_claim.sub_claim_id: row for row in assessment.sub_claim_results}
+    facts = []
+    for fact in match.facts:
+        label, hint = BUCKET_LABELS.get(fact.bucket, (fact.bucket, ""))
+        row = verdicts.get(fact.sub_claim_id or "")
+        facts.append({
+            **fact.model_dump(mode="json"),
+            "label": label,
+            "hint": hint,
+            "verdict": row.verdict.value if row else None,
+            "verdict_label": verdict_label(row.verdict) if row else None,
+        })
+    return {
+        **match.model_dump(mode="json"),
+        "facts": facts,
+        "url": f"https://www.youtube.com/watch?v={match.video_id}" if match.video_id else None,
+        "counts": {key: sum(fact["bucket"] == key for fact in facts) for key in BUCKET_LABELS},
     }
 
 
@@ -99,7 +133,6 @@ def _result(row: SubClaimResult, audit: dict[str, Any] | None) -> dict[str, Any]
 
 def _evidence(item: EvidenceItem) -> dict[str, Any]:
     data = item.model_dump(mode="json")
-    data["publisher_page"] = item.publisher_page
     data["source_label"] = source_label(item)
     data["computed_label"] = fmt_figure(item.computed_value) if item.computed_value is not None else None
     if item.comparison_value is not None:
@@ -116,8 +149,12 @@ def _audit(audit: AuditResult) -> dict[str, Any]:
 
 def _units(assessment: FinalAssessment) -> list[dict[str, Any]]:
     units = []
+    headline = set(assessment.headline_sub_claim_ids)
     for unit in report_units(assessment.sub_claim_results):
+        ids = [row.sub_claim.sub_claim_id for row in unit.results]
         units.append({
+            "group": "also" if headline and not (set(ids) & headline) else "asked",
+            "alignment": next((row.sub_claim.alignment for row in unit.results if row.sub_claim.alignment), None),
             "heading": unit_heading(unit),
             "verdict": unit.verdict.value,
             "label": verdict_label(unit.verdict),

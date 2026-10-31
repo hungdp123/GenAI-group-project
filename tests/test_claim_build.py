@@ -159,21 +159,14 @@ def test_the_later_company_keeps_the_figure_when_only_it_states_a_number():
     assert set(by_ticker) == {"TSLA", "MSFT"}
     assert by_ticker["MSFT"].startswith("Microsoft has grown all three by about 15%")
     assert "15%" not in by_ticker["TSLA"]
-    from finsight.agents.claim_extraction.select import choose_line
-    from finsight.contracts.schemas import SubClaim, SubClaimType
+    from finsight.agents.claim_matching.catalog import Line
+    from finsight.agents.claim_matching.matcher import match_claim
 
-    stored = [
-        (SubClaim(
-            sub_claim_id=piece["sub_claim_id"], text=piece["text"], company_ticker=piece["company_ticker"],
-            sub_claim_type=SubClaimType.OTHER, parent_span=text,
-        ), "q7pF6Z0XDvc")
-        for piece in pieces
-    ]
-    choice = choose_line(
-        "Alex Reffett said Microsoft grew revenue by about 15% in a year",
-        stored, [], ticker="MSFT",
-    )
-    assert choice.quotes and choice.quotes[0].startswith("Microsoft has grown all three by about 15%")
+    lines = [Line(line_id=piece["sub_claim_id"], video_id="q7pF6Z0XDvc", channel="alex_reffett", title="",
+                  upload_date=None, ticker=piece["company_ticker"], text=piece["text"], row=piece)
+             for piece in pieces if piece["company_ticker"] == "MSFT"]
+    out = match_claim("Microsoft grew revenue by about 15% in a year", lines, mode="rules")
+    assert out.lines and out.lines[0].text.startswith("Microsoft has grown all three by about 15%")
 
 
 def test_a_comparison_of_two_companies_stays_one_claim():

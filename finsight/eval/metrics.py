@@ -7,6 +7,8 @@ import re
 import statistics
 from pathlib import Path
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from finsight.contracts.schemas import SubClaimType, Verdict
@@ -22,6 +24,39 @@ class GoldSubClaim(BaseModel):
     influencer: str | None = None
     rule_note: str | None = None  # which verdict rule decided the label
     post_id: str | None = None  # which post a sub-claim comes from (record items)
+
+
+class GoldMatch(BaseModel):
+    """Which stored line(s) the prompt points to. See docs/claim_matching.md."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["MATCHED", "NONE", "ASK"]
+    quote_ids: list[str] = Field(default_factory=list, description="MATCHED: lines that must be chosen")
+    acceptable_quote_ids: list[str] = Field(default_factory=list, description="MATCHED: lines that may also be")
+    video_ids: list[str] = Field(default_factory=list, description="ASK: videos the question should offer")
+
+
+class GoldFact(BaseModel):
+    """One fact in the alignment: what the user typed vs what the influencer said."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bucket: Literal["both", "conflict", "quote_only", "user_only"]
+    quote_span: str | None = None
+    quote_id: str | None = None
+    user_span: str | None = None
+    gold_verdict: Verdict | None = None
+    evidence: list[str] = Field(default_factory=list)
+    rule_note: str | None = None
+    sub_claim_type: SubClaimType | None = None
+    # Which agent checks this fact, from the gold label and the rule-based router (finsight/eval/gold_routes.py),
+    # never from a system's run. Used by `finsight eval --route`.
+    route: str | None = None
+
+    @property
+    def asked(self) -> bool:
+        return self.bucket in ("both", "conflict")
 
 
 class PredictedSubClaim(BaseModel):
@@ -58,6 +93,13 @@ class RunRecord(BaseModel):
     gold_sub_claims: list[GoldSubClaim] = Field(default_factory=list)
     failed_checks: list[str] = Field(default_factory=list)  # record / two-turn items: which check failed
     error: str | None = None
+    # Claim matching (items with gold_match). None = not scored for this item.
+    match_case: str | None = None
+    match_correct: bool | None = None
+    predicted_match_status: str | None = None
+    alignment_correct: int = 0
+    alignment_total: int = 0
+    fact_verdicts: list[tuple[str, str | None]] = Field(default_factory=list)  # (gold, predicted) per labeled fact
 
 
 def task_success(completed: bool, schema_valid: bool, all_have_verdict: bool, refused: bool,
@@ -99,6 +141,7 @@ def summarize(records: list[RunRecord]) -> dict[str, float]:
         "latency_max_ms": max(latencies, default=0.0),
         "latency_total_s": sum(latencies) / 1000,
         "avg_tokens": sum(r.input_tokens + r.output_tokens for r in records) / n,
+        **match_summary(records),
         "total_input_tokens": sum(r.input_tokens for r in records),
         "total_output_tokens": sum(r.output_tokens for r in records),
         "total_tokens": sum(r.input_tokens + r.output_tokens for r in records),
@@ -179,11 +222,37 @@ _ROWS = [
 ]
 
 
+def match_summary(records: list[RunRecord]) -> dict[str, float | None]:
+    """Three separate scores: did it find the right line, line up the facts right, and judge each fact right."""
+    scored = [r for r in records if r.match_correct is not None]
+    facts = sum(r.alignment_total for r in scored)
+    pairs = [pair for r in scored for pair in r.fact_verdicts]
+    return {
+        "match_items": len(scored),
+        "match_accuracy": (sum(bool(r.match_correct) for r in scored) / len(scored)) if scored else None,
+        "alignment_accuracy": (sum(r.alignment_correct for r in scored) / facts) if facts else None,
+        "fact_verdict_accuracy": (sum(gold == pred for gold, pred in pairs) / len(pairs)) if pairs else None,
+        "fact_verdicts_labeled": len(pairs),
+    }
+
+
+_MATCH_ROWS = [
+    ("Match accuracy (right line / right question)", "match_accuracy", "{:.0%}"),
+    ("Alignment accuracy (facts in the right bucket)", "alignment_accuracy", "{:.0%}"),
+    ("Fact verdict accuracy (labeled facts only)", "fact_verdict_accuracy", "{:.0%}"),
+    ("Labeled facts scored for verdict", "fact_verdicts_labeled", "{:.0f}"),
+]
+
+
+def _cell(value, fmt: str) -> str:
+    return "n/a" if value is None else fmt.format(value)
+
+
 def summary_markdown(summaries: dict[str, dict[str, float]], header: str) -> str:
     systems = list(summaries)
     lines = [header, "", "| Metric | " + " | ".join(systems) + " |", "|---|" + "---|" * len(systems)]
-    for label, key, fmt in _ROWS:
-        lines.append(f"| {label} | " + " | ".join(fmt.format(summaries[s][key]) for s in systems) + " |")
+    for label, key, fmt in [*_ROWS, *_MATCH_ROWS]:
+        lines.append(f"| {label} | " + " | ".join(_cell(summaries[s].get(key), fmt) for s in systems) + " |")
     lines += ["", "Per-sub-claim predicted vs gold verdicts: `sub_claims.csv` (for Accuracy / Macro-F1).",
               "Retry metrics apply to FinSight only (baselines make a single LLM call)."]
     return "\n".join(lines) + "\n"

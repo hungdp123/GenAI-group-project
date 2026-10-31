@@ -103,8 +103,10 @@ def test_pipeline_attaches_clues_and_reports_the_mismatch(monkeypatch, tmp_path)
     recorder = _Recorder()
     out = execute("Joseph Carlson said Company X revenue grew 25% last quarter.", date(2025, 7, 31),
                   registry=demo_registry(financial=recorder))
-    assert not recorder.seen
-    assert out.assessment.clarification_question == (
-        "That line is not in this influencer's stored videos. "
-        "Restate the line, or resubmit with the video id."
-    )
+    # The user misremembered the figure (25% vs 22%). The influencer's own line is what gets checked, and the
+    # mismatch is reported next to it instead of silently picking one.
+    assert [claim.sub_claim_id for claim in recorder.seen][:1] == ["c1"]
+    assert recorder.seen[0].alignment == "conflict"
+    match = out.assessment.match
+    assert match is not None and match.quotes == [LINE]
+    assert [(fact.bucket, fact.note) for fact in match.facts] == [("conflict", "You said 25%; they said 22%.")]

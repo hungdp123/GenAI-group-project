@@ -32,7 +32,7 @@ Gold verdicts across all sub-claims: CONTRADICTED 23, INSUFFICIENT_EVIDENCE 15, 
 | Verdict | Meaning |
 | --- | --- |
 | `SUPPORTED` | The allowed evidence states the claim, including value and direction. |
-| `PARTIALLY_SUPPORTED` | Agrees in part, is forward-looking, or only an earnings release (Tier 2) states it. |
+| `PARTIALLY_SUPPORTED` | Agrees in part, or is forward-looking. (A business-risk claim that only an earnings remark states is also capped here; a figure in the company's own release can be Supported.) |
 | `CONTRADICTED` | A financial claim disagrees with the filing in value or direction. |
 | `INSUFFICIENT_EVIDENCE` | The stored documents cannot decide: not mentioned, outside the window or cut-off, a missing tag, a price, or a ranking against peers. |
 

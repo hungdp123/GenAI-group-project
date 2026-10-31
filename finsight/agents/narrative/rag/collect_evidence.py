@@ -23,7 +23,6 @@ from finsight.agents.narrative.corpus.processing.contextual import (
     split_claim_parts,
 )
 from finsight.agents.narrative.corpus.processing.index import load_index
-from finsight.agents.narrative.rag.source_provenance import source_attribution
 from finsight.agents.narrative.retrieval.retriever import BACKENDS, CorpusRetriever, normalize_backend
 from finsight.contracts.interfaces import Retriever
 from finsight.contracts.schemas import EvidenceItem, Stance, SubClaim, SubClaimType
@@ -437,7 +436,6 @@ class NarrativeEvidenceAgent:
                 url=c.get("source_url"),
                 citation_span=c.get("citation_span"),
                 produced_by=self.name,
-                **source_attribution(c.get("document_id"), c.get("company_ticker")),
             )
             # NEUTRAL is only the required shared-contract placeholder. No
             # relevance/stance judgment was performed by this collector.

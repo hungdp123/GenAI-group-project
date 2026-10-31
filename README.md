@@ -18,6 +18,11 @@ one checkable statement each, and gives each sub-claim its own verdict. In code:
 `raw_claim` for the input; `SubClaim`, `sub_claim_id`, `SubClaimType` and `sub_claim_results` for the
 parts. (Before schema v0.3 these were called "thesis" and "claim".)
 
+**Claim matching:** the user's text is only used to find the influencer's own line (filter → rank → pick →
+align). Each fact is marked `both`, `conflict`, `quote_only` or `user_only`. The headline verdict covers the
+facts the user asked about, and the influencer's own words are what get verified. See
+[docs/claim_matching.md](docs/claim_matching.md).
+
 The pasted claim is **never** evidence. Per-sub-claim verdicts: `SUPPORTED`, `PARTIALLY_SUPPORTED`,
 `CONTRADICTED`, `INSUFFICIENT_EVIDENCE`.
 
@@ -107,6 +112,10 @@ Expected with the stubs: 4 sub-claims.
 | `finsight trace <request_id> [--json]` | Print the decision log of a past run (`logs/<request_id>.json`) |
 | `finsight ui [--port 8765] [--open]` | Local testing page: run a claim, watch each stage, and read the evidence and citations |
 | `finsight eval --system {direct,rag,finsight,all} --split dev` | Run the evaluation (see below) |
+| `finsight eval --system all --split dev` | FinSight vs plain LLM, LLM + filings, Basic RAG and RAG + quote: writes `comparison.md` (overclaim rate, made-up numbers, paired test). See [docs/evaluation.md](docs/evaluation.md) |
+| `finsight eval --system finsight,llm,direct --route financial` | The comparison on financial facts only (no narrative corpus needed) |
+| `finsight eval --compare results/<run>` | Rebuild `comparison.md` for a finished run |
+| `finsight eval --matcher [--dataset F]` | Score claim matching only (right line, right fact buckets), no agents. See [docs/claim_matching.md](docs/claim_matching.md) |
 | `finsight eval --validate` | Check both dataset files for mistakes |
 | `finsight eval --freeze` | Lock the heldout split (once, when labels are final) |
 | `finsight mode [mock\|paid] [--model M]` | Show or switch the LLM mode |

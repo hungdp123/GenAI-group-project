@@ -21,13 +21,18 @@ from finsight.agents.advice_boundary.agent import without_advice
 from finsight.agents.claim_extraction.build import claims_catalog_path
 from finsight.agents.claim_extraction.extract import extract_claims as run_extraction
 from finsight.agents.claim_extraction.extract import (
+    Extraction,
+    _quote_claim,
     extraction_from_quotes,
-    load_claim_rows,
+    keep_within_cap,
     load_stored_claims,
     load_stored_reasons,
 )
 from finsight.agents.claim_extraction.prepare import post_limits
-from finsight.agents.claim_extraction.select import MATCH_NOTE, choose_line, miss_text, stated_claim
+from finsight.agents.claim_extraction.select import MATCH_NOTE, miss_text, stated_claim
+from finsight.agents.claim_matching.catalog import lines_for, load_catalog, posts_from_catalog, transcript_lines
+from finsight.agents.claim_matching.matcher import match_claim
+from finsight.agents.claim_matching.subclaims import build_sub_claims, headline_ids, to_contract
 from finsight.agents.orchestrator import clues, explain, pending, posts, router, routing
 from finsight.agents.orchestrator.aggregation import highest_tier, overall_verdict
 from finsight.agents.orchestrator.expansion import report_units
@@ -190,6 +195,15 @@ def _said_and_verified(state: FinSightState, results: list[SubClaimResult], text
     return note, Verdict.INSUFFICIENT_EVIDENCE if results else overall
 
 
+def _quote_claim_of(req: ClaimRequest):
+    """A builder for a split fact or an unstored line: its type and measure, plus a not-assessed reason."""
+
+    def make(text: str) -> tuple[SubClaim, str | None]:
+        return _quote_claim(text, req.company_ticker, 1)
+
+    return make
+
+
 class Nodes:
     def __init__(self, ctx: RunContext) -> None:
         self.ctx = ctx
@@ -302,7 +316,13 @@ class Nodes:
         aliases = self.ctx.settings.corpus_companies.get(req.company_ticker or "", [])
         display = routing.INFLUENCERS[state.influencer][0]
         company = aliases[0] if aliases else req.company_ticker
-        stored = posts.posts_for(posts.load_posts(self.ctx.settings.posts_dir), state.influencer, aliases)
+        claims_path = claims_catalog_path(self.ctx.settings.posts_dir)
+        all_posts = posts.load_posts(self.ctx.settings.posts_dir)
+        if not all_posts and claims_path.exists():
+            # No transcripts on this machine: the catalog still says which videos exist and what was said.
+            all_posts = posts_from_catalog(load_catalog(claims_path))
+            self.rec.event("collect_posts", "no transcripts stored; posts built from the claim catalog")
+        stored = posts.posts_for(all_posts, state.influencer, aliases)
         # The Company X demo is outside the project window. Real companies stay inside it.
         if req.company_ticker != "CMPX":
             stored = [row for row in stored if posts.in_window(row)]
@@ -361,24 +381,36 @@ class Nodes:
             self.rec.event("collect_posts", f"record over {len(ordered)} posts: {', '.join(sorted(kinds))}")
             return {"clarification_question": posts.record_marker(kinds, [str(row.get("video_id")) for row in ordered])}
         focus_quotes: list[str] = []
+        match = None
         focus = stated_claim(state.raw_input, state.influencer, aliases)
-        claims_path = claims_catalog_path(self.ctx.settings.posts_dir)
         if focus and claims_path.exists():
+            # Filter -> rank -> pick -> align (finsight/agents/claim_matching). The user's text only finds the line.
             video_ids = {str(row.get("video_id") or "") for row in with_text}
-            choice = choose_line(
-                focus,
-                load_claim_rows(claims_path, video_ids, req.company_ticker),
-                with_text,
-                confirmed_video=explicit,
-                ticker=req.company_ticker,
+            candidates = lines_for(load_catalog(claims_path), influencer=state.influencer,
+                                   ticker=req.company_ticker, video_ids=video_ids)
+            fallback = transcript_lines(with_text, req.company_ticker)
+            # Recorded as an agent call, so the LLM pick's tokens and cost reach the decision log and the eval.
+            outcome, error = self._call("claim_matcher", lambda: match_claim(
+                focus, candidates, video_id=explicit, fallback=fallback, ticker=req.company_ticker))
+            if error is not None or outcome is None:
+                outcome = match_claim(focus, candidates, video_id=explicit, fallback=fallback,
+                                      ticker=req.company_ticker, mode="rules")
+            match = to_contract(outcome, with_text)
+            self.rec.event(
+                "collect_posts",
+                f"match {outcome.status} by {outcome.method}: {len(candidates)} candidate lines, "
+                f"chose {[line.line_id for line in outcome.lines]}; facts "
+                + ", ".join(f"{fact.bucket}" for fact in match.facts),
             )
-            if choice.question:
-                self.rec.event("collect_posts", "asked which spoken line")
-                return {"clarification_question": choice.question}
-            chosen = next((row for row in with_text if row.get("video_id") == choice.video_id), None)
+            later = self._said_after_cutoff(state, outcome, focus, stored, display)
+            if later:
+                return _stop(AssessmentStatus.REFUSED, later) | {"match": match}
+            if outcome.status != "MATCHED":
+                return {"clarification_question": outcome.question, "match": match}
+            chosen = next((row for row in with_text if row.get("video_id") == outcome.video_id), None)
             if chosen is None:
                 return _stop(AssessmentStatus.REFUSED, "That post is not in the store.")
-            focus_quotes = choice.quotes
+            focus_quotes = [line.text for line in outcome.lines]
         else:
             chosen = posts.choose_post(with_text, state.raw_input, state.influencer, state.post_id)
             if chosen is None:
@@ -422,7 +454,41 @@ class Nodes:
             "post_id": str(chosen.get("video_id") or "") or None,
             "focus_quotes": focus_quotes,
             "post_published": uploaded,
+            "match": match,
         }
+
+    def _said_after_cutoff(self, state: FinSightState, outcome, focus: str, stored: list[dict],
+                           display: str) -> str | None:
+        """The user's cut-off hides the line they mean: it was said later. Say so instead of offering a weaker line.
+
+        Applies only to a cut-off the user gave, and only when nothing before it states the same figure
+        (no match, or only a conflict).
+        """
+        req = state.request
+        if req.cutoff_was_defaulted or req.cutoff_source == "corpus_default":
+            return None
+        if outcome.status == "MATCHED" and any(item.bucket == "both" for item in outcome.aligned):
+            return None
+        if outcome.status == "ASK":
+            return None
+        later_ids = {str(row.get("video_id") or "") for row in stored
+                     if (uploaded := posts.post_date(row)) is not None and uploaded > req.cutoff_date}
+        if not later_ids:
+            return None
+        claims_path = claims_catalog_path(self.ctx.settings.posts_dir)
+        lines = lines_for(load_catalog(claims_path), influencer=state.influencer, ticker=req.company_ticker,
+                          video_ids=later_ids)
+        found = match_claim(focus, lines, ticker=req.company_ticker, mode="rules")
+        if found.status == "NONE" or (found.status == "MATCHED"
+                                      and not any(item.bucket == "both" for item in found.aligned)):
+            return None
+        dates = sorted(line.upload_date for line in found.lines if line.upload_date) or sorted(
+            line.upload_date for line in lines if line.upload_date and line.video_id in later_ids)
+        when = dates[0].strftime("%d %b %Y").lstrip("0") if dates else "a later date"
+        self.rec.event("collect_posts", f"the matching line was said after the cut-off ({when})")
+        return (f"{display} said this on {when}, after the cut-off "
+                f"{req.cutoff_date.strftime('%d %b %Y').lstrip('0')}. Nothing said on or before the cut-off "
+                "states it, so there is nothing to check as of that date.")
 
     # -- clarification (diagram: "Unclear or missing info" -> ask the user) ------
 
@@ -440,7 +506,19 @@ class Nodes:
         reasons = load_stored_reasons(claims_path, state.post_id, req.company_ticker) if stored is not None else None
         aliases = self.ctx.settings.corpus_companies.get(req.company_ticker or "", [])
         focus = stated_claim(state.raw_input, state.influencer, aliases) if state.from_stored_post else None
-        if state.focus_quotes:
+        match = state.match
+        if match is not None and match.status == "MATCHED":
+            sub_claims, match, made_reasons = build_sub_claims(match, stored, req.company_ticker, _quote_claim_of(req))
+            extracted = Extraction()
+            ids = {claim.sub_claim_id for claim in sub_claims}
+            extracted.insufficient_reasons = {key: value for key, value in (reasons or {}).items() if key in ids}
+            extracted.insufficient_reasons.update(made_reasons)
+            extracted.sub_claims, extracted.dropped_by_cap = keep_within_cap(sub_claims)
+            extracted.notes.append(
+                f"{len(extracted.sub_claims)} sub-claims from the match: "
+                + ", ".join(f"{c.sub_claim_id}={c.sub_claim_type.value}/{c.alignment}" for c in extracted.sub_claims)
+            )
+        elif state.focus_quotes:
             extracted = extraction_from_quotes(state.focus_quotes, stored, req.company_ticker)
         else:
             extracted = run_extraction(
@@ -462,13 +540,16 @@ class Nodes:
         if state.from_stored_post:
             # Period clues ride along with each line; the line itself is still the claim that is checked.
             sub_claims = clues.with_clues(sub_claims, req.raw_claim, focus)
-            conflicts = clues.prompt_conflicts(focus, sub_claims, req.company_ticker)
+            # With a match, the fact alignment already reports every prompt-vs-post difference.
+            conflicts = [] if match is not None else clues.prompt_conflicts(focus, sub_claims, req.company_ticker)
             for claim in sub_claims:
                 if claim.context:
                     self.rec.event("extract_claims", f"{claim.sub_claim_id} context: {claim.context[:200]}")
             for note in conflicts:
                 self.rec.event("extract_claims", f"prompt vs post: {note}")
         update: dict[str, Any] = {"sub_claims": sub_claims}
+        if match is not None:
+            update["match"] = match
         if extracted.insufficient_reasons:
             update["insufficient_reasons"] = extracted.insufficient_reasons
         label = state.checked_post or ""
@@ -778,13 +859,25 @@ class Nodes:
         post_label = state.checked_post or ""
         if missed:
             post_label = post_label[:post_label.find(missed)].strip()
+        # The headline covers the facts the user asked about. What the influencer also said is shown, not counted.
+        headline = headline_ids(state.sub_claims) if state.match is not None else [
+            claim.sub_claim_id for claim in state.sub_claims]
+        asked = [row for row in results if row.sub_claim.sub_claim_id in headline]
         if not results:
             overall = None
             text = missed or "Nothing in this post could be checked, so there is no overall label."
             gaps.append(text)
         else:
-            overall = overall_verdict([unit.verdict for unit in report_units(results)])
-            text = explain.summary(results, overall)
+            overall = overall_verdict([unit.verdict for unit in report_units(asked or results)])
+            text = explain.summary(asked or results, overall)
+            also = len(results) - len(asked)
+            if asked and also:
+                text += (f" In the same line the influencer also said {also} other thing"
+                         f"{'s' if also != 1 else ''}; those are checked below but not counted in this verdict.")
+            not_said = [fact for fact in (state.match.facts if state.match else []) if fact.bucket == "user_only"]
+            if not_said:
+                text += " Not in the matched line: " + "; ".join(
+                    fact.user_span or "" for fact in not_said) + "."
         text, overall = _said_and_verified(state, results, text, overall)
         if state.influencer_note:
             text = f"{state.influencer_note} {text}"
@@ -797,6 +890,7 @@ class Nodes:
             evidence_gaps=gaps, as_of_date=state.request.cutoff_date,
             cutoff_was_defaulted=state.request.cutoff_was_defaulted, boundary_disclaimer=BOUNDARY_DISCLAIMER,
             cutoff_source=state.request.cutoff_source, requested_cutoff=state.request.requested_cutoff,
+            match=state.match, headline_sub_claim_ids=[row.sub_claim.sub_claim_id for row in asked],
         )
         return {"final": final}
 
@@ -851,6 +945,7 @@ class Nodes:
             cutoff_source=state.request.cutoff_source if state.request else "user",
             requested_cutoff=state.request.requested_cutoff if state.request else None,
             boundary_disclaimer=BOUNDARY_DISCLAIMER,
+            match=state.match,
         )
         self.rec.event("finalize", f"status={final.status.value} reason={final.refusal_reason or '-'}")
         log = self.rec.finish(final.status, {r.sub_claim.sub_claim_id: r.verdict for r in final.sub_claim_results})

@@ -74,17 +74,6 @@ Select the explicit implementations below when the orchestrator should use LLM e
 
 #### Input and output contracts
 
-**Paid-source provenance:** after retrieval, the collector looks up each canonical
-document ID and company in the raw manifests. Approved paid-subscription sources
-carry optional `source_page` and `source_url_requirement` fields on their
-EvidenceItems (schema 0.12). The Auditor still requires a citation span. A missing
-document URL is accepted only with an HTTP(S) publisher page and the explicit
-`not_required_user_approved_paid_source` exception. CLI and UI links are labelled
-**Publisher/platform**; the individual document URL remains empty and the source
-tier does not change. This runtime lookup needs no PDF processing, chunk rebuild
-or embedding regeneration. Existing saved results remain historical; restart the
-UI server to load the code and run a new check to obtain an updated assessment.
-
 | Input | Meaning |
 |---|---|
 | `SubClaim.sub_claim_id` | Links every returned passage to the incoming claim. |

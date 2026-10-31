@@ -22,7 +22,7 @@ from pathlib import Path
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from finsight.agents.orchestrator import posts
 from finsight.agents.orchestrator.aggregation import overall_verdict
@@ -33,7 +33,10 @@ from finsight.baselines.common import BaselineResult
 from finsight.baselines.direct_llm import run_direct_llm
 from finsight.config import FINAL_REPORT_MODEL, get_settings
 from finsight.contracts.schemas import AssessmentStatus, DecisionLog, FinalAssessment, Verdict
+from finsight.eval.match_eval import fact_verdicts, match_correct, score_alignment
 from finsight.eval.metrics import (
+    GoldFact,
+    GoldMatch,
     GoldSubClaim,
     PredictedSubClaim,
     RunRecord,
@@ -43,7 +46,10 @@ from finsight.eval.metrics import (
     write_sub_claims_csv,
 )
 
-SYSTEMS = ("direct", "rag", "finsight")
+# llm: plain LLM (no data). direct: LLM + the company's XBRL facts. rag: Basic RAG. rag_quote: RAG + the
+# influencer's actual line (from the gold match), so only verification differs from FinSight. See
+# docs/evaluation.md.
+SYSTEMS = ("llm", "direct", "rag", "rag_quote", "finsight")
 DATASET_DIR = Path(str(resources.files("finsight.eval.datasets")))
 HELDOUT_LOCK = DATASET_DIR / "claims_heldout.lock"
 
@@ -74,6 +80,31 @@ class EvalItem(BaseModel):
     user_matches_post: bool | None = None  # False when the user misremembers the post
     mismatch_note: str | None = None
     gold_source: str | None = None
+    # Claim matching gold (docs/claim_matching.md). gold_sub_claims is derived from gold_alignment when empty.
+    match_case: str | None = None
+    gold_match: GoldMatch | None = None
+    gold_alignment: list[GoldFact] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _sub_claims_from_alignment(self) -> "EvalItem":
+        if self.gold_alignment and not self.gold_sub_claims:
+            seen: set[str] = set()
+            for fact in self.gold_alignment:
+                if fact.bucket == "user_only" or not fact.quote_span or fact.quote_span in seen:
+                    continue
+                seen.add(fact.quote_span)
+                self.gold_sub_claims.append(GoldSubClaim(
+                    text=fact.quote_span, gold_verdict=fact.gold_verdict, sub_claim_type=fact.sub_claim_type,
+                    evidence=fact.evidence, influencer=self.influencer, rule_note=fact.rule_note))
+        return self
+
+    @property
+    def gold_overall(self) -> Verdict | None:
+        """The headline verdict: the facts the user asked about, when every one of them is labeled."""
+        asked = [fact.gold_verdict for fact in self.gold_alignment if fact.asked]
+        if not asked or any(verdict is None for verdict in asked):
+            return None
+        return overall_verdict(asked)
 
 
 def dataset_path(split: str) -> Path:
@@ -118,7 +149,9 @@ def validate_datasets() -> list[str]:
                 problems.append(f"{i.item_id}: refusal/clarification items must not have gold_sub_claims")
             if not stops and not i.gold_sub_claims:
                 problems.append(f"{i.item_id}: items that are analyzed need gold_sub_claims")
-            if i.category == "ask_which_post":
+            if i.gold_match is not None:
+                problems += _match_problems(i)
+            if i.category == "ask_which_post" and i.gold_match is None:
                 # The question asks which post, so the answer is a post id, not an influencer name.
                 if not i.expect_clarification or not processed_later:
                     problems.append(f"{i.item_id}: ask_which_post needs expect_clarification and "
@@ -132,6 +165,28 @@ def validate_datasets() -> list[str]:
     if HELDOUT_LOCK.exists() and HELDOUT_LOCK.read_text().strip() != file_sha256(dataset_path("heldout")):
         problems.append("heldout file changed after it was frozen (hash mismatch with claims_heldout.lock)")
     return problems
+
+
+def _match_problems(i: EvalItem) -> list[str]:
+    gold, out = i.gold_match, []
+    if gold.status == "MATCHED":
+        if not gold.quote_ids:
+            out.append(f"{i.item_id}: a MATCHED gold_match needs quote_ids")
+        if not i.gold_alignment:
+            out.append(f"{i.item_id}: a MATCHED item needs gold_alignment")
+        if i.expect_clarification or i.expect_refusal:
+            out.append(f"{i.item_id}: a MATCHED item is analyzed, so it cannot expect a stop")
+        for fact in i.gold_alignment:
+            if fact.bucket != "user_only" and fact.quote_id not in set(gold.quote_ids) | set(gold.acceptable_quote_ids):
+                out.append(f"{i.item_id}: fact quote_id {fact.quote_id} is not one of the gold lines")
+            if fact.bucket == "user_only" and (fact.quote_span or fact.gold_verdict):
+                out.append(f"{i.item_id}: a user_only fact has no quote and no verdict (it is never checked)")
+    else:
+        if not i.expect_clarification:
+            out.append(f"{i.item_id}: a {gold.status} gold_match asks the user, so expect_clarification is true")
+        if gold.status == "ASK" and len(gold.video_ids) < 2:
+            out.append(f"{i.item_id}: an ASK gold_match needs at least two video_ids")
+    return out
 
 
 def freeze_heldout() -> str:
@@ -193,7 +248,7 @@ def run_finsight_item(item: EvalItem, out_dir: Path) -> tuple[RunRecord, str]:
     settings = dataclasses.replace(get_settings(), logs_dir=out_dir / "logs")
     if item.category == "record":
         return _run_record_item(item, settings)
-    if item.category == "ask_which_post":
+    if item.category == "ask_which_post" and item.gold_match is None:
         return _run_which_post_item(item, settings)
     run = execute(item.claim, item.cutoff_date, settings=settings)
     fa = run.assessment
@@ -206,7 +261,24 @@ def run_finsight_item(item: EvalItem, out_dir: Path) -> tuple[RunRecord, str]:
         item, fa, [run.decision_log], valid=valid, have_verdicts=have_verdicts, clarified=clarified,
         success=_success(completed, valid, have_verdicts, refused, clarified, item), predicted=_predicted(fa),
     )
+    if item.gold_match is not None:
+        _score_match(record, item, fa)
     return record, fa.model_dump_json(indent=2)
+
+
+def _score_match(record: RunRecord, item: EvalItem, fa: FinalAssessment) -> None:
+    """Right line, right fact buckets, right verdict per fact: three scores, never mixed."""
+    predicted = fa.match if fa.match is not None and fa.match.status == "MATCHED" else None
+    record.match_case = item.match_case
+    record.predicted_match_status = fa.match.status if fa.match else (
+        "ASK" if fa.clarification_question else fa.status.value)
+    record.match_correct = match_correct(item.gold_match, fa.match, fa.clarification_question)
+    alignment = score_alignment(item.gold_alignment, predicted)
+    record.alignment_correct, record.alignment_total = alignment.correct, alignment.total
+    record.fact_verdicts = fact_verdicts(item.gold_alignment, fa) if record.match_correct else []
+    record.failed_checks += [f"alignment {miss}" for miss in alignment.misses]
+    if not record.match_correct:
+        record.failed_checks.append(f"match: gold {item.gold_match.status}, got {record.predicted_match_status}")
 
 
 # -- record items (consistency / accuracy across every stored post) ----------------------------
@@ -338,9 +410,41 @@ def _run_which_post_item(item: EvalItem, settings) -> tuple[RunRecord, str]:
     return out, json.dumps(raw, indent=2)
 
 
+def baseline_cutoff(item: EvalItem) -> date | None:
+    """The same as-of date FinSight judges on: the user's cut-off, else the matched video's date."""
+    if item.cutoff_date:
+        return item.cutoff_date
+    for post in item.posts:
+        raw = post.get("upload_date") if isinstance(post, dict) else None
+        if raw:
+            return date.fromisoformat(str(raw)[:10])
+    return None
+
+
+def gold_quote(item: EvalItem) -> str | None:
+    """The influencer's actual line(s) for the RAG + quote baseline (an oracle: no matching errors)."""
+    if item.gold_match is None or item.gold_match.status != "MATCHED":
+        return None
+    from finsight.agents.claim_extraction.build import claims_catalog_path
+    from finsight.agents.claim_matching.catalog import load_catalog
+
+    wanted = set(item.gold_match.quote_ids)
+    lines = [line for line in load_catalog(claims_catalog_path(get_settings().posts_dir)) if line.line_id in wanted]
+    return " ".join(line.text for line in lines) or None
+
+
 def run_baseline_item(system: str, item: EvalItem) -> tuple[RunRecord, str]:
+    cutoff = baseline_cutoff(item)
     try:
-        result = (run_direct_llm if system == "direct" else run_basic_rag)(item.claim, item.cutoff_date)
+        if system == "llm":
+            result = run_direct_llm(item.claim, cutoff, with_facts=False)
+        elif system == "direct":
+            result = run_direct_llm(item.claim, cutoff)
+        elif system == "rag_quote":
+            result = run_basic_rag(item.claim, cutoff, quote=gold_quote(item))
+            result.system = "rag_quote"
+        else:
+            result = run_basic_rag(item.claim, cutoff)
     except Exception as exc:  # noqa: BLE001 - a crashing baseline is a failed item, not a failed eval
         result = BaselineResult(system=system, cutoff_date=item.cutoff_date or get_settings().corpus_as_of_date,
                                 error=f"{type(exc).__name__}: {exc}")
@@ -365,11 +469,41 @@ def run_baseline_item(system: str, item: EvalItem) -> tuple[RunRecord, str]:
     return record, raw
 
 
+def llm_preflight() -> str | None:
+    """One tiny real call before a paid run. Returns the error text, or None when the model answers.
+
+    A paid run where every call fails still "finishes": FinSight falls back to its rules and every baseline item
+    fails in a few milliseconds with 0 tokens. This stops that before it wastes a run.
+    """
+    settings = get_settings()
+    if settings.llm_provider == "mock":
+        return None
+    from finsight.llm.client import complete
+
+    try:
+        response = complete("Reply with the single word OK.", max_tokens=200)
+    except Exception as exc:  # noqa: BLE001 - reported to the user, not raised
+        return f"{type(exc).__name__}: {exc}"
+    if not (response.text or "").strip():
+        return (f"the model returned an empty answer (finish_reason={response.finish_reason}); "
+                "a reasoning model may need a larger max_tokens")
+    return None
+
+
 def run_eval(systems: list[str], split: str, out_root: Path = Path("results"),
-             dataset_path: Path | None = None) -> Path:
+             dataset_path: Path | None = None, route: str | None = None) -> Path:
+    """`route` ("financial" / "narrative"): every system runs only on items with a labeled fact whose gold route is
+    that agent, and comparison.md scores only those facts. The set comes from the gold labels, not from a run."""
     items = load_dataset(split, dataset_path)
     out_dir = out_root / datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_dir.mkdir(parents=True, exist_ok=True)
     records: list[RunRecord] = []
+    if route:
+        from finsight.eval.compare import items_on_route
+
+        items = items_on_route(items, route)
+        (out_dir / f"items_{route}.txt").write_text("\n".join(i.item_id for i in items) + "\n", encoding="utf-8")
+        print(f"[route] {len(items)} items have a labeled {route} fact: " + ", ".join(i.item_id for i in items))
     for system in systems:
         raw_dir = out_dir / "raw" / system
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -380,27 +514,40 @@ def run_eval(systems: list[str], split: str, out_root: Path = Path("results"),
             records.append(record)
             print(f"[{system:<8}] {item.item_id:<8} success={record.task_success} "
                   f"overall={record.overall_verdict.value if record.overall_verdict else '-'}"
-                  + (f" failed: {'; '.join(record.failed_checks)}" if record.failed_checks else ""))
+                  + (f" failed: {'; '.join(record.failed_checks)}" if record.failed_checks else "")
+                  + (f" ERROR: {record.error}" if record.error else ""))
 
     (out_dir / "records.jsonl").write_text("\n".join(r.model_dump_json() for r in records) + "\n", encoding="utf-8")
     write_sub_claims_csv(records, out_dir / "sub_claims.csv")
     summaries = {s: summarize([r for r in records if r.system == s]) for s in systems}
     settings = get_settings()
-    header = (f"# FinSight evaluation: split={split}, {len(items)} items\n\n"
+    scope = f", {route} items only" if route else ""
+    header = (f"# FinSight evaluation: split={split}, {len(items)} items{scope}\n\n"
               f"Run {out_dir.name}, provider={settings.llm_provider}, model={settings.llm_model}")
     (out_dir / "summary.md").write_text(summary_markdown(summaries, header), encoding="utf-8")
+    if len(systems) > 1:
+        from finsight.eval.compare import write_comparison
+
+        write_comparison(out_dir, items, systems, route)
     return out_dir
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="finsight-eval", description="Run the FinSight evaluation.")
-    parser.add_argument("--system", choices=[*SYSTEMS, "all"], default="all")
+    parser.add_argument("--system", default="all", metavar="NAMES",
+                        help=f"all, or a comma list of: {', '.join(SYSTEMS)} (e.g. finsight,llm,direct)")
     parser.add_argument("--split", choices=["dev", "heldout"], default="dev")
     parser.add_argument("--final", action="store_true", help="required to run the frozen heldout split")
     parser.add_argument("--out", type=Path, default=Path("results"))
     parser.add_argument("--dataset", type=Path, default=None, help="override the JSONL file for the split")
     parser.add_argument("--validate", action="store_true", help="validate both dataset files and exit")
     parser.add_argument("--freeze", action="store_true", help="write claims_heldout.lock (do this once)")
+    parser.add_argument("--route", choices=["financial", "narrative"],
+                        help="only items with a labeled fact the router sends to this agent; score only those facts")
+    parser.add_argument("--compare", type=Path, metavar="RUN_DIR",
+                        help="recompute comparison.md for a finished run directory (all its systems)")
+    parser.add_argument("--matcher", action="store_true",
+                        help="score claim matching only (no agents): match and alignment accuracy per case")
     parser.add_argument("--agents", metavar="NAMES",
                         help="evaluate agents one by one instead of the full system: 'all' or a comma list of "
                              "decomposer, financial, narrative, retriever, auditor, advice_boundary, tier_policy")
@@ -414,6 +561,29 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(exc))
         out_dir = run_agent_evals(names, args.out)
         print((out_dir / "summary.md").read_text(encoding="utf-8"))
+        print(f"Results written to {out_dir}")
+        return 0
+    if args.compare:
+        from finsight.eval.compare import write_comparison
+
+        found = {p.name for p in (args.compare / "raw").iterdir() if p.is_dir()}
+        systems = [s for s in SYSTEMS if s in found] + sorted(found - set(SYSTEMS))
+        path = write_comparison(args.compare, load_dataset(args.split, args.dataset), systems, args.route)
+        print(path.read_text(encoding="utf-8"))
+        return 0
+    if args.matcher:
+        from finsight.eval.match_eval import matcher_report, run_matcher_only
+        from finsight.agents.claim_matching.matcher import matcher_mode
+
+        if args.split == "heldout" and not args.final:
+            parser.error("the heldout split is frozen: pass --final only for the final reported run")
+        rows = run_matcher_only(load_dataset(args.split, args.dataset))
+        out_dir = args.out / f"match-{datetime.now():%Y%m%d-%H%M%S}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        report = matcher_report(rows, f"# Claim matching: split={args.split}, mode={matcher_mode()}")
+        (out_dir / "match_report.md").write_text(report, encoding="utf-8")
+        (out_dir / "match_rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        print(report)
         print(f"Results written to {out_dir}")
         return 0
     if args.validate or args.freeze:
@@ -433,8 +603,18 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("freeze the heldout split first: finsight eval --freeze")
         if HELDOUT_LOCK.read_text().strip() != file_sha256(dataset_path("heldout")):
             parser.error("heldout file changed since it was frozen; results would not be comparable")
-    systems = list(SYSTEMS) if args.system == "all" else [args.system]
-    out_dir = run_eval(systems, args.split, args.out, args.dataset)
+    problem = llm_preflight()
+    if problem:
+        print(f"The LLM call failed before the run started ({settings.llm_provider}, {settings.llm_model}):\n"
+              f"  {problem}\n"
+              "Check: `pip install -e \".[dev,openai]\"` in this venv, the API key in config.yaml, "
+              "FINSIGHT_SPEND_LIMIT_USD, and `finsight usage`. Or run in mock mode: `finsight mode mock`.")
+        return 2
+    systems = list(SYSTEMS) if args.system == "all" else [s.strip() for s in args.system.split(",") if s.strip()]
+    unknown = [s for s in systems if s not in SYSTEMS]
+    if unknown:
+        parser.error(f"unknown system(s) {', '.join(unknown)}; choose from {', '.join(SYSTEMS)} or all")
+    out_dir = run_eval(systems, args.split, args.out, args.dataset, route=args.route)
     print((out_dir / "summary.md").read_text(encoding="utf-8"))
     print(f"Results written to {out_dir}")
     return 0

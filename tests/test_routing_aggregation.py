@@ -42,8 +42,11 @@ def test_guards():
     assert routing.cap_verdict(S, capped)[0] is P and routing.cap_verdict(C, capped)[0] is C
     assert routing.is_raise(I, S) and not routing.is_raise(S, I) and not routing.is_raise(I, C)
     both = rule.model_copy(update={"tier_requirement": [SourceTier.TIER_1, SourceTier.TIER_2]})
-    assert routing.cap_tier2_only_support(S, [_item(Stance.SUPPORTING, SourceTier.TIER_2)], both)[0] is S
+    assert routing.cap_tier2_only_support(S, [_item(Stance.SUPPORTING, SourceTier.TIER_2)], both)[0] is P
     assert routing.cap_tier2_only_support(S, [_item(Stance.SUPPORTING, SourceTier.TIER_1)], both)[0] is S
+    # A segment figure (OTHER) stated only in the company's release is not capped (team decision, 31 Oct 2026).
+    other = both.model_copy(update={"sub_claim_type": SubClaimType.OTHER})
+    assert routing.cap_tier2_only_support(S, [_item(Stance.SUPPORTING, SourceTier.TIER_2)], other)[0] is S
 
 
 def test_scope():
