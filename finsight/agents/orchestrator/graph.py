@@ -16,7 +16,8 @@ sub-claim) goes to `clarification`, which returns a question to the user.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -224,8 +225,8 @@ def _combine(runs: list[RunOutput]) -> RunOutput:
     for final in finals:
         if final.checked_post:
             names.append(final.checked_post)
-    summary = " ".join(final.summary for final in finals if final.summary)
-    status = next((final.status for final in finals if final.status is AssessmentStatus.COMPLETED), finals[0].status)
+    summary = _unique_sentences(final.summary for final in finals if final.summary)
+    status =next((final.status for final in finals if final.status is AssessmentStatus.COMPLETED), finals[0].status)
     overall = overall_verdict([row.verdict for row in results]) if results else finals[0].overall_verdict
     question = next((final.clarification_question for final in finals if final.clarification_question), None)
     merged = finals[0].model_copy(update={
@@ -237,6 +238,16 @@ def _combine(runs: list[RunOutput]) -> RunOutput:
         "clarification_question": question if status is AssessmentStatus.NEEDS_CLARIFICATION else None,
     })
     return RunOutput(merged, runs[0].decision_log)
+
+
+def _unique_sentences(summaries: Iterable[str]) -> str:
+    """Join run summaries, dropping a sentence one run already said (two companies, same verdict)."""
+    seen: list[str] = []
+    for text in summaries:
+        for sentence in re.split(r"(?<=[.!?])\s+", text.strip()):
+            if sentence and sentence not in seen:
+                seen.append(sentence)
+    return " ".join(seen)
 
 
 def _computed(run: RunOutput) -> tuple[float | None, str | None]:

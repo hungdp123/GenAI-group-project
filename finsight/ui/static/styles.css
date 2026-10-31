@@ -114,14 +114,6 @@ textarea, select, input[type="date"], input:not([type]) {
 textarea { resize: vertical; min-height: 104px; line-height: 1.45; }
 select { background-color: var(--surface); padding-right: 32px; }
 textarea:focus, select:focus, input:focus { outline: 3px solid var(--accent-soft); border-color: var(--accent); }
-.paid {
-  display: flex; gap: 8px; align-items: flex-start; margin: 4px 0 14px; padding: 10px 12px;
-  border-radius: 10px; background: var(--mixed-soft); color: var(--mixed); font-size: 0.8rem; line-height: 1.4;
-  border: 1px solid transparent;
-}
-.paid input { margin-top: 2px; accent-color: var(--accent); }
-.paid.is-nudged { border-color: var(--mixed); animation: nudge 0.3s; }
-@keyframes nudge { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 .run-row { display: flex; gap: 8px; }
 .run-btn, .ghost-btn, .text-btn { border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 0.9rem; }
 .run-btn { flex: 1; border: 0; background: var(--accent); color: var(--accent-ink); }
@@ -146,15 +138,6 @@ textarea:focus, select:focus, input:focus { outline: 3px solid var(--accent-soft
   margin: 8px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--code-bg); color: var(--code-ink);
   font-family: var(--mono); font-size: 0.7rem; line-height: 1.5; overflow: auto; white-space: pre-wrap; word-break: break-word;
 }
-
-/* Model level */
-.segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 12px; background: var(--neutral-soft); }
-.segmented__opt {
-  border: 0; border-radius: 9px; padding: 7px 8px; background: transparent; color: var(--muted);
-  font-size: 0.84rem; font-weight: 600;
-}
-.segmented__opt:hover { color: var(--ink); }
-.segmented__opt.is-on { background: var(--surface); color: var(--accent); box-shadow: 0 1px 3px rgba(16, 24, 40, 0.12); }
 
 /* Suggested next checks */
 .suggest { margin-top: 18px; }

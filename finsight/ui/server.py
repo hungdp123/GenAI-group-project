@@ -141,8 +141,8 @@ class StageCapture:
             return [dict(stage) for stage in self._stages]
 
 
-def parse_run_body(raw: dict[str, Any], *, paid: bool) -> dict[str, Any]:
-    """Check the form payload. Raises ValueError, or PermissionError in paid mode without confirmation."""
+def parse_run_body(raw: dict[str, Any]) -> dict[str, Any]:
+    """Check the form payload. Raises ValueError."""
     claim = raw.get("claim")
     if not isinstance(claim, str):
         raise ValueError("The claim has to be text.")
@@ -168,8 +168,6 @@ def parse_run_body(raw: dict[str, Any], *, paid: bool) -> dict[str, Any]:
     level = _blank(raw.get("level"))
     if level and level not in MODEL_LEVELS:
         raise ValueError(f"The model level must be one of: {', '.join(MODEL_LEVELS)}.")
-    if paid and not raw.get("confirm_paid"):
-        raise PermissionError("This machine is in paid LLM mode. Confirm the run before it can spend credit.")
     return {"claim": claim, "cutoff": cutoff, "company": company, "influencer": influencer, "post": post,
             "level": level}
 
@@ -392,10 +390,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "The request body must be an object."})
             return
         try:
-            body = parse_run_body(raw, paid=get_settings().llm_provider != "mock")
-        except PermissionError as exc:
-            self._json(400, {"error": str(exc), "paid": True})
-            return
+            body = parse_run_body(raw)
         except ValueError as exc:
             self._json(400, {"error": str(exc)})
             return

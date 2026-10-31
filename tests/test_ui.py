@@ -78,13 +78,11 @@ def test_rejects_a_log_path_that_leaves_the_folder(tmp_path):
     assert path.parent == tmp_path.resolve()
 
 
-def test_paid_run_needs_confirmation():
-    with pytest.raises(PermissionError):
-        parse_run_body({"claim": "Nvidia revenue grew."}, paid=True)
-    parsed = parse_run_body({"claim": "  Nvidia revenue grew. ", "confirm_paid": True, "company": "nvda"}, paid=True)
+def test_run_body_is_checked():
+    parsed = parse_run_body({"claim": "  Nvidia revenue grew. ", "company": "nvda"})
     assert parsed["company"] == "NVDA"
     with pytest.raises(ValueError):
-        parse_run_body({"claim": "x", "cutoff": "31-08-2026"}, paid=False)
+        parse_run_body({"claim": "x", "cutoff": "31-08-2026"})
 
 
 def test_view_keeps_the_source_label_and_citation():
@@ -153,8 +151,8 @@ def test_model_level_is_checked_and_routes_each_call(monkeypatch):
     from finsight.ui.server import MODEL_LEVELS, level_model
 
     with pytest.raises(ValueError):
-        parse_run_body({"claim": "Nvidia revenue grew.", "level": "ultra"}, paid=False)
-    assert parse_run_body({"claim": "Nvidia revenue grew.", "level": "high"}, paid=False)["level"] == "high"
+        parse_run_body({"claim": "Nvidia revenue grew.", "level": "ultra"})
+    assert parse_run_body({"claim": "Nvidia revenue grew.", "level": "high"})["level"] == "high"
     assert level_model("high") is None  # mock mode keeps its own model
     monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "openai")
     assert level_model("high") == MODEL_LEVELS["high"]["model"]

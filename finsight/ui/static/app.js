@@ -103,7 +103,6 @@ function cliPreview() {
 async function init() {
   const response = await fetch("/api/meta");
   state.meta = await response.json();
-  renderMode();
   renderExamples();
   const asOf = state.meta.mode.corpus_as_of;
   if (asOf) {
@@ -136,46 +135,6 @@ async function init() {
   });
   $("examples").addEventListener("click", onExampleClick);
   $("preview").addEventListener("click", onPreviewClick);
-}
-
-function renderMode() {
-  const mode = state.meta.mode;
-  $("paidRow").hidden = !mode.paid;
-  const levels = state.meta.levels || [];
-  $("levelRow").hidden = !levels.length;
-  if (!levels.length) return;
-  let saved = "";
-  try {
-    saved = localStorage.getItem("finsight-level") || "";
-  } catch (error) {
-    // Storage may be blocked; fall back to the server default.
-  }
-  state.level = levels.some((level) => level.id === saved) ? saved : state.meta.default_level;
-  $("levels").innerHTML = levels.map((level) => `
-    <button type="button" role="radio" class="segmented__opt" data-level="${esc(level.id)}" title="${esc(level.note)}">${esc(level.label)}</button>`).join("");
-  $("levels").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-level]");
-    if (!button) return;
-    state.level = button.dataset.level;
-    try {
-      localStorage.setItem("finsight-level", state.level);
-    } catch (error) {
-      // Not remembered across visits; the choice still applies now.
-    }
-    renderLevel();
-  });
-  renderLevel();
-}
-
-function renderLevel() {
-  const levels = state.meta.levels || [];
-  document.querySelectorAll("[data-level]").forEach((button) => {
-    const on = button.dataset.level === state.level;
-    button.classList.toggle("is-on", on);
-    button.setAttribute("aria-checked", on ? "true" : "false");
-  });
-  const level = levels.find((row) => row.id === state.level);
-  $("levelHint").textContent = level ? level.note : "";
 }
 
 function renderExamples() {
@@ -234,20 +193,12 @@ async function run() {
     company: state.company,
     influencer: state.influencer,
     post: state.post,
-    level: state.level || "",
-    confirm_paid: $("confirmPaid").checked,
   };
   if (!body.claim.trim()) {
     $("formStatus").textContent = "Paste a claim first.";
     $("claim").focus();
     return;
   }
-  if (state.meta.mode.paid && !body.confirm_paid) {
-    $("formStatus").textContent = "Tick the box above to confirm this paid run.";
-    $("paidRow").classList.add("is-nudged");
-    return;
-  }
-  $("paidRow").classList.remove("is-nudged");
   $("runBtn").disabled = true;
   $("runBtn").textContent = "Checking…";
   $("empty").hidden = true;
