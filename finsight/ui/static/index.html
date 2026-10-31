@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>FinSight</title>
+  <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -12,54 +13,102 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo" aria-hidden="true"></span>
+      <img class="logo" src="/logo.svg" alt="" width="38" height="38" />
       <div>
-        <p class="brand__name">FinSight</p>
+        <p class="brand__name">Fin<span>Sight</span></p>
+        <p class="brand__sub">Fact-check what finance influencers say</p>
       </div>
-    </div>
-    <p class="topbar__lede">Run a claim, then read each step and the citation behind the verdict.</p>
-    <div class="topbar__meta">
-      <label class="switch"><input type="checkbox" id="technical" /> Technical details</label>
-      <div id="modeChip" class="mode-chip">Loading…</div>
     </div>
   </header>
 
   <div class="stage">
     <aside class="deck">
-      <section class="card">
+      <section class="card form-card">
         <h2>Check a claim</h2>
-        <p class="card__hint" id="cutoffHint">Enter a cut-off to choose which posts are eligible. Leave it blank and a stored post is checked as of the day it was published. If that post has no date, the check uses the latest filing in the corpus.</p>
+        <p class="card__hint">Write who said what about which company, with a number. FinSight checks it against company filings and reports.</p>
+        <label class="field">
+          <span>Influencer</span>
+          <select id="influencer">
+            <option value="">Detect from the claim</option>
+          </select>
+        </label>
         <label class="field">
           <span>Claim</span>
-          <textarea id="claim" rows="5" placeholder="Joseph Carlson said Nvidia reported revenues of 96.2 billion, up 106% year-over-year."></textarea>
+          <textarea id="claim" rows="4" placeholder="Kevin Paffrath said Google&#39;s Services margin was 40% last year and is 48.4% now.">Kevin Paffrath said Google&#39;s Services margin was 40% last year and is 48.4% now.</textarea>
         </label>
         <label class="field">
-          <span>Cut-off</span>
+          <span>Check as of <em>(optional)</em></span>
           <input id="cutoff" type="date" />
+          <small class="field__help" id="cutoffHint">Only information published on or before this date is used. Leave blank to use the post's own date.</small>
         </label>
+        <div class="field" id="levelRow" hidden>
+          <span>Model</span>
+          <div class="segmented" id="levels" role="radiogroup" aria-label="Model level"></div>
+          <small class="field__help" id="levelHint"></small>
+        </div>
         <label class="paid" id="paidRow" hidden>
           <input type="checkbox" id="confirmPaid" />
-          <span>This machine is in paid mode. I confirm this run can spend course credit.</span>
+          <span>This run uses the paid model and spends course credit.</span>
         </label>
         <div class="run-row">
           <button type="button" class="run-btn" id="runBtn">Run check</button>
           <button type="button" class="ghost-btn" id="clearBtn">Clear</button>
         </div>
-        <p class="ops__note" id="formStatus">Paste a claim. ⌘/Ctrl + Enter runs it.</p>
-        <p class="cli-label">Terminal equivalent</p>
-        <pre class="cli" id="cliPreview"></pre>
+        <p class="form-status" id="formStatus">Tip: Ctrl/⌘ + Enter runs the check.</p>
+        <div class="examples" id="examples"></div>
+        <details class="fold fold--quiet">
+          <summary>Terminal command</summary>
+          <pre class="cli" id="cliPreview"></pre>
+        </details>
+      </section>
+      <section class="card history-card">
+        <div class="history__head">
+          <h2>History</h2>
+          <button type="button" class="text-btn" id="clearHistory" hidden>Clear</button>
+        </div>
+        <ul class="history" id="history"></ul>
       </section>
     </aside>
 
     <main class="preview" id="preview">
-      <section class="card card--soft empty" id="empty">
-        <p class="scope-h">Waiting for a check</p>
-        <h2>Steps, verdict, and citations show up here.</h2>
-        <p class="coverage-brief">The run prints each pipeline stage as it happens, then the verdict for every sub-claim with the filing or passage it cites. Gates, retries, and cut-off violations stay in the trace underneath.</p>
+      <section class="card empty" id="empty">
+        <h2>How to check a claim</h2>
+        <p class="empty__lede">Write what the influencer said, the way you would tell a friend:</p>
+        <p class="formula"><span>Who</span> said <span>which company</span> <span>did what, with a number</span></p>
+        <ol class="empty__steps">
+          <li>Name the influencer: Joseph Carlson, Mark Roussin, Alex Reffett, or Kevin Paffrath. You can also pick one from the <strong>Influencer</strong> list.</li>
+          <li>Include a figure FinSight can look up: revenue, growth, margin, profit, or cash flow.</li>
+          <li>Optionally set <strong>Check as of</strong> to look only at videos and filings up to that day.</li>
+          <li>Press <strong>Run check</strong>. You get a verdict with its source. <strong>Details</strong> holds the evidence, Steps, and the full trace.</li>
+        </ol>
+
+        <p class="empty__label">Good claims. Click one to try it</p>
+        <div class="try-list">
+          <button type="button" class="try" data-try="Joseph Carlson said Alphabet's revenue grew 22% to $110 billion last quarter.">
+            <span class="try__kind">Revenue growth</span>Joseph Carlson said Alphabet's revenue grew 22% to $110 billion last quarter.
+          </button>
+          <button type="button" class="try" data-try="Mark Roussin said Nvidia's revenue doubled and AMD's revenue grew 40%.">
+            <span class="try__kind">Two companies in one claim</span>Mark Roussin said Nvidia's revenue doubled and AMD's revenue grew 40%.
+          </button>
+          <button type="button" class="try" data-try="Amazon's AWS grew 28% in Q1 2026.">
+            <span class="try__kind">No influencer named: FinSight asks</span>Amazon's AWS grew 28% in Q1 2026.
+          </button>
+          <button type="button" class="try" data-try="Mark Roussin said Alphabet's revenue grew 20% last quarter, but Joseph Carlson said Alphabet grew by 22%. Which one is right?" data-cutoff="2026-04-30">
+            <span class="try__kind">Compare two influencers · as of 30 Apr 2026</span>Mark Roussin said Alphabet's revenue grew 20% last quarter, but Joseph Carlson said Alphabet grew by 22%. Which one is right?
+          </button>
+        </div>
+
+        <p class="empty__label">FinSight will not check</p>
+        <ul class="wont">
+          <li><strong>Advice:</strong> "Should I buy Amazon?"</li>
+          <li><strong>Price predictions:</strong> "Nvidia stock will hit $500 next year."</li>
+          <li><strong>Whole-market claims:</strong> "The S&amp;P 500 is up 13% this year."</li>
+          <li><strong>Claims nobody made:</strong> a statement with no influencer gets a follow-up question first.</li>
+        </ul>
       </section>
+      <div id="progress"></div>
       <div id="result"></div>
-      <div id="steps"></div>
-      <div id="trace"></div>
+      <div id="details"></div>
     </main>
   </div>
   <script src="/app.js"></script>

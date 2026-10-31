@@ -146,3 +146,38 @@ def test_meta_and_index_are_served():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_model_level_is_checked_and_routes_each_call(monkeypatch):
+    from finsight.llm import client
+    from finsight.ui.server import MODEL_LEVELS, level_model
+
+    with pytest.raises(ValueError):
+        parse_run_body({"claim": "Nvidia revenue grew.", "level": "ultra"}, paid=False)
+    assert parse_run_body({"claim": "Nvidia revenue grew.", "level": "high"}, paid=False)["level"] == "high"
+    assert level_model("high") is None  # mock mode keeps its own model
+    monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "openai")
+    assert level_model("high") == MODEL_LEVELS["high"]["model"]
+    monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "mock")
+    with client.use_model("gpt-5.4-mini"):
+        assert client.complete("hello").model == "gpt-5.4-mini"
+    assert client.complete("hello").model == "mock-model"
+
+
+def test_model_choice_reaches_orchestrator_worker_threads():
+    from finsight.agents.orchestrator.nodes import _ModelPool
+    from finsight.llm.client import model_override, use_model
+
+    with use_model("gpt-5.4"), _ModelPool(max_workers=2) as pool:
+        seen = list(pool.map(lambda _: model_override(), range(3)))
+    assert seen == ["gpt-5.4"] * 3
+
+
+def test_suggestions_are_stored_claims_and_never_raise():
+    from finsight.ui.suggest import suggestions
+
+    view = {"assessment": {"claim": "Kevin Paffrath said Tesla sales fell.", "sub_claim_results": []}}
+    picked = suggestions(view, {"claim": view["assessment"]["claim"], "company": "TSLA"})
+    assert len(picked) <= 3
+    assert all(text.startswith("Kevin Paffrath said ") for text in picked)
+    assert suggestions({}, {}) == []
