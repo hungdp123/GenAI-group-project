@@ -24,9 +24,11 @@ from finsight.agents.orchestrator.graph import execute
 from finsight.agents.orchestrator.stages import ROLES, StageReporter
 from finsight.config import BOUNDARY_DISCLAIMER, COURSE_BUDGET_USD, get_settings
 from finsight.contracts.schemas import DecisionLog
+from finsight.llm.client import use_model
 from finsight.llm.spend import ledger_summary
 from finsight.logging.decision_log import format_trace
 from finsight.ui.payload import _stats, build_view, cli_command
+from finsight.ui.suggest import suggestions
 
 STATIC = Path(__file__).resolve().parent / "static"
 _FILES = {
@@ -34,6 +36,14 @@ _FILES = {
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/logo.svg": ("logo.svg", "image/svg+xml"),
+    "/favicon.ico": ("logo.svg", "image/svg+xml"),
+}
+# The page's Low / Medium / High choice. Applies when the provider is OpenAI; every model is in PRICE_TABLE.
+MODEL_LEVELS = {
+    "low": {"label": "Low", "model": "gpt-5.4-nano", "note": "Fastest and cheapest"},
+    "medium": {"label": "Medium", "model": "gpt-5.4-mini", "note": "Balanced"},
+    "high": {"label": "High", "model": "gpt-5.4", "note": "Most careful, costs the most"},
 }
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$")
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$")
@@ -131,8 +141,8 @@ class StageCapture:
             return [dict(stage) for stage in self._stages]
 
 
-def parse_run_body(raw: dict[str, Any], *, paid: bool) -> dict[str, Any]:
-    """Check the form payload. Raises ValueError, or PermissionError in paid mode without confirmation."""
+def parse_run_body(raw: dict[str, Any]) -> dict[str, Any]:
+    """Check the form payload. Raises ValueError."""
     claim = raw.get("claim")
     if not isinstance(claim, str):
         raise ValueError("The claim has to be text.")
@@ -155,9 +165,19 @@ def parse_run_body(raw: dict[str, Any], *, paid: bool) -> dict[str, Any]:
     post = _blank(raw.get("post"))
     if post and _TOKEN.fullmatch(post) is None:
         raise ValueError("The video id can only use letters, numbers, dots, and dashes.")
-    if paid and not raw.get("confirm_paid"):
-        raise PermissionError("This machine is in paid LLM mode. Confirm the run before it can spend credit.")
-    return {"claim": claim, "cutoff": cutoff, "company": company, "influencer": influencer, "post": post}
+    level = _blank(raw.get("level"))
+    if level and level not in MODEL_LEVELS:
+        raise ValueError(f"The model level must be one of: {', '.join(MODEL_LEVELS)}.")
+    return {"claim": claim, "cutoff": cutoff, "company": company, "influencer": influencer, "post": post,
+            "level": level}
+
+
+def level_model(level: str | None) -> str | None:
+    """The model behind a UI level. None keeps settings.llm_model (mock mode, other providers)."""
+    settings = get_settings()
+    if not level or settings.llm_provider != "openai":
+        return None
+    return MODEL_LEVELS[level]["model"]
 
 
 def _blank(value: Any) -> str | None:
@@ -170,16 +190,18 @@ def _blank(value: Any) -> str | None:
 def run_check(body: dict[str, Any], capture: StageCapture | None = None) -> dict[str, Any]:
     """Run one check and return the view the page renders."""
     capture = capture or StageCapture()
-    out = execute(
-        body["claim"],
-        body.get("cutoff"),
-        company_ticker=body.get("company"),
-        influencer=body.get("influencer"),
-        post_id=body.get("post"),
-        on_stage=capture,
-    )
-    view = build_view(out)
-    view["cli"] = cli_command(body)
+    with use_model(level_model(body.get("level"))):
+        out = execute(
+            body["claim"],
+            body.get("cutoff"),
+            company_ticker=body.get("company"),
+            influencer=body.get("influencer"),
+            post_id=body.get("post"),
+            on_stage=capture,
+        )
+        view = build_view(out)
+        view["cli"] = cli_command(body)
+        view["suggestions"] = suggestions(view, body)
     return view
 
 
@@ -263,6 +285,12 @@ def meta() -> dict[str, Any]:
             "max_retries": settings.max_retries,
             "env_override": bool(os.getenv("FINSIGHT_LLM_PROVIDER")),
         },
+        "levels": [
+            {"id": key, **row} for key, row in MODEL_LEVELS.items()
+        ] if settings.llm_provider == "openai" else [],
+        "default_level": next(
+            (key for key, row in MODEL_LEVELS.items() if row["model"] == settings.llm_model), "low"
+        ),
         "companies": companies,
         "influencers": [aliases[0] for aliases in INFLUENCERS.values()],
         "examples": EXAMPLES,
@@ -362,10 +390,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "The request body must be an object."})
             return
         try:
-            body = parse_run_body(raw, paid=get_settings().llm_provider != "mock")
-        except PermissionError as exc:
-            self._json(400, {"error": str(exc), "paid": True})
-            return
+            body = parse_run_body(raw)
         except ValueError as exc:
             self._json(400, {"error": str(exc)})
             return

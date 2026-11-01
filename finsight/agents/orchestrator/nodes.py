@@ -56,7 +56,21 @@ from finsight.contracts.schemas import (
     Verdict,
 )
 from finsight.knowledge.loader import KnowledgeLayer
+from finsight.llm.client import model_override, use_model
 from finsight.logging.decision_log import DecisionLogRecorder, tracked_call, write_log
+
+
+class _ModelPool(ThreadPoolExecutor):
+    """Worker threads start with a fresh context, so pass the run's model choice on explicitly."""
+
+    def submit(self, fn, /, *args, **kwargs):
+        model = model_override()
+
+        def call():
+            with use_model(model):
+                return fn(*args, **kwargs)
+
+        return super().submit(call)
 
 
 @dataclass
@@ -220,7 +234,7 @@ class Nodes:
         return result, error
 
     def _pool(self) -> ThreadPoolExecutor:
-        return ThreadPoolExecutor(max_workers=max(1, self.ctx.settings.max_workers))
+        return _ModelPool(max_workers=max(1, self.ctx.settings.max_workers))
 
     # -- 1. intake ----------------------------------------------------------
 
