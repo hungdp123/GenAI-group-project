@@ -14,11 +14,13 @@ in the user prompt, never into `system`.
 
 from __future__ import annotations
 
+import contextvars
 import math
 import os
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from finsight.config import PRICE_TABLE, get_settings
@@ -41,6 +43,26 @@ class LLMResponse:
     model: str
     provider: str
     finish_reason: str | None = None
+
+
+# A per-run model choice (the UI's Low / Medium / High). None falls back to settings.llm_model.
+_MODEL_OVERRIDE: contextvars.ContextVar[str | None] = contextvars.ContextVar("finsight_model", default=None)
+
+
+def model_override() -> str | None:
+    return _MODEL_OVERRIDE.get()
+
+
+@contextmanager
+def use_model(model: str | None) -> Iterator[None]:
+    """Route every complete() call in this context to `model` (worker pools must pass it on)."""
+    if model is not None and model not in PRICE_TABLE:
+        raise ValueError(f"No price for {model!r} in config.PRICE_TABLE")
+    token = _MODEL_OVERRIDE.set(model)
+    try:
+        yield
+    finally:
+        _MODEL_OVERRIDE.reset(token)
 
 
 def data_block(name: str, content: str) -> str:
@@ -188,7 +210,7 @@ def complete(
     `max_tokens` includes hidden reasoning tokens on reasoning models, so keep it generous.
     """
     settings = get_settings()
-    provider, model = settings.llm_provider, model or settings.llm_model
+    provider, model = settings.llm_provider, model or _MODEL_OVERRIDE.get() or settings.llm_model
     t0 = time.perf_counter()
     finish = None
     if provider == "mock":

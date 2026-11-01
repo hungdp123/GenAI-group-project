@@ -1,9 +1,38 @@
 const state = {
-  meta: null, view: null, log: null, stepQuery: "", lastStageCount: -1,
+  meta: null, view: null, log: null, stages: [], elapsed: 0,
   company: "", influencer: "", post: "",
 };
 
 const $ = (id) => document.getElementById(id);
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Plain-language name for each pipeline node, shown while a run is in progress.
+const STAGE_NAMES = {
+  intake: "Reading the request",
+  advice_gate_input: "Checking it is not a request for advice",
+  scope_check: "Checking the company is covered",
+  clarification: "Looking for missing details",
+  collect_posts: "Finding the influencer's post",
+  extract_claims: "Pulling out the factual claims",
+  plan: "Planning the checks",
+  gather_evidence: "Gathering evidence from filings and reports",
+  audit: "Auditing the evidence",
+  retry_or_accept: "Deciding whether to look again",
+  apply_tier_policy: "Weighing source reliability",
+  assemble: "Writing the answer",
+  advice_gate_output: "Final advice check",
+  finalize: "Finishing up",
+  record: "Comparing the influencer's posts",
+};
+
+// What each verdict means for a reader who has never seen the pipeline.
+const VERDICTS = {
+  SUPPORTED: { tone: "good", meaning: "The sources back this claim up." },
+  PARTIALLY_SUPPORTED: { tone: "mixed", meaning: "Part of the claim holds up; part does not or could not be confirmed." },
+  CONTRADICTED: { tone: "bad", meaning: "The sources say something different." },
+  INSUFFICIENT_EVIDENCE: { tone: "unknown", meaning: "FinSight could not find enough evidence to decide either way." },
+};
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
@@ -11,26 +40,47 @@ function esc(value) {
   }[ch]));
 }
 
-function quote(text) {
-  return `'${String(text).replaceAll("'", "'\"'\"'")}'`;
-}
-
 function verdictClass(verdict) {
   return verdict ? `v-${verdict}` : "";
+}
+
+function niceDate(iso) {
+  if (!iso) return "";
+  const [year, month, day] = String(iso).slice(0, 10).split("-");
+  if (!day) return iso;
+  return `${Number(day)} ${MONTHS[Number(month) - 1]} ${year}`;
+}
+
+// "quarter ended 2026-06-30" reads as "quarter ended 30 Jun 2026", like every other date on the page.
+function friendlyDates(text) {
+  return String(text || "").replace(/\b(\d{4}-\d{2}-\d{2})\b/g, (iso) => niceDate(iso));
+}
+
+// The finding already shows the source under the quote, so the explanation drops its "Source: … Where: …" copy.
+function withoutSource(text) {
+  return String(text || "")
+    .replace(/\s*Source: .+?\(Tier [^)]*\)\.(?:\s*Where: .+?\.(?=\s|$))?/, "")
+    .replace(" (see the evidence below)", "")
+    .trim();
+}
+
+function stageName(node) {
+  return STAGE_NAMES[node] || String(node || "").replaceAll("_", " ");
 }
 
 function headline(view) {
   const assessment = view.assessment;
   if (assessment.overall_verdict) {
-    return { text: view.overall_label || assessment.verdict_label, cls: verdictClass(assessment.overall_verdict) };
+    const info = VERDICTS[assessment.overall_verdict] || { tone: "unknown", meaning: "" };
+    return { text: view.overall_label || assessment.verdict_label, tone: info.tone, meaning: info.meaning };
   }
   const labels = {
-    REFUSED: "Refused",
-    NEEDS_CLARIFICATION: "Needs an answer",
-    FAILED: "Failed",
-    COMPLETED: "Completed",
+    REFUSED: { text: "Not checked", tone: "neutral", meaning: "" },
+    NEEDS_CLARIFICATION: { text: "One more detail needed", tone: "ask", meaning: "Answer the question below and FinSight will run the check again." },
+    FAILED: { text: "The check failed", tone: "bad", meaning: "Something went wrong while checking. Open Details for the trace." },
+    COMPLETED: { text: "Completed", tone: "neutral", meaning: "" },
   };
-  return { text: labels[assessment.status] || assessment.status, cls: `s-${assessment.status}` };
+  return labels[assessment.status] || { text: assessment.status, tone: "neutral", meaning: "" };
 }
 
 function stepTone(lines) {
@@ -50,34 +100,26 @@ function lineClass(line) {
   return "";
 }
 
-function cliPreview() {
-  const parts = ["finsight run", quote($("claim").value), "--stages"];
-  if ($("cutoff").value) parts.push("--cutoff", $("cutoff").value);
-  if (state.company) parts.push("--company", state.company);
-  if (state.influencer) parts.push("--influencer", quote(state.influencer));
-  if (state.post) parts.push("--post", state.post);
-  $("cliPreview").textContent = parts.join(" ");
-}
-
 async function init() {
   const response = await fetch("/api/meta");
   state.meta = await response.json();
-  renderMode();
   const asOf = state.meta.mode.corpus_as_of;
   if (asOf) {
-    const [year, month, day] = asOf.split("-");
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const label = `${Number(day)} ${months[Number(month) - 1]} ${year}`;
-    $("cutoffHint").textContent = `Enter a cut-off to choose which posts are eligible. Leave it blank and a stored post is checked as of the day it was published. If that post has no date, the check uses the latest filing in the corpus (${label}).`;
+    $("cutoffHint").textContent = `Only information published on or before this date is used. Leave blank to use the post's own date (or ${niceDate(asOf)}, the latest data, if the post is undated).`;
   }
-  cliPreview();
-  $("cutoff").addEventListener("input", cliPreview);
+  $("influencer").innerHTML += (state.meta.influencers || [])
+    .map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join("");
+  setInfluencer(influencerIn($("claim").value));
+  $("influencer").addEventListener("change", () => {
+    state.influencer = $("influencer").value;
+  });
   $("claim").addEventListener("input", () => {
     state.company = "";
-    state.influencer = "";
     state.post = "";
-    cliPreview();
   });
+  $("clearHistory").addEventListener("click", clearHistory);
+  $("history").addEventListener("click", onHistoryClick);
+  renderHistory();
   $("runBtn").addEventListener("click", run);
   $("clearBtn").addEventListener("click", clearForm);
   $("claim").addEventListener("keydown", (event) => {
@@ -86,37 +128,31 @@ async function init() {
       run();
     }
   });
-  $("technical").addEventListener("change", () => {
-    document.body.classList.toggle("is-technical", $("technical").checked);
-    localStorage.setItem("finsight-technical", $("technical").checked ? "1" : "0");
-  });
-  if (localStorage.getItem("finsight-technical") === "1") {
-    $("technical").checked = true;
-    document.body.classList.add("is-technical");
-  }
   $("preview").addEventListener("click", onPreviewClick);
 }
 
-function renderMode() {
-  const mode = state.meta.mode;
-  const chip = $("modeChip");
-  const spend = state.meta.spend;
-  const override = mode.env_override ? " · shell override" : "";
-  chip.classList.toggle("is-paid", mode.paid);
-  chip.textContent = mode.paid
-    ? `PAID ${mode.provider} · ${mode.model}${override}`
-    : `MOCK · free · corpus ${mode.corpus_as_of}${override}`;
-  chip.title = `Retries ${mode.max_retries}. Ledger $${spend.cost_usd.toFixed(4)} of $${spend.budget_usd.toFixed(0)} on this machine.`;
-  $("paidRow").hidden = !mode.paid;
+// The dropdown and state.influencer always agree; a typed name that is not listed is added.
+function setInfluencer(name) {
+  const select = $("influencer");
+  if (name && ![...select.options].some((option) => option.value === name)) {
+    select.add(new Option(name, name));
+  }
+  select.value = name || "";
+  state.influencer = select.value;
+}
+
+// Pre-select the influencer when the claim already names one.
+function influencerIn(text) {
+  const lower = String(text || "").toLowerCase();
+  return (state.meta.influencers || []).find((name) => lower.includes(name.toLowerCase())) || "";
 }
 
 function clearForm() {
   $("claim").value = "";
   $("cutoff").value = "";
   state.company = "";
-  state.influencer = "";
+  setInfluencer("");
   state.post = "";
-  cliPreview();
   $("formStatus").textContent = "Cleared.";
 }
 
@@ -127,20 +163,21 @@ async function run() {
     company: state.company,
     influencer: state.influencer,
     post: state.post,
-    confirm_paid: $("confirmPaid").checked,
   };
-  if (state.meta.mode.paid && !body.confirm_paid) {
-    $("formStatus").textContent = "Tick the confirmation first. A paid run can spend course credit.";
+  if (!body.claim.trim()) {
+    $("formStatus").textContent = "Paste a claim first.";
+    $("claim").focus();
     return;
   }
   $("runBtn").disabled = true;
+  $("runBtn").textContent = "Checking…";
   $("empty").hidden = true;
   $("result").innerHTML = "";
-  $("trace").innerHTML = "";
-  state.lastStageCount = -1;
+  $("details").innerHTML = "";
   state.view = null;
-  $("formStatus").textContent = "Running… steps will appear as each stage finishes.";
-  renderStages([], 0, true);
+  state.stages = [];
+  $("formStatus").textContent = "Running…";
+  renderProgress([], 0);
   let response;
   try {
     response = await fetch("/api/run", {
@@ -149,17 +186,23 @@ async function run() {
       body: JSON.stringify(body),
     });
   } catch (error) {
-    $("formStatus").textContent = "The page could not reach the local server.";
-    $("runBtn").disabled = false;
+    stopRun("The page could not reach the FinSight server.");
     return;
   }
   const data = await response.json();
   if (!response.ok) {
-    $("formStatus").textContent = data.error || "The run was rejected.";
-    $("runBtn").disabled = false;
+    stopRun(data.error || "The run was rejected.");
     return;
   }
   poll(data.job_id);
+}
+
+function stopRun(message) {
+  $("formStatus").textContent = message;
+  $("runBtn").disabled = false;
+  $("runBtn").textContent = "Run check";
+  $("progress").innerHTML = "";
+  if (!state.view) $("empty").hidden = false;
 }
 
 async function poll(jobId) {
@@ -169,66 +212,305 @@ async function poll(jobId) {
     data = await response.json();
     if (!response.ok) throw new Error(data.error || "Lost the run.");
   } catch (error) {
-    $("formStatus").textContent = error.message;
-    $("runBtn").disabled = false;
+    stopRun(error.message);
     return;
   }
-  renderStages(data.stages || [], data.elapsed_ms, data.status === "running");
+  state.stages = data.stages || [];
+  state.elapsed = data.elapsed_ms;
   if (data.status === "running") {
-    $("formStatus").textContent = `Running… ${data.stages.length} stage${data.stages.length === 1 ? "" : "s"}, ${Math.round(data.elapsed_ms)} ms.`;
+    renderProgress(state.stages, data.elapsed_ms);
     setTimeout(() => poll(jobId), 400);
     return;
   }
+  $("progress").innerHTML = "";
   $("runBtn").disabled = false;
+  $("runBtn").textContent = "Run check";
   if (data.status === "error") {
-    $("formStatus").textContent = data.error || "The run failed.";
+    stopRun(data.error || "The run failed.");
     return;
   }
   state.view = data.result;
   state.log = data.result.decision_log;
   renderResult(data.result);
-  renderTrace(data.result.decision_log, data.result.stats, data.result.trace_text, data.result.warning);
-  const assessment = data.result.assessment;
-  $("formStatus").textContent = `${assessment.status} · ${assessment.request_id} · ${Math.round(data.elapsed_ms)} ms.`;
+  renderDetails(data.result);
+  saveHistory(data.result);
+  $("formStatus").textContent = `Done in ${(data.elapsed_ms / 1000).toFixed(1)} s.`;
+  $("result").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function renderStages(stages, elapsed, running) {
-  if (stages.length === state.lastStageCount && $("timeline")) {
-    const note = $("stepNote");
-    if (note) note.textContent = stageNote(stages, elapsed, running);
-    return;
-  }
-  state.lastStageCount = stages.length;
-  const visible = stages.filter((stage) => stageMatches(stage, state.stepQuery));
-  $("steps").innerHTML = `
-    <section class="card" id="stepCard">
-      <div class="section-head">
-        <h2 id="steps-title">Steps</h2>
-        <span class="ops__note" id="stepNote">${esc(stageNote(stages, elapsed, running))}</span>
-        <input id="stepFilter" placeholder="Filter steps" value="${esc(state.stepQuery)}" />
+function renderProgress(stages, elapsed) {
+  const last = stages[stages.length - 1];
+  const current = last ? stageName(last.node) : "Starting";
+  const done = stages.map((stage) => `<li>${esc(stageName(stage.node))}</li>`).join("");
+  $("progress").innerHTML = `
+    <section class="card progress" aria-live="polite">
+      <div class="progress__head">
+        <span class="spinner" aria-hidden="true"></span>
+        <div>
+          <p class="progress__title">Checking your claim…</p>
+          <p class="progress__now">${esc(current)} · ${(elapsed / 1000).toFixed(1)} s</p>
+        </div>
       </div>
-      <ol class="timeline" id="timeline">
-        ${visible.map(stageHtml).join("") || `<li class="ops__note">${running ? "Waiting for the first stage." : "No stages match."}</li>`}
-      </ol>
+      <div class="progress__bar"><span style="width:${Math.min(95, 8 + stages.length * 7)}%"></span></div>
+      ${done ? `<ol class="progress__list">${done}</ol>` : ""}
     </section>`;
-  $("stepFilter").addEventListener("input", (event) => {
-    state.stepQuery = event.target.value;
-    state.lastStageCount = -1;
-    renderStages(stages, elapsed, running);
-    $("stepFilter").focus();
-  });
 }
 
-function stageNote(stages, elapsed, running) {
-  const time = elapsed ? `${Math.round(elapsed)} ms` : "";
-  const tail = running ? "running" : "finished";
-  return `${stages.length} stage${stages.length === 1 ? "" : "s"} · ${tail}${time ? ` · ${time}` : ""}`;
+const POST_NOTES = [
+  "A figure that appears only on a chart, a slide, or an image is not in the stored text, so it was not checked.",
+  "The transcript does not mark who is speaking, so the speaker was not separated.",
+  "This transcript has no timestamps, so the report cannot point to a moment in the video.",
+  "Checked the lines in this post that match the claim in the prompt.",
+];
+const ADVICE_NOTE = "A sentence that told you to buy or sell was removed. The claim and the labels are unchanged.";
+
+function splitCheckedPost(text) {
+  const source = String(text || "");
+  const cuts = [];
+  for (const note of POST_NOTES) {
+    const at = source.indexOf(note);
+    if (at >= 0) cuts.push({ at, text: note, video: "" });
+  }
+  const videoAt = source.indexOf("Video: ");
+  if (videoAt >= 0) {
+    const rest = source.slice(videoAt + "Video: ".length);
+    const url = (rest.split(/\s/)[0] || "").replace(/[.)]+$/, "");
+    cuts.push({ at: videoAt, text: "", video: url });
+  }
+  cuts.sort((left, right) => left.at - right.at);
+  const leadEnd = cuts.length ? cuts[0].at : source.length;
+  return {
+    lead: source.slice(0, leadEnd).trim(),
+    notes: cuts.filter((cut) => cut.text).map((cut) => cut.text),
+    video: (cuts.find((cut) => cut.video) || {}).video || "",
+  };
 }
 
-function stageMatches(stage, query) {
-  if (!query) return true;
-  const haystack = `${stage.node} ${stage.role} ${stage.lines.join(" ")}`.toLowerCase();
-  return haystack.includes(query.toLowerCase());
+function splitSummary(text) {
+  const source = String(text || "");
+  if (source.startsWith(ADVICE_NOTE)) {
+    return { advice: ADVICE_NOTE, text: source.slice(ADVICE_NOTE.length).trim() };
+  }
+  return { advice: "", text: source };
+}
+
+function unitsOf(view) {
+  if (view.units && view.units.length) return view.units;
+  return (view.assessment.sub_claim_results || []).map((row) => ({
+    heading: row.sub_claim.text,
+    verdict: row.verdict,
+    label: row.verdict_label,
+    partial_reason: null,
+    is_parent: false,
+    ids: [row.sub_claim.sub_claim_id],
+  }));
+}
+
+function rowsById(view) {
+  return Object.fromEntries((view.assessment.sub_claim_results || []).map((row) => [row.sub_claim.sub_claim_id, row]));
+}
+
+function sourceUrl(item) {
+  if (typeof item.url === "string" && /^https?:\/\//.test(item.url)) return item.url;
+  if (typeof item.publisher_page === "string" && /^https?:\/\//.test(item.publisher_page)) return item.publisher_page;
+  return null;
+}
+
+// One line per checked part of the claim: verdict, why, and the main source behind it.
+function findingHtml(unit, rows) {
+  const children = unit.ids.map((id) => rows[id]).filter(Boolean);
+  const why = withoutSource(children.map((row) => row.explanation || row.rationale).find(Boolean) || unit.partial_reason || "");
+  // A contradiction is shown with the evidence against it; anything else leads with the evidence for it.
+  const against = unit.verdict === "CONTRADICTED";
+  const evidence = children.flatMap((row) => against
+    ? [...(row.challenging || []), ...(row.supporting || [])]
+    : [...(row.supporting || []), ...(row.challenging || [])])[0];
+  const quoted = evidence && evidence.content && (against || unit.verdict === "SUPPORTED")
+    ? `<blockquote class="finding__quote"><span>${against ? "The source says otherwise" : "The source says"}</span>${esc(friendlyDates(evidence.content.trim()))}</blockquote>`
+    : "";
+  const figures = children.map((row) => (row.audit || {}).figures).find(Boolean);
+  // When the auditor kept no stated figure, a percentage written in the line itself is what was claimed.
+  if (figures && !figures.claimed && figures.found.endsWith("%")) {
+    const written = String(unit.heading).match(/\d+(?:\.\d+)?\s?%/);
+    if (written) figures.claimed = written[0].replace(/\s/, "");
+  }
+  const compare = figures
+    ? `<p class="finding__figures ${figures.matches ? "is-match" : "is-gap"}">${figures.claimed ? `<span>Claimed <b>${esc(figures.claimed)}</b></span>` : ""}<span>Filing shows <b>${esc(figures.found)}</b></span></p>`
+    : "";
+  const url = evidence ? sourceUrl(evidence) : null;
+  // The tier note, XBRL tag and accession number stay in Details; here the document and date are enough.
+  const label = evidence ? String(evidence.source_label || evidence.doc_type || "").replace(/\s*\(Tier[^)]*\)\s*$/, "") : "";
+  const source = evidence
+    ? `<p class="finding__source"><span>Source</span> ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` : esc(label)}</p>`
+    : "";
+  const tone = (VERDICTS[unit.verdict] || {}).tone || "unknown";
+  return `
+    <li class="finding tone-${tone}">
+      <span class="dot" aria-hidden="true"></span>
+      <div>
+        <div class="finding__head">
+          <p class="finding__text">${esc(unit.heading)}</p>
+          <span class="verdict ${verdictClass(unit.verdict)}">${esc(unit.label)}</span>
+        </div>
+        ${why ? `<p class="finding__why">${esc(why)}</p>` : ""}
+        ${compare}
+        ${quoted}
+        ${source}
+      </div>
+    </li>`;
+}
+
+function renderResult(view) {
+  const assessment = view.assessment;
+  const head = headline(view);
+  const summary = splitSummary(assessment.summary || assessment.refusal_reason || assessment.clarification_question || "");
+  const units = unitsOf(view);
+  const asked = units.filter((unit) => unit.group !== "also");
+  const also = units.filter((unit) => unit.group === "also");
+  const rows = rowsById(view);
+  const post = splitCheckedPost(assessment.checked_post);
+  const violations = (view.decision_log.temporal_violations || []).map((item) => `
+    <p class="violation">Cut-off leak: ${esc(item.evidence_id)} for ${esc(item.sub_claim_id)} was published ${esc(item.publication_date)}, after ${esc(item.cutoff_date)}. ${esc(item.produced_by)} produced it and it was dropped.</p>
+  `).join("");
+  // The verdict is already the heading, so the summary starts after its "Overall, …" sentence.
+  const summaryText = assessment.overall_verdict ? summary.text.replace(/^Overall, [^.]*\.\s*/, "") : summary.text;
+  const showSummary = summaryText && assessment.status !== "NEEDS_CLARIFICATION";
+  const meta = [];
+  if (assessment.as_of_date) meta.push(`Information up to ${esc(niceDate(assessment.as_of_date))}`);
+  if (post.video) meta.push(`<a href="${esc(post.video)}" target="_blank" rel="noopener">Watch the video</a>`);
+  $("result").innerHTML = `
+    <article class="card answer tone-${head.tone}">
+      <div class="answer__head">
+        <span class="answer__icon" aria-hidden="true"></span>
+        <div>
+          <p class="eyebrow">${assessment.overall_verdict ? "Verdict" : "Status"}</p>
+          <h2 class="answer__verdict">${esc(head.text)}</h2>
+          ${head.meaning ? `<p class="answer__meaning">${esc(head.meaning)}</p>` : ""}
+        </div>
+      </div>
+      <blockquote class="answer__claim">${esc(assessment.claim || $("claim").value)}</blockquote>
+      ${showSummary ? `<p class="answer__summary">${esc(summaryText)}</p>` : ""}
+      ${asked.length ? `<ul class="findings">${asked.map((unit) => findingHtml(unit, rows)).join("")}</ul>` : ""}
+      ${also.length ? `<p class="group-h">Also in that line <small>checked, not counted in the verdict</small></p>
+      <ul class="findings findings--also">${also.map((unit) => findingHtml(unit, rows)).join("")}</ul>` : ""}
+      ${violations}
+      ${meta.length ? `<p class="answer__meta">${meta.join(" · ")}</p>` : ""}
+      ${clarificationHtml(view)}
+      ${suggestionsHtml(view)}
+      <p class="disclaimer">${esc(assessment.boundary_disclaimer)}</p>
+    </article>
+    ${matchHtml(view.match, assessment.status, assessment.claim)}`;
+  $("empty").hidden = true;
+}
+
+// Related claims from stored posts, picked by the model, that the user can check with one click.
+function suggestionsHtml(view) {
+  const items = view.suggestions || [];
+  if (!items.length || view.assessment.status === "NEEDS_CLARIFICATION") return "";
+  return `
+    <div class="suggest">
+      <p class="suggest__label">Check next</p>
+      <div class="suggest__list">
+        ${items.map((text) => `
+          <button type="button" class="suggest__item" data-suggest="${esc(text)}">
+            <span>${esc(text)}</span><span class="suggest__go" aria-hidden="true">→</span>
+          </button>`).join("")}
+      </div>
+    </div>`;
+}
+
+function clarificationHtml(view) {
+  const question = view.assessment.clarification_question;
+  if (view.assessment.status !== "NEEDS_CLARIFICATION" || !question) return "";
+  const choices = (view.post_choices || []).map((choice) => `
+    <button type="button" class="choice" data-fill-post="${esc(choice.video_id)}">
+      ${esc(choice.title || choice.video_id)}
+      <small>${esc(choice.date)} · ${esc(choice.video_id)}</small>
+    </button>`).join("");
+  const companies = view.answer_slot === "company"
+    ? state.meta.companies.map((row) => `
+      <button type="button" class="choice" data-fill-company="${esc(row.ticker)}">${esc(row.name)} <small>${esc(row.ticker)}</small></button>`).join("")
+    : "";
+  const influencers = view.answer_slot === "influencer"
+    ? state.meta.influencers.map((name) => `
+      <button type="button" class="choice" data-fill-influencer="${esc(name)}">${esc(name)}</button>`).join("")
+    : "";
+  const slotLabel = { post: "Video id", company: "Ticker", influencer: "Influencer", claim: "Revised claim" }[view.answer_slot] || "Answer";
+  const ask = question.split("\n")[0];
+  return `
+    <div class="clarify">
+      <p class="clarify__q">${esc(ask)}</p>
+      ${choices || companies || influencers ? `<div class="choices">${choices}${companies}${influencers}</div>` : ""}
+      <div class="clarify__row">
+        <label class="field"><span>${esc(slotLabel)}</span><input id="answer" placeholder="Pick above or type here" /></label>
+        <button type="button" class="run-btn" id="sendAnswer">Run again</button>
+      </div>
+    </div>`;
+}
+
+// Everything a curious reader or a tester may want, folded away by default.
+function renderDetails(view) {
+  const assessment = view.assessment;
+  const post = splitCheckedPost(assessment.checked_post);
+  const summary = splitSummary(assessment.summary || "");
+  const sections = [];
+  if (unitsOf(view).length) {
+    sections.push(fold("Evidence and citations", "Every passage and filing figure behind each verdict", `
+      <div id="checks">${checksHtml(view)}</div>`));
+  }
+  if (view.record && view.record.posts && view.record.posts.length) {
+    sections.push(fold("Posts in this record", `${view.record.posts.length} post${view.record.posts.length === 1 ? "" : "s"}`, recordHtml(view.record)));
+  }
+  if (post.lead || post.notes.length || summary.advice) {
+    sections.push(fold("About the post", "What was checked and what could not be", `
+      ${post.lead ? `<p class="body-text">${esc(post.lead)}</p>` : ""}
+      ${post.notes.length ? `<ul class="notes">${post.notes.map((note) => `<li>${esc(note)}</li>`).join("")}</ul>` : ""}
+      ${summary.advice ? `<p class="body-text">${esc(ADVICE_NOTE)}</p>` : ""}`));
+  }
+  sections.push(fold("Steps", `${state.stages.length} stage${state.stages.length === 1 ? "" : "s"} · ${(state.elapsed / 1000).toFixed(1)} s`, `
+    <ol class="timeline" id="timeline">${state.stages.map(stageHtml).join("") || `<li class="muted">No stages recorded.</li>`}</ol>`));
+  sections.push(fold("Run info", assessment.request_id, runInfoHtml(view)));
+  sections.push(fold("Decision log", "Gates, routing, agent calls, audits, retries", traceHtml(view.decision_log, view.stats, view.trace_text, view.warning)));
+  $("details").innerHTML = `
+    <section class="card details">
+      <h2 class="details__title">Details</h2>
+      ${sections.join("")}
+    </section>`;
+}
+
+function fold(title, hint, body) {
+  return `
+    <details class="fold">
+      <summary><span class="fold__title">${esc(title)}</span>${hint ? `<span class="fold__hint">${esc(hint)}</span>` : ""}</summary>
+      <div class="fold__body">${body}</div>
+    </details>`;
+}
+
+function runInfoHtml(view) {
+  const assessment = view.assessment;
+  const gates = (view.decision_log.gate_decisions || []).map((gate) => `
+    <span class="tag ${gate.flagged ? "against" : "for"}">${esc(gate.gate)} ${gate.flagged ? "flagged" : "pass"}</span>
+  `).join("");
+  return `
+    <div class="info-grid">
+      <span>Status</span><span>${esc(assessment.status)}</span>
+      <span>Request id</span><span class="mono">${esc(assessment.request_id)}</span>
+      ${view.cutoff_note ? `<span>Cut-off</span><span>${esc(niceDate(assessment.as_of_date))} (${esc(view.cutoff_note)})</span>` : ""}
+      ${view.match ? `
+      <span>Matched on</span><span>${esc(view.match.user_claim)}</span>
+      <span>Matched by</span><span>${esc(view.match.method)} · ${esc(view.match.candidates_considered)} candidate lines</span>
+      <span>Line ids</span><span class="mono">${esc((view.match.quote_ids || []).join(", ") || "—")}</span>` : ""}
+    </div>
+    ${gates ? `<div class="tag-row">${gates}</div>` : ""}
+    <div class="stat-row">${statHtml(view.stats)}</div>
+    ${assessment.refusal_reason && !(assessment.summary || "").includes(assessment.refusal_reason) ? `<p class="body-text">${esc(assessment.refusal_reason)}</p>` : ""}
+    ${assessment.status === "COMPLETED" && view.limits ? `<p class="body-text muted">${esc(view.limits)}</p>` : ""}
+    <div class="button-row">
+      <button type="button" class="text-btn" data-copy="${esc(assessment.request_id)}">Copy id</button>
+      <button type="button" class="text-btn" data-download="assessment">Assessment JSON</button>
+      <button type="button" class="text-btn" data-download="log">Decision log JSON</button>
+    </div>
+    ${view.cli ? `<p class="cli-label">Repeat this run</p><pre class="cli">${esc(view.cli)}</pre>` : ""}`;
 }
 
 function stageHtml(stage) {
@@ -239,60 +521,13 @@ function stageHtml(stage) {
       <span class="step__n">${esc(stage.step)}</span>
       <div>
         <div class="step__head">
-          <span class="step__node">${esc(stage.node)}</span>
-          <span class="step__role">${esc(stage.role)}</span>
+          <span class="step__node">${esc(stageName(stage.node))}</span>
+          <span class="step__role">${esc(stage.node)} · ${esc(stage.role)}</span>
           ${timing}
         </div>
         ${lines}
       </div>
     </li>`;
-}
-
-function renderResult(view) {
-  const assessment = view.assessment;
-  const head = headline(view);
-  const gates = (view.decision_log.gate_decisions || []).map((gate) => `
-    <span class="tag ${gate.flagged ? "against" : "for"}">${esc(gate.gate)} ${gate.flagged ? "flagged" : "pass"}</span>
-  `).join("");
-  const violations = (view.decision_log.temporal_violations || []).map((item) => `
-    <p class="violation">Cut-off leak: ${esc(item.evidence_id)} for ${esc(item.sub_claim_id)} was published ${esc(item.publication_date)}, after ${esc(item.cutoff_date)}. ${esc(item.produced_by)} produced it and it was dropped.</p>
-  `).join("");
-  $("result").innerHTML = `
-    <article class="card">
-      <div class="result-top">
-        <span class="verdict ${head.cls}">${esc(head.text)}</span>
-        <span class="status">${esc(assessment.status)}</span>
-        <span class="rid">${esc(assessment.request_id)}</span>
-        <button type="button" class="text-btn" data-copy="${esc(assessment.request_id)}">Copy id</button>
-        <button type="button" class="text-btn" data-download="assessment">Assessment JSON</button>
-        <button type="button" class="text-btn" data-download="log">Decision log JSON</button>
-      </div>
-      <div class="jump-row">
-        ${view.match ? `<a href="#matchCard">You asked · they said</a>` : ""}
-        <a href="#stepCard">Steps</a>
-        <a href="#checks">Checks and citations</a>
-        <a href="#traceCard">Trace</a>
-      </div>
-      ${assessment.checked_post ? `<p class="post-line">${esc(assessment.checked_post)}</p>` : ""}
-      <p class="summary">${esc(assessment.summary || assessment.refusal_reason || assessment.clarification_question || "No summary.")}</p>
-      ${assessment.as_of_date ? `<p class="reason">Information up to ${esc(assessment.as_of_date)}${view.cutoff_note ? ` — ${esc(view.cutoff_note)}` : ""}.</p>` : ""}
-      ${assessment.refusal_reason && !(assessment.summary || "").includes(assessment.refusal_reason) ? `<p class="reason">${esc(assessment.refusal_reason)}</p>` : ""}
-      <div class="gate-row">${gates}</div>
-      <div class="stat-row">${statHtml(view.stats)}</div>
-      ${violations}
-      <p class="disclaimer">${esc(assessment.boundary_disclaimer)}</p>
-      ${assessment.status === "COMPLETED" ? `<p class="disclaimer">${esc(view.limits || "")}</p>` : ""}
-      ${view.cli ? `<p class="cli-label">Repeat this run</p><pre class="cli">${esc(view.cli)}</pre>` : ""}
-    </article>
-    ${matchHtml(view.match, view.assessment.status, view.assessment.claim)}
-    ${clarificationHtml(view)}
-    ${recordHtml(view.record)}
-    <section class="card" id="checks">
-      <h2>Checks and citations</h2>
-      <p class="card__hint">Each sub-claim keeps the passage or filing figure behind it. A missing citation is shown on purpose, so a gap is visible while testing.</p>
-      ${checksHtml(view)}
-    </section>`;
-  $("empty").hidden = true;
 }
 
 function statHtml(stats) {
@@ -314,9 +549,9 @@ const BUCKET_CLASS = { both: "b-both", conflict: "b-conflict", quote_only: "b-al
 function matchHtml(match, status, typed) {
   if (!match) return "";
   const quotes = (match.quotes || []).map((text) => `<blockquote class="said">${esc(text)}</blockquote>`).join("");
-  const when = match.upload_date ? esc(match.upload_date) : "undated";
+  const when = match.upload_date ? esc(niceDate(match.upload_date)) : "undated";
   const source = match.video_id
-    ? `<p class="said-src">${esc(match.title || match.video_id)} · ${when} · <a href="${esc(match.url)}" target="_blank" rel="noopener">${esc(match.video_id)}</a> <span class="tag">matched by ${esc(match.method)}</span></p>`
+    ? `<p class="said-src">${esc(match.title || match.video_id)} · ${when} · <a href="${esc(match.url)}" target="_blank" rel="noopener">${esc(match.video_id)}</a></p>`
     : "";
   const counts = match.counts || {};
   const legend = ["both", "conflict", "quote_only", "user_only"]
@@ -336,89 +571,49 @@ function matchHtml(match, status, typed) {
     <section class="card match" id="matchCard">
       <div class="section-head">
         <h2>You asked · they said</h2>
-        <div class="gate-row">${legend}</div>
+        <div class="tag-row">${legend}</div>
       </div>
       <p class="card__hint">FinSight checks the influencer's own words. Your text is only used to find them, so a figure you remembered differently is shown, not checked.</p>
       <div class="match-grid">
         <div>
           <p class="scope-h">You asked</p>
           <blockquote class="asked">${esc(typed || match.user_claim)}</blockquote>
-          <p class="said-src tech">Matched on: ${esc(match.user_claim)}</p>
         </div>
         <div>
           <p class="scope-h">They said</p>
-          ${quotes || `<p class="ops__note">${waiting ? "No single line yet — answer the question below." : "No stored line matched."}</p>`}
+          ${quotes || `<p class="muted">${waiting ? "No single line yet — answer the question above." : "No stored line matched."}</p>`}
           ${source}
         </div>
       </div>
-      ${rows ? `<table class="facts"><thead><tr><th></th><th>You</th><th>They</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table>` : ""}
-      <p class="tech">Candidates considered: ${esc(match.candidates_considered)} · line ids ${esc((match.quote_ids || []).join(", ") || "—")}</p>
-    </section>`;
-}
-
-function clarificationHtml(view) {
-  const question = view.assessment.clarification_question;
-  if (view.assessment.status !== "NEEDS_CLARIFICATION" || !question) return "";
-  const choices = (view.post_choices || []).map((choice) => `
-    <button type="button" class="choice" data-fill-post="${esc(choice.video_id)}">
-      ${esc(choice.video_id)}
-      <small>${esc(choice.date)} ${esc(choice.title)}</small>
-    </button>`).join("");
-  const companies = view.answer_slot === "company"
-    ? state.meta.companies.map((row) => `
-      <button type="button" class="choice" data-fill-company="${esc(row.ticker)}">${esc(row.name)} <small>${esc(row.ticker)}</small></button>`).join("")
-    : "";
-  const influencers = view.answer_slot === "influencer"
-    ? state.meta.influencers.map((name) => `
-      <button type="button" class="choice" data-fill-influencer="${esc(name)}">${esc(name)}</button>`).join("")
-    : "";
-  const slotLabel = { post: "Video id", company: "Ticker", influencer: "Influencer", claim: "Revised claim" }[view.answer_slot] || "Answer";
-  return `
-    <section class="card clarify">
-      <h2>FinSight needs an answer</h2>
-      <p class="summary">${esc(question)}</p>
-      <div class="choices">${choices}${companies}${influencers}</div>
-      <label class="field"><span>${esc(slotLabel)}</span><input id="answer" /></label>
-      <button type="button" class="run-btn" id="sendAnswer">Send answer and run again</button>
+      ${rows ? `<div class="table-wrap"><table class="facts"><thead><tr><th></th><th>You</th><th>They</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
     </section>`;
 }
 
 function recordHtml(record) {
-  if (!record || !record.posts || !record.posts.length) return "";
   const unfinished = record.unfinished && record.unfinished.length
     ? `<p class="line-stop">Unfinished posts: ${esc(record.unfinished.join(", "))}</p>` : "";
-  const posts = record.posts.map((post, index) => `
-    <details ${index === 0 ? "open" : ""}>
-      <summary><strong>${esc(post.label)}</strong> · ${esc(post.upload_date || "undated")} · ${esc(post.video_id)} · ${esc(post.title || "")}</summary>
-      <p class="reason">Cut-off used for this post: ${esc(post.cutoff_date || "unknown")}.</p>
-      ${post.view ? checksHtml(post.view) : `<p class="ops__note">This post has no decision log.</p>`}
+  const posts = record.posts.map((post) => `
+    <details class="fold fold--inner">
+      <summary><span class="fold__title">${esc(post.title || post.video_id)}</span><span class="fold__hint">${esc(post.label)} · ${esc(niceDate(post.upload_date) || "undated")}</span></summary>
+      <div class="fold__body">
+        <p class="body-text muted">Video ${esc(post.video_id)} · checked as of ${esc(niceDate(post.cutoff_date) || "unknown")}.</p>
+        ${post.view ? checksHtml(post.view) : `<p class="muted">This post has no decision log.</p>`}
+      </div>
     </details>`).join("");
   return `
-    <section class="card">
-      <h2>Posts in this record</h2>
-      <p>${esc(record.consistency || "")}</p>
-      <p>${esc(record.accuracy || "")}</p>
-      ${unfinished}
-      ${posts}
-    </section>`;
+    ${record.consistency ? `<p class="body-text">${esc(record.consistency)}</p>` : ""}
+    ${record.accuracy ? `<p class="body-text">${esc(record.accuracy)}</p>` : ""}
+    ${unfinished}
+    ${posts}`;
 }
 
 function checksHtml(view) {
-  const rows = Object.fromEntries((view.assessment.sub_claim_results || []).map((row) => [row.sub_claim.sub_claim_id, row]));
-  const units = view.units && view.units.length
-    ? view.units
-    : (view.assessment.sub_claim_results || []).map((row) => ({
-      heading: row.sub_claim.text,
-      verdict: row.verdict,
-      label: row.verdict_label,
-      partial_reason: null,
-      is_parent: false,
-      ids: [row.sub_claim.sub_claim_id],
-    }));
+  const rows = rowsById(view);
+  const units = unitsOf(view);
   if (!units.length) {
-    return `<p class="ops__note">No sub-claim was checked. The status above is the whole result.</p>`;
+    return `<p class="muted">No sub-claim was checked. The status above is the whole result.</p>`;
   }
-  const gaps = (view.assessment.evidence_gaps || []).map((gap) => `<p class="reason tech">Gap: ${esc(gap)}</p>`).join("");
+  const gaps = (view.assessment.evidence_gaps || []).map((gap) => `<p class="gap">Gap: ${esc(gap)}</p>`).join("");
   const card = (unit) => {
     const children = unit.ids.map((id) => rows[id]).filter(Boolean);
     const reason = unit.partial_reason ? ` · ${unit.partial_reason}` : "";
@@ -447,20 +642,23 @@ function checkBody(row) {
   const audit = row.audit || {};
   const tier = row.highest_tier_used || "—";
   return `
-    <div class="tech">
-      <p>${esc(claim.sub_claim_id)} · ${esc(claim.sub_claim_type)}${claim.measure ? ` · ${esc(claim.measure)}` : ""} · tier ${esc(tier)} · retries ${esc(row.retries_used)}</p>
-      ${claim.source_span ? `<p>Quote: ${esc(claim.source_span)}</p>` : ""}
-      ${row.rationale ? `<p>Audit: ${esc(row.rationale)}</p>` : ""}
-      ${audit.review_note ? `<p>Review: ${esc(audit.review_note)}</p>` : ""}
-      ${row.capped_by ? `<p>Capped: ${esc(row.capped_by)}</p>` : ""}
-      ${audit.numeric_label ? `<p>Number: ${esc(audit.numeric_label)}</p>` : ""}
-      ${stanceLines(audit)}
-      ${(audit.failure_reasons || []).length ? `<p>Failures: ${esc(audit.failure_reasons.join("; "))}</p>` : ""}
-    </div>
     ${row.explanation ? `<p class="why">${esc(row.explanation)}</p>` : ""}
     ${evidenceGroup(row.supporting, "Evidence for", "for")}
     ${evidenceGroup(row.challenging, "Evidence against", "against")}
-    ${!row.supporting.length && !row.challenging.length ? `<p class="where missing">No evidence was attached to ${esc(claim.sub_claim_id)}.</p>` : ""}`;
+    ${!row.supporting.length && !row.challenging.length ? `<p class="where missing">No evidence was attached to ${esc(claim.sub_claim_id)}.</p>` : ""}
+    <details class="mini">
+      <summary>Audit notes</summary>
+      <div class="tech">
+        <p>${esc(claim.sub_claim_id)} · ${esc(claim.sub_claim_type)}${claim.measure ? ` · ${esc(claim.measure)}` : ""} · tier ${esc(tier)} · retries ${esc(row.retries_used)}</p>
+        ${claim.source_span ? `<p>Quote: ${esc(claim.source_span)}</p>` : ""}
+        ${row.rationale ? `<p>Audit: ${esc(row.rationale)}</p>` : ""}
+        ${audit.review_note ? `<p>Review: ${esc(audit.review_note)}</p>` : ""}
+        ${row.capped_by ? `<p>Capped: ${esc(row.capped_by)}</p>` : ""}
+        ${audit.numeric_label ? `<p>Number: ${esc(audit.numeric_label)}</p>` : ""}
+        ${stanceLines(audit)}
+        ${(audit.failure_reasons || []).length ? `<p>Failures: ${esc(audit.failure_reasons.join("; "))}</p>` : ""}
+      </div>
+    </details>`;
 }
 
 function stanceLines(audit) {
@@ -479,8 +677,13 @@ function evidenceGroup(items, title, tone) {
 }
 
 function evidenceCard(item) {
-  const link = typeof item.url === "string" && /^https?:\/\//.test(item.url)
-    ? `<p class="link"><span>Link</span> <a href="${esc(item.url)}" target="_blank" rel="noopener">${esc(item.url)}</a></p>`
+  const documentUrl = typeof item.url === "string" && /^https?:\/\//.test(item.url) ? item.url : null;
+  const publisherUrl = typeof item.publisher_page === "string" && /^https?:\/\//.test(item.publisher_page)
+    ? item.publisher_page : null;
+  const sourceUrl = documentUrl || publisherUrl;
+  const linkLabel = documentUrl ? "Link" : "Publisher/platform";
+  const link = sourceUrl
+    ? `<p class="link"><span>${linkLabel}</span> <a href="${esc(sourceUrl)}" target="_blank" rel="noopener">${esc(sourceUrl)}</a></p>`
     : "";
   const where = item.citation_span
     ? `<p class="where"><span>Citation</span> ${esc(item.citation_span)}</p>`
@@ -505,11 +708,8 @@ function evidenceCard(item) {
     </article>`;
 }
 
-function renderTrace(log, stats, traceText, warning) {
-  if (!log) {
-    $("trace").innerHTML = "";
-    return;
-  }
+function traceHtml(log, stats, traceText, warning) {
+  if (!log) return `<p class="muted">No decision log.</p>`;
   const calls = log.agent_calls || [];
   const maxMs = Math.max(1, ...calls.map((call) => call.latency_ms || 0));
   const callRows = calls.map((call) => `
@@ -548,42 +748,38 @@ function renderTrace(log, stats, traceText, warning) {
     </tr>`).join("");
   const finals = Object.entries(log.final_verdicts || {}).map(([id, verdict]) => `
     <span class="tag">${esc(id)} ${esc(verdict)}</span>`).join("");
-  $("trace").innerHTML = `
-    <section class="card" id="traceCard">
-      <div class="section-head">
-        <h2>Trace</h2>
-        <span class="rid">${esc(log.request_id || "")}</span>
-        <button type="button" class="text-btn" data-copy-trace="1">Copy plain trace</button>
-      </div>
-      ${warning ? `<p class="violation">${esc(warning)}</p>` : ""}
-      <p class="card__hint">This is the decision log: gates, the routing plan, every agent call, audits, retries, and events. ${esc(log.input || "")}</p>
-      <div class="stat-row">${statHtml(stats)}</div>
-      <h3>Routing plan</h3>
-      ${routes ? `<table><thead><tr><th>Id</th><th>Type</th><th>Collectors</th><th>Cap</th><th>Tiers</th><th>Note</th></tr></thead><tbody>${routes}</tbody></table>` : `<p class="ops__note">No routing plan. The run stopped before it.</p>`}
-      <h3>Agent calls</h3>
-      ${callRows ? `<table><thead><tr><th>Time</th><th>Agent</th><th>Sub-claim</th><th>Latency</th><th>Tokens</th><th>Tools</th><th>Result</th></tr></thead><tbody>${callRows}</tbody></table>` : `<p class="ops__note">No agent calls.</p>`}
-      <h3>Audits</h3>
-      ${audits ? `<table><thead><tr><th>Id</th><th></th><th>Verdict</th><th>Why it failed</th><th>Retry feedback</th></tr></thead><tbody>${audits}</tbody></table>` : `<p class="ops__note">No audit.</p>`}
-      <h3>Retries</h3>
-      ${retries ? `<table><thead><tr><th>Id</th><th>Attempt</th><th></th><th>Feedback</th></tr></thead><tbody>${retries}</tbody></table>` : `<p class="ops__note">No retries.</p>`}
-      <h3>Final verdicts</h3>
-      <div class="gate-row">${finals || `<span class="ops__note">None recorded.</span>`}</div>
-      <h3>Events</h3>
-      <ol class="timeline">
-        ${(log.events || []).map((event, index) => `
-          <li class="step">
-            <span class="step__n">${index + 1}</span>
-            <div>
-              <div class="step__head"><span class="step__node">${esc(event.node)}</span><span class="step__ms">${esc((event.at || "").replace("T", " ").slice(0, 19))}</span></div>
-              <p>${esc(event.message)}</p>
-            </div>
-          </li>`).join("") || `<li class="ops__note">No events.</li>`}
-      </ol>
-      <details class="payload-wrap">
-        <summary>Plain trace</summary>
-        <pre class="payload" id="plainTrace">${esc(traceText || "")}</pre>
-      </details>
-    </section>`;
+  const table = (head, body, empty) => body
+    ? `<div class="table-wrap"><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`
+    : `<p class="muted">${empty}</p>`;
+  return `
+    ${warning ? `<p class="violation">${esc(warning)}</p>` : ""}
+    <p class="body-text muted">${esc(log.input || "")}</p>
+    <h3>Routing plan</h3>
+    ${table(["Id", "Type", "Collectors", "Cap", "Tiers", "Note"], routes, "No routing plan. The run stopped before it.")}
+    <h3>Agent calls</h3>
+    ${table(["Time", "Agent", "Sub-claim", "Latency", "Tokens", "Tools", "Result"], callRows, "No agent calls.")}
+    <h3>Audits</h3>
+    ${table(["Id", "", "Verdict", "Why it failed", "Retry feedback"], audits, "No audit.")}
+    <h3>Retries</h3>
+    ${table(["Id", "Attempt", "", "Feedback"], retries, "No retries.")}
+    <h3>Final verdicts</h3>
+    <div class="tag-row">${finals || `<span class="muted">None recorded.</span>`}</div>
+    <h3>Events</h3>
+    <ol class="timeline">
+      ${(log.events || []).map((event, index) => `
+        <li class="step">
+          <span class="step__n">${index + 1}</span>
+          <div>
+            <div class="step__head"><span class="step__node">${esc(event.node)}</span><span class="step__ms">${esc((event.at || "").replace("T", " ").slice(0, 19))}</span></div>
+            <p>${esc(event.message)}</p>
+          </div>
+        </li>`).join("") || `<li class="muted">No events.</li>`}
+    </ol>
+    <details class="mini">
+      <summary>Plain trace</summary>
+      <button type="button" class="text-btn" data-copy-trace="1">Copy plain trace</button>
+      <pre class="payload" id="plainTrace">${esc(traceText || "")}</pre>
+    </details>`;
 }
 
 function onPreviewClick(event) {
@@ -593,9 +789,11 @@ function onPreviewClick(event) {
     copy.textContent = "Copied";
     return;
   }
-  if (event.target.closest("[data-copy-trace]")) {
+  const copyTrace = event.target.closest("[data-copy-trace]");
+  if (copyTrace) {
     const text = $("plainTrace") ? $("plainTrace").textContent : (state.view && state.view.trace_text) || "";
     navigator.clipboard.writeText(text);
+    copyTrace.textContent = "Copied";
     return;
   }
   const download = event.target.closest("[data-download]");
@@ -605,25 +803,36 @@ function onPreviewClick(event) {
     downloadJson(`${state.view.assessment.request_id}-${name}.json`, payload);
     return;
   }
-  const post = event.target.closest("[data-fill-post]");
-  if (post) {
-    state.post = post.dataset.fillPost;
-    if ($("answer")) $("answer").value = post.dataset.fillPost;
-    cliPreview();
+  const fills = [["fillPost", "post"], ["fillCompany", "company"], ["fillInfluencer", "influencer"]];
+  for (const [key, slot] of fills) {
+    const button = event.target.closest(`[data-${key.replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`)}]`);
+    if (!button) continue;
+    if (slot === "influencer") setInfluencer(button.dataset[key]);
+    else state[slot] = button.dataset[key];
+    if ($("answer")) $("answer").value = button.dataset[key];
+    document.querySelectorAll(".choice.is-active").forEach((node) => node.classList.remove("is-active"));
+    button.classList.add("is-active");
     return;
   }
-  const company = event.target.closest("[data-fill-company]");
-  if (company) {
-    state.company = company.dataset.fillCompany;
-    if ($("answer")) $("answer").value = company.dataset.fillCompany;
-    cliPreview();
+  const example = event.target.closest("[data-try]");
+  if (example) {
+    $("claim").value = example.dataset.try;
+    $("cutoff").value = example.dataset.cutoff || "";
+    state.company = "";
+    state.post = "";
+    setInfluencer(influencerIn(example.dataset.try));
+    $("formStatus").textContent = "Example loaded. Press Run check.";
+    $("claim").focus();
     return;
   }
-  const influencer = event.target.closest("[data-fill-influencer]");
-  if (influencer) {
-    state.influencer = influencer.dataset.fillInfluencer;
-    if ($("answer")) $("answer").value = influencer.dataset.fillInfluencer;
-    cliPreview();
+  const suggestion = event.target.closest("[data-suggest]");
+  if (suggestion) {
+    $("claim").value = suggestion.dataset.suggest;
+    $("cutoff").value = "";
+    state.company = "";
+    state.post = "";
+    setInfluencer(influencerIn(suggestion.dataset.suggest));
+    run();
     return;
   }
   if (event.target.closest("#sendAnswer")) sendAnswer();
@@ -633,20 +842,19 @@ function sendAnswer() {
   if (!state.view) return;
   const value = ($("answer").value || "").trim();
   if (!value) {
-    $("formStatus").textContent = "Type an answer first.";
+    $("formStatus").textContent = "Pick or type an answer first.";
     return;
   }
   const slot = state.view.answer_slot || "claim";
   if (slot === "post") state.post = value;
   else if (slot === "company") state.company = value;
-  else if (slot === "influencer") state.influencer = value;
+  else if (slot === "influencer") setInfluencer(value);
   else {
     state.company = "";
-    state.influencer = "";
+    setInfluencer("");
     state.post = "";
     $("claim").value = value;
   }
-  cliPreview();
   run();
 }
 
@@ -657,6 +865,106 @@ function downloadJson(name, payload) {
   link.download = name;
   link.click();
   URL.revokeObjectURL(link.href);
+}
+
+// Past checks live in this browser only, so each visitor sees just their own runs.
+const HISTORY_KEY = "finsight-history";
+const HISTORY_MAX = 20;
+
+function loadHistory() {
+  try {
+    const items = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    return Array.isArray(items) ? items : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function storeHistory(items) {
+  // Drop the oldest entries until the list fits the browser's storage quota.
+  for (let keep = items.length; keep >= 0; keep -= 1) {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, keep)));
+      return;
+    } catch (error) {
+      if (keep === 0) return;
+    }
+  }
+}
+
+function saveHistory(view) {
+  const head = headline(view);
+  const entry = {
+    id: view.assessment.request_id || String(Date.now()),
+    at: new Date().toISOString(),
+    claim: view.assessment.claim || $("claim").value,
+    form: { claim: $("claim").value, cutoff: $("cutoff").value, influencer: state.influencer },
+    label: head.text,
+    tone: head.tone,
+    view,
+    stages: state.stages,
+    elapsed: state.elapsed,
+  };
+  const items = loadHistory().filter((item) => item.id !== entry.id);
+  items.unshift(entry);
+  storeHistory(items.slice(0, HISTORY_MAX));
+  renderHistory(entry.id);
+}
+
+function timeAgo(iso) {
+  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
+  return niceDate(iso);
+}
+
+function renderHistory(activeId) {
+  const items = loadHistory();
+  $("clearHistory").hidden = !items.length;
+  $("history").innerHTML = items.length
+    ? items.map((item) => `
+      <li>
+        <button type="button" class="history__item tone-${esc(item.tone)}${item.id === activeId ? " is-active" : ""}" data-history="${esc(item.id)}">
+          <span class="dot" aria-hidden="true"></span>
+          <span class="history__text">
+            <span class="history__claim">${esc(item.claim)}</span>
+            <span class="history__meta">${esc(item.label)} · ${esc(timeAgo(item.at))}</span>
+          </span>
+        </button>
+      </li>`).join("")
+    : `<li class="history__empty">Checks you run will be listed here.</li>`;
+}
+
+function onHistoryClick(event) {
+  const button = event.target.closest("[data-history]");
+  if (!button) return;
+  const item = loadHistory().find((entry) => entry.id === button.dataset.history);
+  if (!item) return;
+  $("claim").value = item.form.claim || item.claim;
+  $("cutoff").value = item.form.cutoff || "";
+  setInfluencer(item.form.influencer || "");
+  state.company = "";
+  state.post = "";
+  state.view = item.view;
+  state.log = item.view.decision_log;
+  state.stages = item.stages || [];
+  state.elapsed = item.elapsed || 0;
+  $("progress").innerHTML = "";
+  renderResult(item.view);
+  renderDetails(item.view);
+  renderHistory(item.id);
+  $("formStatus").textContent = `Showing a saved check from ${timeAgo(item.at)}.`;
+  $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function clearHistory() {
+  try {
+    localStorage.removeItem(HISTORY_KEY);
+  } catch (error) {
+    // Storage may be blocked; the list below is cleared either way.
+  }
+  renderHistory();
 }
 
 init();

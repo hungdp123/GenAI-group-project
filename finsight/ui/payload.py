@@ -133,6 +133,7 @@ def _result(row: SubClaimResult, audit: dict[str, Any] | None) -> dict[str, Any]
 
 def _evidence(item: EvidenceItem) -> dict[str, Any]:
     data = item.model_dump(mode="json")
+    data["publisher_page"] = item.publisher_page
     data["source_label"] = source_label(item)
     data["computed_label"] = fmt_figure(item.computed_value) if item.computed_value is not None else None
     if item.comparison_value is not None:
@@ -144,6 +145,10 @@ def _audit(audit: AuditResult) -> dict[str, Any]:
     data = audit.model_dump(mode="json")
     check = audit.numeric_check
     data["numeric_label"] = fmt_numeric_check(check) if check is not None and check.computed is not None else None
+    # The two figures side by side for the reader: what the post claimed and what the filing gives.
+    if check is not None and check.computed is not None:
+        data["figures"] = {"claimed": fmt_figure(check.stated) if check.stated is not None else None,
+                           "found": fmt_figure(check.computed), "matches": check.matches}
     return data
 
 

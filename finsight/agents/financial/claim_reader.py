@@ -59,6 +59,12 @@ _EXCLUDING = "a figure that removes gains or one-time items is not the reported 
 SEGMENT_NOTE = "a segment or product figure; the SEC data only has company-wide totals, the narrative agent checks it"
 OTHER_COMPANY_NOTE = "about another company"
 
+# "Looking at their latest earnings, revenue grew 40%": the report, not the profit figure. A move or figure
+# right after it ("latest earnings grew 20%") still reads as profit.
+_LATEST_EARNINGS = (r"(?:latest|last|most recent|recent|new|this) earnings\b"
+                    r"(?!\s+(?:grew|growth|rose|fell|dropped|declined|increased|decreased|jumped|were|was|are|is|"
+                    r"of|up|down|came|hit|reached|per\b))")
+
 # (pattern, measures | "ignore" | "excluded:<note>"). Checked in order; a match hides its words from later rules,
 # so "free cash flow" is not also read as "cash flow".
 _LEXICON = [
@@ -66,7 +72,7 @@ _LEXICON = [
      r"|(?:sales|revenue|earnings) multiples?|earnings multiples?|" + YIELD_WORDS, "ignore"),
     (r"earnings (?:calls?|reports?|releases?|dates?|season|day|beats?|miss(?:es)?|previews?|announcements?)"
      r"|(?:report|reports|reported|reporting) (?:their |its |q[1-4] )?earnings|(?:after|before|ahead of) earnings"
-     r"|(?:taking|take|took) profits|profit[- ]taking|operating leverage|a quarter of", "ignore"),
+     r"|(?:taking|take|took) profits|profit[- ]taking|operating leverage|a quarter of|" + _LATEST_EARNINGS, "ignore"),
     (r"(?:free cash flow|fcf) margins?", ["fcf_margin"]),
     (r"free cash flows?|\bfcf\b", ["free_cash_flow"]),
     (r"operating cash flows?|cash flows? from operations|cash from operations", ["OperatingCashFlow"]),
@@ -133,7 +139,7 @@ _TTM = r"\b(ttm|ltm|trailing (?:12|twelve)[- ]months?|(?:last|past|prior) (?:12|
 _LAST_N_QUARTERS = r"\b(?:last|past|latest|recent|previous|prior) (two|three|four|2|3|4) quarters\b"
 # rule book: "recent", "quarter", or the latest earnings call / report (earnings are reported quarterly)
 _LATEST_QUARTER = (r"\bquarter(ly)?\b|\brecent(ly)?\b|\bearnings (?:call|report|release)s?\b"
-                   r"|\b(?:reported|reports|posted) (?:their |its )?earnings\b")
+                   r"|\b(?:reported|reports|posted) (?:their |its )?earnings\b|\b" + _LATEST_EARNINGS)
 _LATEST_YEAR = r"\b(annual|yearly|full[- ]year|fiscal year|in a (?:single )?year|last year)\b"
 
 

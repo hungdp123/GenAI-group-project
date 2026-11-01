@@ -157,3 +157,45 @@ def test_a_measured_comparison_uses_the_two_figures():
     )
     assert contradicted is Verdict.CONTRADICTED
     assert "lower than" in wrong
+
+
+def test_two_company_runs_get_one_summary_not_two():
+    from finsight.agents.orchestrator.graph import RunOutput, _combine
+    from finsight.contracts.schemas import AssessmentStatus, DecisionLog, FinalAssessment
+
+    def row(cid: str, verdict: Verdict) -> SubClaimResult:
+        return SubClaimResult(sub_claim=SubClaim(sub_claim_id=cid, text=f"Point {cid}.",
+                                                 sub_claim_type=SubClaimType.HISTORICAL_GROWTH),
+                              verdict=verdict, rationale="test")
+
+    def run(rows: list[SubClaimResult], headline: list[str], text: str) -> RunOutput:
+        final = FinalAssessment(request_id="r", status=AssessmentStatus.COMPLETED, summary=text,
+                                sub_claim_results=rows, headline_sub_claim_ids=headline,
+                                boundary_disclaimer="d")
+        return RunOutput(final, DecisionLog(request_id="r", input="x"))
+
+    nvda = run([row("n1", Verdict.SUPPORTED), row("n2", Verdict.INSUFFICIENT_EVIDENCE)], ["n1", "n2"],
+               "Overall, this claim is partly supported. FinSight split it into 2 points and checked each "
+               "against company filings and reports: 1 supported, 1 can't be confirmed.")
+    amd = run([row("a1", Verdict.CONTRADICTED), row("a2", Verdict.SUPPORTED)], ["a1"],
+              "Overall, the evidence contradicts this claim. FinSight checked it against company filings and "
+              "reports. In the same line the influencer also said 1 other thing; those are checked below but "
+              "not counted in this verdict.")
+    merged = _combine([nvda, amd]).assessment
+    assert merged.summary.count("Overall,") == 1
+    assert "split it into 3 points" in merged.summary
+    assert merged.summary.count("also said 1 other thing") == 1
+    assert merged.headline_sub_claim_ids == ["n1", "n2", "a1"]
+
+
+def test_an_unconfirmed_point_says_what_was_looked_for():
+    from finsight.agents.orchestrator.explain import explain
+
+    def unconfirmed(sub_type: SubClaimType, reason: str | None = None) -> str:
+        result = SubClaimResult(sub_claim=SubClaim(sub_claim_id="c", text="x", sub_claim_type=sub_type),
+                                verdict=Verdict.INSUFFICIENT_EVIDENCE, rationale="test")
+        return explain(result, date(2026, 7, 24), reason)
+
+    growth = unconfirmed(SubClaimType.HISTORICAL_GROWTH, "the financial agent returned no figure: a missing tag")
+    assert "SEC filings and earnings releases, but none reports this exact measure and period." in growth
+    assert "filings only report what has already happened" in unconfirmed(SubClaimType.CONTINUATION)

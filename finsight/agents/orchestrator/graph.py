@@ -16,7 +16,8 @@ sub-claim) goes to `clarification`, which returns a question to the user.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -24,8 +25,9 @@ from typing import TYPE_CHECKING
 
 from langgraph.graph import END, StateGraph
 
-from finsight.agents.orchestrator import posts, routing
+from finsight.agents.orchestrator import explain, posts, routing
 from finsight.agents.orchestrator.aggregation import overall_verdict
+from finsight.agents.orchestrator.expansion import report_units
 from finsight.agents.orchestrator.nodes import Nodes, RunContext, new_request_id
 from finsight.config import BOUNDARY_DISCLAIMER, AgentRegistry, Settings, get_settings
 from finsight.contracts.schemas import (
@@ -33,6 +35,8 @@ from finsight.contracts.schemas import (
     DecisionLog,
     FinalAssessment,
     FinSightState,
+    SubClaimResult,
+    Verdict,
 )
 from finsight.knowledge.loader import KnowledgeLayer, default_knowledge_layer
 from finsight.logging.decision_log import DecisionLogRecorder, write_log
@@ -224,19 +228,55 @@ def _combine(runs: list[RunOutput]) -> RunOutput:
     for final in finals:
         if final.checked_post:
             names.append(final.checked_post)
-    summary = " ".join(final.summary for final in finals if final.summary)
-    status = next((final.status for final in finals if final.status is AssessmentStatus.COMPLETED), finals[0].status)
-    overall = overall_verdict([row.verdict for row in results]) if results else finals[0].overall_verdict
+    # A run with no headline ids counts all of its rows, as it does on its own.
+    asked = [
+        row for final in finals for row in final.sub_claim_results
+        if not final.headline_sub_claim_ids or row.sub_claim.sub_claim_id in final.headline_sub_claim_ids
+    ]
+    status =next((final.status for final in finals if final.status is AssessmentStatus.COMPLETED), finals[0].status)
+    if asked:
+        overall = overall_verdict([unit.verdict for unit in report_units(asked)])
+        summary = _merged_summary(finals, asked, overall, len(results) - len(asked))
+    else:
+        overall = finals[0].overall_verdict
+        summary = _unique_sentences(final.summary for final in finals if final.summary)
     question = next((final.clarification_question for final in finals if final.clarification_question), None)
     merged = finals[0].model_copy(update={
         "status": status,
         "sub_claim_results": results,
+        "headline_sub_claim_ids": [row.sub_claim.sub_claim_id for row in asked],
         "summary": summary,
         "checked_post": " | ".join(names) or None,
         "overall_verdict": overall,
         "clarification_question": question if status is AssessmentStatus.NEEDS_CLARIFICATION else None,
     })
     return RunOutput(merged, runs[0].decision_log)
+
+
+# Sentences each run writes about its own counts. The merged result says them once, over both runs.
+_COUNT_SENTENCE = re.compile(r"^(?:Overall, |FinSight (?:split it|checked it)|In the same line the influencer also said)")
+
+
+def _merged_summary(finals: list[FinalAssessment], asked: list[SubClaimResult], overall: Verdict | None,
+                    also: int) -> str:
+    """One verdict and one breakdown for both runs, then any other note a run added (said once)."""
+    text = explain.summary(asked, overall)
+    if also:
+        text += (f" In the same line the influencer also said {also} other thing"
+                 f"{'s' if also != 1 else ''}; those are checked below but not counted in this verdict.")
+    notes = _unique_sentences(final.summary for final in finals if final.summary)
+    extra = [s for s in re.split(r"(?<=[.!?])\s+", notes) if s and not _COUNT_SENTENCE.match(s)]
+    return " ".join([text, *extra])
+
+
+def _unique_sentences(summaries: Iterable[str]) -> str:
+    """Join run summaries, dropping a sentence one run already said (two companies, same verdict)."""
+    seen: list[str] = []
+    for text in summaries:
+        for sentence in re.split(r"(?<=[.!?])\s+", text.strip()):
+            if sentence and sentence not in seen:
+                seen.append(sentence)
+    return " ".join(seen)
 
 
 def _computed(run: RunOutput) -> tuple[float | None, str | None]:

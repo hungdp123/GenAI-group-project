@@ -195,7 +195,8 @@ def explain(result: SubClaimResult, as_of: date | None, not_assessed_reason: str
                           "documents, so the comparison can't be checked." + news_note)
         if not_assessed_reason and "failed" in not_assessed_reason and "audit" not in not_assessed_reason:
             return finish("Part of the system failed while checking this point, so it couldn't be confirmed.")
-        return finish(f"No official filing or company report{when} confirms this." + news_note)
+        return finish(f"No official filing or company report{when} confirms this."
+                      + _why_unconfirmed(sub_type, not_assessed_reason) + news_note)
     if result.verdict is Verdict.SUPPORTED:
         tier1 = any(e.source_tier is SourceTier.TIER_1 for e in reliable_for)
         source = "official filings" if tier1 else "the company's own reports"
@@ -212,6 +213,30 @@ def explain(result: SubClaimResult, as_of: date | None, not_assessed_reason: str
     else:
         sentence = "Only weak evidence points this way."
     return finish(lead + sentence + news_note)
+
+
+_FIGURE_TYPES = frozenset({
+    SubClaimType.HISTORICAL_GROWTH, SubClaimType.NET_INCOME_GROWTH, SubClaimType.PROFITABILITY,
+    SubClaimType.CASH_GENERATION, SubClaimType.LIQUIDITY, SubClaimType.LEVERAGE,
+    SubClaimType.PROFITABILITY_CASH_LEVERAGE,
+})
+
+_UNCONFIRMED_BY_TYPE = {
+    SubClaimType.CONTINUATION: " It is about the future, and filings only report what has already happened.",
+    SubClaimType.DEMAND_ATTRIBUTION: " Filings rarely say why demand changed, so the cause they name can't be confirmed.",
+    SubClaimType.BUSINESS_RISK: " FinSight found no risk disclosure in the filings that names this.",
+    SubClaimType.OTHER: " This is not the kind of statement company filings report.",
+}
+
+
+def _why_unconfirmed(sub_type: SubClaimType, reason: str | None) -> str:
+    """What FinSight looked for, in plain words, so a gap reads as a limit of the sources, not a guess."""
+    if sub_type in _FIGURE_TYPES:
+        if reason and "no figure" in reason:
+            return (" FinSight looked for a matching figure in the company's SEC filings and earnings releases, "
+                    "but none reports this exact measure and period.")
+        return " FinSight looked for a matching figure in the company's SEC filings and earnings releases."
+    return _UNCONFIRMED_BY_TYPE.get(sub_type, "")
 
 
 def summary(results: list[SubClaimResult], overall: Verdict | None) -> str:
