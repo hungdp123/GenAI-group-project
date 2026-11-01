@@ -20,8 +20,9 @@ from finsight.agents.claim_extraction.fields import _LEADING_TO, _close, parse_f
 _HARD_SPLIT = re.compile(r"\s*(?:[;:]|,(?!\d{3})|\s[-–—]\s)\s*")
 _SOFT_SPLIT = re.compile(r"\s+\b(?:and|but|while|whereas|plus|with)\b\s+(?!\d+/\d)", flags=re.IGNORECASE)
 # "doubled" / "more than doubling" is about +100%; "tripled" about +200%. Used only when no percent is stated.
-_FOLD_VALUES = ((re.compile(r"\b(?:doubl\w*|twofold|2x)\b", re.IGNORECASE), 100.0),
-                (re.compile(r"\b(?:tripl\w*|threefold|3x)\b", re.IGNORECASE), 200.0))
+# "Double-digit" / "triple-digit growth" names a range, not a doubling.
+_FOLD_VALUES = ((re.compile(r"\b(?:doubl(?!e[- ]?digits?\b)\w*|twofold|2x)\b", re.IGNORECASE), 100.0),
+                (re.compile(r"\b(?:tripl(?!e[- ]?digits?\b)\w*|threefold|3x)\b", re.IGNORECASE), 200.0))
 _WORD = re.compile(r"[a-z0-9]+(?:\.\d+)?%?")
 
 _STOP = frozenset("""

@@ -24,6 +24,19 @@ _LOWER_FIRST = {"the", "a", "an", "this", "that", "these", "those", "their", "it
 _HAS_FIGURE = re.compile(r"\$\s?\d|\d(?:[\d,.]*)\s?(?:%|percent|billion|million|trillion)", re.IGNORECASE)
 # Claim types the financial and narrative agents can check against filings.
 _CHECKABLE = {"HISTORICAL_GROWTH", "NET_INCOME_GROWTH", "PROFITABILITY", "CASH_GENERATION", "COMPARATIVE"}
+# A measure the filings report, so a film's box office or a share-price figure is not offered.
+_FILING_MEASURE = re.compile(
+    r"\b(?:revenue|sales|top[- ]line|grew|growth|margin|earnings|net income|profit|operating income|"
+    r"cash flow|eps|debt|cloud|data cent(?:er|re)|segment)\b",
+    re.IGNORECASE,
+)
+# Valuation and market talk: these depend on the share price, which filings do not state.
+_VALUATION = re.compile(
+    r"price[- ]to[- ]|\bp/e\b|\byields?\b|\bvaluation|\bmultiples?\b|share price|stock price|price target|"
+    r"\bmarket cap|\breturn (?:is|of|to)\b|\bgross over\b|box office|\bworth\b|"
+    r"\b(?:stock|shares?)\b[^.]{0,20}\b(?:fell|rose|dropped|jumped|soared|plunged)\b",
+    re.IGNORECASE,
+)
 # Transcript fragments that start mid-thought read badly as a suggestion.
 _FILLER_START = re.compile(r"^(?:uh|um|so|and|but|now|well|like|yeah|okay|i mean)\b[,\s]", re.IGNORECASE)
 
@@ -69,9 +82,13 @@ def candidates(influencer: str | None, ticker: str | None, claim: str) -> list[s
         text = str(row.get("text") or "").strip()
         if (influencer and row.get("influencer") != influencer) or (ticker and row.get("company_ticker") != ticker):
             continue
+        if row.get("company_ticker") not in settings.corpus_companies:  # no filings to check it against
+            continue
         if row.get("video_id") not in readable or row.get("sub_claim_type") not in _CHECKABLE:
             continue
         if not _HAS_FIGURE.search(text) or _FILLER_START.match(text) or not 30 <= len(text) <= 220:
+            continue
+        if not _FILING_MEASURE.search(text) or _VALUATION.search(text) or ">>" in text:
             continue
         if _norm(text) in seen or _norm(text) in _norm(claim):
             continue

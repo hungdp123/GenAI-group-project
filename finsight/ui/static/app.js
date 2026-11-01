@@ -40,10 +40,6 @@ function esc(value) {
   }[ch]));
 }
 
-function quote(text) {
-  return `'${String(text).replaceAll("'", "'\"'\"'")}'`;
-}
-
 function verdictClass(verdict) {
   return verdict ? `v-${verdict}` : "";
 }
@@ -53,6 +49,19 @@ function niceDate(iso) {
   const [year, month, day] = String(iso).slice(0, 10).split("-");
   if (!day) return iso;
   return `${Number(day)} ${MONTHS[Number(month) - 1]} ${year}`;
+}
+
+// "quarter ended 2026-06-30" reads as "quarter ended 30 Jun 2026", like every other date on the page.
+function friendlyDates(text) {
+  return String(text || "").replace(/\b(\d{4}-\d{2}-\d{2})\b/g, (iso) => niceDate(iso));
+}
+
+// The finding already shows the source under the quote, so the explanation drops its "Source: … Where: …" copy.
+function withoutSource(text) {
+  return String(text || "")
+    .replace(/\s*Source: .+?\(Tier [^)]*\)\.(?:\s*Where: .+?\.(?=\s|$))?/, "")
+    .replace(" (see the evidence below)", "")
+    .trim();
 }
 
 function stageName(node) {
@@ -91,19 +100,9 @@ function lineClass(line) {
   return "";
 }
 
-function cliPreview() {
-  const parts = ["finsight run", quote($("claim").value), "--stages"];
-  if ($("cutoff").value) parts.push("--cutoff", $("cutoff").value);
-  if (state.company) parts.push("--company", state.company);
-  if (state.influencer) parts.push("--influencer", quote(state.influencer));
-  if (state.post) parts.push("--post", state.post);
-  $("cliPreview").textContent = parts.join(" ");
-}
-
 async function init() {
   const response = await fetch("/api/meta");
   state.meta = await response.json();
-  renderExamples();
   const asOf = state.meta.mode.corpus_as_of;
   if (asOf) {
     $("cutoffHint").textContent = `Only information published on or before this date is used. Leave blank to use the post's own date (or ${niceDate(asOf)}, the latest data, if the post is undated).`;
@@ -111,16 +110,12 @@ async function init() {
   $("influencer").innerHTML += (state.meta.influencers || [])
     .map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join("");
   setInfluencer(influencerIn($("claim").value));
-  cliPreview();
-  $("cutoff").addEventListener("input", cliPreview);
   $("influencer").addEventListener("change", () => {
     state.influencer = $("influencer").value;
-    cliPreview();
   });
   $("claim").addEventListener("input", () => {
     state.company = "";
     state.post = "";
-    cliPreview();
   });
   $("clearHistory").addEventListener("click", clearHistory);
   $("history").addEventListener("click", onHistoryClick);
@@ -133,31 +128,7 @@ async function init() {
       run();
     }
   });
-  $("examples").addEventListener("click", onExampleClick);
   $("preview").addEventListener("click", onPreviewClick);
-}
-
-function renderExamples() {
-  const examples = state.meta.examples || [];
-  if (!examples.length) return;
-  $("examples").innerHTML = `
-    <p class="examples__label">Try an example</p>
-    <div class="examples__row">
-      ${examples.map((item, index) => `<button type="button" class="chip" data-example="${index}" title="${esc(item.note || "")}">${esc(item.label)}</button>`).join("")}
-    </div>`;
-}
-
-function onExampleClick(event) {
-  const button = event.target.closest("[data-example]");
-  if (!button) return;
-  const item = state.meta.examples[Number(button.dataset.example)];
-  $("claim").value = item.claim || "";
-  state.company = item.company || "";
-  setInfluencer(item.influencer || "");
-  state.post = item.post || "";
-  cliPreview();
-  $("formStatus").textContent = item.note || "Example loaded.";
-  $("claim").focus();
 }
 
 // The dropdown and state.influencer always agree; a typed name that is not listed is added.
@@ -182,7 +153,6 @@ function clearForm() {
   state.company = "";
   setInfluencer("");
   state.post = "";
-  cliPreview();
   $("formStatus").textContent = "Cleared.";
 }
 
@@ -349,13 +319,29 @@ function sourceUrl(item) {
 // One line per checked part of the claim: verdict, why, and the main source behind it.
 function findingHtml(unit, rows) {
   const children = unit.ids.map((id) => rows[id]).filter(Boolean);
-  const why = children.map((row) => row.explanation || row.rationale).find(Boolean) || unit.partial_reason || "";
-  const evidence = children.flatMap((row) => [...(row.supporting || []), ...(row.challenging || [])])[0];
+  const why = withoutSource(children.map((row) => row.explanation || row.rationale).find(Boolean) || unit.partial_reason || "");
+  // A contradiction is shown with the evidence against it; anything else leads with the evidence for it.
+  const against = unit.verdict === "CONTRADICTED";
+  const evidence = children.flatMap((row) => against
+    ? [...(row.challenging || []), ...(row.supporting || [])]
+    : [...(row.supporting || []), ...(row.challenging || [])])[0];
+  const quoted = evidence && evidence.content && (against || unit.verdict === "SUPPORTED")
+    ? `<blockquote class="finding__quote"><span>${against ? "The source says otherwise" : "The source says"}</span>${esc(friendlyDates(evidence.content.trim()))}</blockquote>`
+    : "";
+  const figures = children.map((row) => (row.audit || {}).figures).find(Boolean);
+  // When the auditor kept no stated figure, a percentage written in the line itself is what was claimed.
+  if (figures && !figures.claimed && figures.found.endsWith("%")) {
+    const written = String(unit.heading).match(/\d+(?:\.\d+)?\s?%/);
+    if (written) figures.claimed = written[0].replace(/\s/, "");
+  }
+  const compare = figures
+    ? `<p class="finding__figures ${figures.matches ? "is-match" : "is-gap"}">${figures.claimed ? `<span>Claimed <b>${esc(figures.claimed)}</b></span>` : ""}<span>Filing shows <b>${esc(figures.found)}</b></span></p>`
+    : "";
   const url = evidence ? sourceUrl(evidence) : null;
-  // The tier note stays in Details; here the document name and date are enough.
+  // The tier note, XBRL tag and accession number stay in Details; here the document and date are enough.
   const label = evidence ? String(evidence.source_label || evidence.doc_type || "").replace(/\s*\(Tier[^)]*\)\s*$/, "") : "";
   const source = evidence
-    ? `<p class="finding__source"><span>Source</span> ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` : esc(label)}${evidence.citation_span ? ` · ${esc(evidence.citation_span)}` : ""}</p>`
+    ? `<p class="finding__source"><span>Source</span> ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` : esc(label)}</p>`
     : "";
   const tone = (VERDICTS[unit.verdict] || {}).tone || "unknown";
   return `
@@ -367,6 +353,8 @@ function findingHtml(unit, rows) {
           <span class="verdict ${verdictClass(unit.verdict)}">${esc(unit.label)}</span>
         </div>
         ${why ? `<p class="finding__why">${esc(why)}</p>` : ""}
+        ${compare}
+        ${quoted}
         ${source}
       </div>
     </li>`;
@@ -384,7 +372,9 @@ function renderResult(view) {
   const violations = (view.decision_log.temporal_violations || []).map((item) => `
     <p class="violation">Cut-off leak: ${esc(item.evidence_id)} for ${esc(item.sub_claim_id)} was published ${esc(item.publication_date)}, after ${esc(item.cutoff_date)}. ${esc(item.produced_by)} produced it and it was dropped.</p>
   `).join("");
-  const showSummary = summary.text && assessment.status !== "NEEDS_CLARIFICATION";
+  // The verdict is already the heading, so the summary starts after its "Overall, …" sentence.
+  const summaryText = assessment.overall_verdict ? summary.text.replace(/^Overall, [^.]*\.\s*/, "") : summary.text;
+  const showSummary = summaryText && assessment.status !== "NEEDS_CLARIFICATION";
   const meta = [];
   if (assessment.as_of_date) meta.push(`Information up to ${esc(niceDate(assessment.as_of_date))}`);
   if (post.video) meta.push(`<a href="${esc(post.video)}" target="_blank" rel="noopener">Watch the video</a>`);
@@ -399,7 +389,7 @@ function renderResult(view) {
         </div>
       </div>
       <blockquote class="answer__claim">${esc(assessment.claim || $("claim").value)}</blockquote>
-      ${showSummary ? `<p class="answer__summary">${esc(summary.text)}</p>` : ""}
+      ${showSummary ? `<p class="answer__summary">${esc(summaryText)}</p>` : ""}
       ${asked.length ? `<ul class="findings">${asked.map((unit) => findingHtml(unit, rows)).join("")}</ul>` : ""}
       ${also.length ? `<p class="group-h">Also in that line <small>checked, not counted in the verdict</small></p>
       <ul class="findings findings--also">${also.map((unit) => findingHtml(unit, rows)).join("")}</ul>` : ""}
@@ -506,6 +496,10 @@ function runInfoHtml(view) {
       <span>Status</span><span>${esc(assessment.status)}</span>
       <span>Request id</span><span class="mono">${esc(assessment.request_id)}</span>
       ${view.cutoff_note ? `<span>Cut-off</span><span>${esc(niceDate(assessment.as_of_date))} (${esc(view.cutoff_note)})</span>` : ""}
+      ${view.match ? `
+      <span>Matched on</span><span>${esc(view.match.user_claim)}</span>
+      <span>Matched by</span><span>${esc(view.match.method)} · ${esc(view.match.candidates_considered)} candidate lines</span>
+      <span>Line ids</span><span class="mono">${esc((view.match.quote_ids || []).join(", ") || "—")}</span>` : ""}
     </div>
     ${gates ? `<div class="tag-row">${gates}</div>` : ""}
     <div class="stat-row">${statHtml(view.stats)}</div>
@@ -555,9 +549,9 @@ const BUCKET_CLASS = { both: "b-both", conflict: "b-conflict", quote_only: "b-al
 function matchHtml(match, status, typed) {
   if (!match) return "";
   const quotes = (match.quotes || []).map((text) => `<blockquote class="said">${esc(text)}</blockquote>`).join("");
-  const when = match.upload_date ? esc(match.upload_date) : "undated";
+  const when = match.upload_date ? esc(niceDate(match.upload_date)) : "undated";
   const source = match.video_id
-    ? `<p class="said-src">${esc(match.title || match.video_id)} · ${when} · <a href="${esc(match.url)}" target="_blank" rel="noopener">${esc(match.video_id)}</a> <span class="tag">matched by ${esc(match.method)}</span></p>`
+    ? `<p class="said-src">${esc(match.title || match.video_id)} · ${when} · <a href="${esc(match.url)}" target="_blank" rel="noopener">${esc(match.video_id)}</a></p>`
     : "";
   const counts = match.counts || {};
   const legend = ["both", "conflict", "quote_only", "user_only"]
@@ -584,7 +578,6 @@ function matchHtml(match, status, typed) {
         <div>
           <p class="scope-h">You asked</p>
           <blockquote class="asked">${esc(typed || match.user_claim)}</blockquote>
-          <p class="said-src">Matched on: ${esc(match.user_claim)}</p>
         </div>
         <div>
           <p class="scope-h">They said</p>
@@ -593,7 +586,6 @@ function matchHtml(match, status, typed) {
         </div>
       </div>
       ${rows ? `<div class="table-wrap"><table class="facts"><thead><tr><th></th><th>You</th><th>They</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
-      <div class="tech"><p>Candidates considered: ${esc(match.candidates_considered)} · line ids ${esc((match.quote_ids || []).join(", ") || "—")}</p></div>
     </section>`;
 }
 
@@ -820,7 +812,6 @@ function onPreviewClick(event) {
     if ($("answer")) $("answer").value = button.dataset[key];
     document.querySelectorAll(".choice.is-active").forEach((node) => node.classList.remove("is-active"));
     button.classList.add("is-active");
-    cliPreview();
     return;
   }
   const example = event.target.closest("[data-try]");
@@ -830,7 +821,6 @@ function onPreviewClick(event) {
     state.company = "";
     state.post = "";
     setInfluencer(influencerIn(example.dataset.try));
-    cliPreview();
     $("formStatus").textContent = "Example loaded. Press Run check.";
     $("claim").focus();
     return;
@@ -842,7 +832,6 @@ function onPreviewClick(event) {
     state.company = "";
     state.post = "";
     setInfluencer(influencerIn(suggestion.dataset.suggest));
-    cliPreview();
     run();
     return;
   }
@@ -866,7 +855,6 @@ function sendAnswer() {
     state.post = "";
     $("claim").value = value;
   }
-  cliPreview();
   run();
 }
 
@@ -958,7 +946,6 @@ function onHistoryClick(event) {
   setInfluencer(item.form.influencer || "");
   state.company = "";
   state.post = "";
-  cliPreview();
   state.view = item.view;
   state.log = item.view.decision_log;
   state.stages = item.stages || [];

@@ -124,9 +124,6 @@ textarea:focus, select:focus, input:focus { outline: 3px solid var(--accent-soft
 .text-btn { padding: 6px 10px; font-size: 0.76rem; }
 .form-status { margin: 10px 0 0; color: var(--muted); font-size: 0.8rem; min-height: 1.2em; }
 
-.examples { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
-.examples__label { margin: 0 0 8px; font-size: 0.76rem; font-weight: 600; color: var(--muted); }
-.examples__row { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   border: 1px solid var(--line); background: var(--surface-2); border-radius: 999px;
   padding: 5px 11px; font-size: 0.76rem;
@@ -244,6 +241,22 @@ textarea:focus, select:focus, input:focus { outline: 3px solid var(--accent-soft
 .finding__head { display: flex; gap: 10px; justify-content: space-between; align-items: flex-start; }
 .finding__text { margin: 0; font-weight: 500; line-height: 1.45; font-size: 0.92rem; }
 .finding__why { margin: 6px 0 0; color: var(--muted); font-size: 0.86rem; line-height: 1.5; }
+.finding__figures { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.finding__figures span {
+  font-size: 0.8rem; padding: 3px 9px; border-radius: 999px; background: var(--surface-2);
+  border: 1px solid var(--line); color: var(--muted);
+}
+.finding__figures b { color: var(--ink); font-weight: 600; }
+.finding__figures.is-gap span:last-child { border-color: var(--bad); }
+.finding__figures.is-gap span:last-child b { color: var(--bad); }
+.finding__quote {
+  margin: 8px 0 0; padding: 8px 12px; border-radius: 8px; border-left: 3px solid var(--tone, var(--neutral));
+  background: var(--surface-2); font-size: 0.86rem; line-height: 1.5; white-space: pre-wrap;
+}
+.finding__quote span {
+  display: block; margin-bottom: 2px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--muted);
+}
 .finding__source { margin: 8px 0 0; font-size: 0.8rem; line-height: 1.4; }
 .finding__source span { font-weight: 600; color: var(--muted); margin-right: 4px; }
 
@@ -289,8 +302,6 @@ textarea:focus, select:focus, input:focus { outline: 3px solid var(--accent-soft
 .fold__title { font-weight: 600; font-size: 0.92rem; }
 .fold__hint { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fold__body { padding: 0 0 16px 22px; }
-.fold--quiet { margin-top: 14px; border-top: 0; }
-.fold--quiet > summary { padding: 4px 0; font-size: 0.8rem; color: var(--muted); }
 .fold--inner { border-top: 1px dashed var(--line); }
 details.mini { margin-top: 8px; }
 details.mini > summary { cursor: pointer; font-size: 0.76rem; color: var(--muted); }
