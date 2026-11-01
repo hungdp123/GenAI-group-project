@@ -338,6 +338,29 @@ def _pct(value) -> str:
     return "n/a" if value is None else f"{value:.0%}"
 
 
+def _seconds(ms) -> str:
+    return "n/a" if ms is None else f"{ms / 1000:.1f} s"
+
+
+def latency_by_system(out_dir: Path, systems: list[str]) -> dict[str, dict[str, float]]:
+    """p50 and p95 query time from records.jsonl. Empty when that file has no rows for a system."""
+    from finsight.eval.metrics import percentile
+
+    path = Path(out_dir) / "records.jsonl"
+    if not path.exists():
+        return {}
+    samples: dict[str, list[float]] = {system: [] for system in systems}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        rec = json.loads(line)
+        system = rec.get("system")
+        if system in samples and rec.get("latency_ms") is not None:
+            samples[system].append(float(rec["latency_ms"]))
+    return {system: {"p50_ms": percentile(values, 50), "p95_ms": percentile(values, 95)}
+            for system, values in samples.items() if values}
+
+
 def comparison_markdown(summary: dict, header: str) -> str:
     systems = list(summary)
     names = {"llm": "Plain LLM", "direct": "LLM + filings", "rag": "Basic RAG", "rag_quote": "RAG + quote",
@@ -364,6 +387,9 @@ def comparison_markdown(summary: dict, header: str) -> str:
     row("Items with a made-up number", lambda x: str(x["items_with_made_up"]))
     row("Answers citing a date after the as-of date", lambda x: str(x["items_with_late_dates"]))
     row("Evidence published after the as-of date", lambda x: str(x["late_evidence"]))
+    if any(summary[s].get("latency") for s in systems):
+        row("Typical query (p50)", lambda x: _seconds(x.get("latency", {}).get("p50_ms")))
+        row("Slow end (p95)", lambda x: _seconds(x.get("latency", {}).get("p95_ms")))
     routes = sorted({route for s in systems for route in summary[s]["by_route"]})
     lines += ["", "Fact accuracy by route (gold route: the rule-based router applied to the gold quote):", "",
               head, "|---|" + "---|" * len(systems)]
@@ -379,7 +405,7 @@ def comparison_markdown(summary: dict, header: str) -> str:
             v = summary[s]["vs_finsight"]
             lines.append(f"| {names.get(s, s)} | {v['finsight_only_right']} | {v['baseline_only_right']} | "
                          f"{v['p_value']:.3f} |")
-    lines += ["", "Behaviour (refusals, clarifications), cost and latency per system: `summary.md`."]
+    lines += ["", "Behaviour (refusals and clarifications) and cost per system: `summary.md`."]
     return "\n".join(lines) + "\n"
 
 
@@ -467,6 +493,9 @@ def write_comparison(out_dir: Path, items: list, systems: list[str], route: str 
     if route:
         scored = only_route(scored, route)
     summary = summarize(scored)
+    for system, latency in latency_by_system(out_dir, systems).items():
+        if system in summary:
+            summary[system]["latency"] = latency
     settings = get_settings()
     scope = f", {route} facts only" if route else ""
     count = len(scored["rows"].get("finsight", [])) if route else len(items)
