@@ -595,8 +595,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.split == "heldout" and not args.final:
         parser.error("the heldout split is frozen: pass --final only for the final reported run")
     settings = get_settings()
-    if args.final and settings.llm_provider == "openai" and settings.llm_model != FINAL_REPORT_MODEL:
-        parser.error(f"final runs must use {FINAL_REPORT_MODEL} (got {settings.llm_model}); "
+    # The reported run is gpt-5.4. gpt-5.4-nano is allowed for the model-strength check on the same split.
+    allowed_final = {FINAL_REPORT_MODEL, "gpt-5.4-nano"}
+    if args.final and settings.llm_provider == "openai" and settings.llm_model not in allowed_final:
+        parser.error(f"final runs must use {FINAL_REPORT_MODEL} or gpt-5.4-nano (got {settings.llm_model}); "
                      f"set FINSIGHT_LLM_MODEL={FINAL_REPORT_MODEL}")
     if args.split == "heldout" and args.dataset is None:
         if not HELDOUT_LOCK.exists():

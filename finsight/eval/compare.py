@@ -371,8 +371,8 @@ def comparison_markdown(summary: dict, header: str) -> str:
     def row(label, fn):
         lines.append(f"| {label} | " + " | ".join(fn(summary[s]) for s in systems) + " |")
 
-    row("Headline verdict accuracy", lambda x: f"{_pct(x['headline_accuracy'])} (n={x['headline_n']})")
-    row("Fact verdict accuracy", lambda x: f"{_pct(x['fact_accuracy'])} (n={x['fact_n']})")
+    row("Overall verdict accuracy", lambda x: f"{_pct(x['headline_accuracy'])} (of {x['headline_n']} claims)")
+    row("Accuracy on each fact", lambda x: f"{_pct(x['fact_accuracy'])} (of {x['fact_n']} facts)")
     row("Facts with no verdict (asked a question, refused, or no matching line)",
         lambda x: f"{x['unanswered']} of {x['fact_n']}")
     row("Fact accuracy on facts it answered", lambda x: _pct(x["answered_accuracy"]))
