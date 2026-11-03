@@ -223,7 +223,9 @@ _FIGURE_TYPES = frozenset({
 
 _UNCONFIRMED_BY_TYPE = {
     SubClaimType.CONTINUATION: " It is about the future, and filings only report what has already happened.",
-    SubClaimType.DEMAND_ATTRIBUTION: " Filings rarely say why demand changed, so the cause they name can't be confirmed.",
+    SubClaimType.DEMAND_ATTRIBUTION: (
+        " Filings rarely say why demand changed, so the cause they name can't be confirmed."
+    ),
     SubClaimType.BUSINESS_RISK: " FinSight found no risk disclosure in the filings that names this.",
     SubClaimType.OTHER: " This is not the kind of statement company filings report.",
 }
