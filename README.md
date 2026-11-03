@@ -107,13 +107,13 @@ Results go to `results/<timestamp>/`, including a `comparison.md`. The datasets 
 
 ## Team
 
-| Member | Area |
+| Member | Contribution |
 |---|---|
-| Venes | Financial analysis agent, XBRL tools |
-| Stella | Narrative evidence agent, vector DB, RAG retriever |
-| Amelia | Claim decomposition, auditor, accuracy metrics |
-| Irine | Source-tier rules, knowledge layer, advice boundary, UI |
-| Hung | Orchestrator, contracts, LLM client, baselines, evaluation |
+| Venes | Built the financial analysis agent and XBRL tools, developed claim matching and sub-claim splitting, built the dev and held-out gold datasets, and ran the evaluations. |
+| Stella | Built the narrative evidence agent, including corpus collection and processing, the vector databases and the RAG retriever, and evaluated retrieval quality. |
+| Amelia | Built the auditor agent, wrote the claim specification and labelled the dev claim dataset. |
+| Irine | Built the claim extraction pipeline, the knowledge layer and the advice boundary, and developed the web UI. |
+| Hung | Designed the orchestrator, shared contracts and LLM client, built the baselines, developed the evaluation framework and refined the web UI. |
 
 ## Contributing
 
