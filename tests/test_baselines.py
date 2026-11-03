@@ -31,6 +31,50 @@ def test_basic_rag_baseline_uses_retriever():
     assert r.agent_calls[0].tool_calls == 1
 
 
+def test_basic_rag_searches_the_company_named_in_the_claim(monkeypatch):
+    from finsight.baselines import basic_rag as rag
+
+    seen = {}
+
+    class FakeRetriever:
+        _embedding_backend = None
+
+        def __init__(self, **kwargs):
+            seen["init"] = kwargs
+
+        def retrieve(self, query, top_k, cutoff):
+            seen["query"] = query
+            seen["top_k"] = top_k
+            return []
+
+    rag._retrievers.clear()
+    monkeypatch.setattr(rag, "CorpusRetriever", FakeRetriever)
+    claim = "Joseph Carlson said Netflix generates $12 billion in free cash flow."
+    quote = "It also generates $12 billion in free cash flow"
+    try:
+        run_basic_rag(claim, DEMO_CUTOFF, quote=quote)
+    finally:
+        rag._retrievers.clear()
+        rag._embedder = None
+    assert seen["init"]["company_ticker"] == "NFLX"
+    assert seen["init"]["backend"] == "hybrid"
+    assert str(seen["init"]["corpus_root"]).endswith("chunking_strategies/C2/full_v1")
+    assert seen["query"] == quote
+    assert seen["top_k"] == 5
+
+
+def test_basic_rag_without_a_company_does_not_open_the_nvidia_index(monkeypatch):
+    from finsight.baselines import basic_rag as rag
+
+    def refuse(**kwargs):
+        raise AssertionError(kwargs)
+
+    monkeypatch.setattr(rag, "CorpusRetriever", refuse)
+    r = run_basic_rag("Its revenue growth is just getting started.", DEMO_CUTOFF)
+    assert r.error is None
+    assert r.agent_calls[0].tool_calls == 1
+
+
 def test_baseline_refusal():
     assert run_direct_llm("Should I put my savings into Company X?", DEMO_CUTOFF).refused
 

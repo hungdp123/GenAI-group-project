@@ -157,9 +157,17 @@ def _strip_names(text: str, influencer: str | None, aliases: list[str]) -> str:
     """Drop the influencer and the company name. Keep a product name such as AWS.
 
     "AWS grew 24%" is about that segment. Stripping AWS makes the AWS sentence look
-    like a different fact from a company-wide revenue line.
+    like a different fact from a company-wide revenue line. A company alias inside a
+    product name is kept too: "Google" is Alphabet, but "Google Cloud" is the segment.
     """
     cleaned = _CUTOFF.sub(" ", without_urls(text or ""))
+    saved: list[str] = []
+    for product in sorted(_PRODUCT_NAMES, key=len, reverse=True):
+        def keep(match: re.Match[str], saved: list[str] = saved) -> str:
+            saved.append(match.group(0))
+            return f"\ue000{len(saved) - 1}\ue001"
+
+        cleaned = re.sub(rf"\b{re.escape(product)}\b", keep, cleaned, flags=re.IGNORECASE)
     names = list(aliases)
     if influencer:
         names.extend(INFLUENCERS.get(influencer, ()))
@@ -167,6 +175,8 @@ def _strip_names(text: str, influencer: str | None, aliases: list[str]) -> str:
         if not name or name.casefold() in _PRODUCT_NAMES:
             continue
         cleaned = re.sub(rf"\b{re.escape(name)}\b", " ", cleaned, flags=re.IGNORECASE)
+    for index, original in enumerate(saved):
+        cleaned = cleaned.replace(f"\ue000{index}\ue001", original)
     return cleaned
 
 

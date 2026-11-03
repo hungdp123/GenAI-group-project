@@ -470,3 +470,8 @@ def test_a_fact_with_its_own_measure_keeps_the_segment_named_earlier_in_the_line
     assert _earlier_segment("Alphabet's total revenue was $96 billion", other) is None
     first = "Nvidia reported $81.6 billion in revenue, with data center revenue of $75 billion."
     assert _earlier_segment("Nvidia reported $81.6 billion in revenue, with", first) is None
+
+
+def test_double_digit_growth_is_a_range_not_a_doubling():
+    assert [fact.value for fact in split_facts("its twelfth straight quarter of double-digit growth")] == [None]
+    assert [fact.value for fact in split_facts("Nvidia revenue more than doubled")] == [(100.0, "percent")]

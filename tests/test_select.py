@@ -45,6 +45,17 @@ def _extract(text: str, stored: list[SubClaim], focus: str | None):
     )
 
 
+def test_google_cloud_keeps_the_product_name():
+    focus = stated_claim(
+        "Alex Reffett said Google Cloud revenue was $24.8 billion last quarter, up 82%.",
+        "alex_reffett",
+        ["Alphabet", "Google", "GOOGL", "Google Cloud"],
+    )
+    assert focus is not None
+    assert "Google Cloud" in focus
+    assert "  Cloud" not in focus
+
+
 def test_a_prompt_that_only_names_the_creator_states_no_claim():
     assert stated_claim("Is Joseph Carlson right about Company X?", "joseph_carlson", _ALIASES) is None
     assert stated_claim("Is Mark Roussin right about NVIDIA?", "mark_roussin", ["NVIDIA", "Nvidia", "NVDA"]) is None

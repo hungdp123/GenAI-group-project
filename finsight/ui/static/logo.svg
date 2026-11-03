@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="FinSight">
+  <defs>
+    <linearGradient id="fs-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14a37f"/>
+      <stop offset="1" stop-color="#0a5a41"/>
+    </linearGradient>
+    <clipPath id="fs-lens">
+      <circle cx="27" cy="27" r="15"/>
+    </clipPath>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#fs-bg)"/>
+  <!-- Rising bars seen through the lens -->
+  <g clip-path="url(#fs-lens)">
+    <rect x="13" y="12" width="29" height="30" fill="#ffffff" opacity="0.14"/>
+    <rect x="17" y="30" width="5" height="12" rx="1.5" fill="#ffffff" opacity="0.65"/>
+    <rect x="24.5" y="24" width="5" height="18" rx="1.5" fill="#ffffff" opacity="0.82"/>
+    <rect x="32" y="17" width="5" height="25" rx="1.5" fill="#ffffff"/>
+  </g>
+  <!-- Lens rim and handle -->
+  <circle cx="27" cy="27" r="15" fill="none" stroke="#ffffff" stroke-width="4"/>
+  <path d="M38 38 L50 50" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+  <!-- Verified tick -->
+  <circle cx="49" cy="15" r="8" fill="#ffd166"/>
+  <path d="M45.2 15.2 L48 18 L53 12.6" fill="none" stroke="#0a5a41" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

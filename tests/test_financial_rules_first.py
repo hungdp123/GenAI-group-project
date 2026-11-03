@@ -143,3 +143,13 @@ def test_rules_that_explain_a_skip_do_not_call_the_model(model):
     items = agent.gather(_sub("Nvidia data center revenue grew 106%."), CUTOFF, None)
     assert items == [] and model == [] and agent.modes["s"] == "rules"
     assert "segment" in agent.reasons["s"]
+
+
+def test_latest_earnings_names_the_report_not_net_income():
+    from finsight.agents.financial.claim_reader import read_claim
+
+    report = read_claim("Well, looking at their latest earnings, AMD saw top-line revenue growth of about 40%", "AMD")
+    assert [point.measure for point in report.points] == ["Revenue"]
+    assert report.points[0].period == ("latest", "quarter")
+    profit = read_claim("AMD latest earnings grew 20% year over year", "AMD")
+    assert [point.measure for point in profit.points] == ["NetIncome"]
