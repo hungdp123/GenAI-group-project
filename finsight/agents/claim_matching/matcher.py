@@ -209,7 +209,6 @@ def match_claim(
     pool = [line for line in lines if not video_id or line.video_id == video_id]
     pool = [line for line in pool if not _PRICE_ONLY.search(line.text)]
     scored = score_lines(user_facts, pool, user_claim, ticker)
-    wanted = len(per_measure(user_facts))
     if fallback:
         # Transcript sentences the catalog did not store compete on the same terms (the catalog wins ties).
         stored = {(line.video_id, _key(line.text)) for line in pool}

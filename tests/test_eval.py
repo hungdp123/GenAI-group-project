@@ -79,10 +79,17 @@ def test_full_dev_eval(tmp_path):
     assert "| Task success rate | " in summary
 
 
-def test_final_run_requires_course_model(monkeypatch):
-    monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "openai")  # default model is the cheap testing one
-    with pytest.raises(SystemExit):
+def test_final_run_rejects_an_unapproved_model_before_any_llm_call(monkeypatch):
+    monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("FINSIGHT_LLM_MODEL", "unapproved-test-model")
+
+    def unexpected_preflight():
+        pytest.fail("An unapproved model must be rejected before any LLM preflight")
+
+    monkeypatch.setattr("finsight.eval.run_eval.llm_preflight", unexpected_preflight)
+    with pytest.raises(SystemExit) as error:
         main(["--split", "heldout", "--final", "--system", "direct"])
+    assert error.value.code == 2
 
 
 def test_cli_forwards_eval_flags():
