@@ -318,17 +318,40 @@ def test_match_and_alignment_scores_are_separate():
     assert not match_correct(asked, ClaimMatch(status="ASK", user_claim="x"), "Which post? v1 ... v9")
 
 
-def test_the_dev_gold_set_validates_and_derives_sub_claims():
+def test_the_dev_gold_set_validates():
     from finsight.eval.run_eval import load_dataset, validate_datasets
 
     assert validate_datasets() == []
-    items = {item.item_id: item for item in load_dataset("dev")}
-    first = items["dev-010"]
+    assert load_dataset("dev")
+
+
+def test_gold_alignment_derives_sub_claims_and_only_scores_asked_facts(tmp_path):
+    import json
+
+    from finsight.eval.run_eval import load_dataset
+
+    # A fixed fixture tests the contract without depending on benchmark IDs or labels.
+    row = {
+        "item_id": "fixture-quote-only", "split": "dev",
+        "claim": "Joseph Carlson said Google grew 24% last quarter.",
+        "gold_match": {"status": "MATCHED", "quote_ids": ["fixture-line"]},
+        "gold_alignment": [
+            {"bucket": "both", "quote_span": "Google grew by 24% year-over-year",
+             "quote_id": "fixture-line", "user_span": "24%", "gold_verdict": "SUPPORTED"},
+            {"bucket": "quote_only", "quote_span": "marking its twelfth consecutive quarter of double-digit growth",
+             "quote_id": "fixture-line", "gold_verdict": "CONTRADICTED"},
+        ],
+    }
+    path = tmp_path / "claims_dev.jsonl"
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    first, = load_dataset("dev", path)
     assert first.gold_match is not None and first.gold_match.status == "MATCHED"
-    assert [g.text for g in first.gold_sub_claims] == ["Google grew by 24% year-over-year",
-                                                       "marking its twelfth consecutive quarter of double-digit growth"]
-    assert first.gold_overall is not None and first.gold_overall.value == "SUPPORTED"  # only the asked fact counts
-    assert items["dev-001"].gold_overall.value == "SUPPORTED"  # both facts asked: S + S (streak relabelled 31 Oct)
+    assert [g.text for g in first.gold_sub_claims] == [
+        "Google grew by 24% year-over-year",
+        "marking its twelfth consecutive quarter of double-digit growth",
+    ]
+    assert [g.gold_verdict.value for g in first.gold_sub_claims] == ["SUPPORTED", "CONTRADICTED"]
+    assert first.gold_overall.value == "SUPPORTED"  # The quote-only contradiction is not the asked fact.
 
 
 # -- 30 Oct fixes: superlatives / estimates are their own fact; dollar amounts without "$" are checked ----
@@ -440,7 +463,8 @@ def test_segment_figures_go_to_the_narrative_agent():
 
 def test_a_fact_with_its_own_measure_keeps_the_segment_named_earlier_in_the_line():
     from finsight.agents.claim_matching.subclaims import _earlier_segment
-    line = "AWS reported $35.6 billion of revenue last quarter, up 24% year-over-year with $12.5 billion of operating income."
+    line = ("AWS reported $35.6 billion of revenue last quarter, "
+            "up 24% year-over-year with $12.5 billion of operating income.")
     assert _earlier_segment("$12.5 billion of operating income", line) is not None
     other = "Google Cloud revenue grew 30%, while Alphabet's total revenue was $96 billion."
     assert _earlier_segment("Alphabet's total revenue was $96 billion", other) is None

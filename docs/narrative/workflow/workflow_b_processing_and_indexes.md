@@ -16,6 +16,11 @@ Paths in this table are relative to `finsight/agents/narrative/` unless stated o
 
 ## Workflow and responsibilities
 
+Optional contextual metadata and blurb preparation is documented in
+[Step 4](#step-4-optionally-build-c2-contextual-metadata-and-blurbs), after the C1-C4 build instructions.
+Its entry point is `scripts/narrative/chunking/build_c2_enriched.py`, with
+`continue_c2_blurbs.py` for company workers.
+
 ```mermaid
 flowchart LR
     Sources["Reviewed source files and manifests from Workflow A"] --> B["W2-B: load manifests and validate source files and date metadata"]
@@ -40,7 +45,8 @@ flowchart LR
 Use existing complete, matching builds when available. W2-K is required for
 dense, hybrid and R4, but not for BM25. Each strategy has its own chunks and
 matching indexes. A changed query or a new test dataset alone does not require
-rechunking or rebuilding vectors.
+rechunking or rebuilding vectors for these baseline builds. Query-selected
+blurb enrichment has a separate dependency on the selected claims; see Step 4.
 
 ## Steps
 
@@ -399,3 +405,150 @@ writes a root `<build-version>_build_report.json` for `--all`, or
 also retains its own company and aggregate reports.
 
 After a build is complete, follow [Workflow C: select chunks and indexes for a RAG run](workflow_c_rag.md#step-1-select-chunks-and-indexes-for-a-rag-run). For comparing strategies and measuring quality, follow [Workflow D](workflow_d_evaluation.md).
+
+### Step 4. Optionally build C2 contextual metadata and blurbs
+
+Use the existing `C2/full_v1` build as the source. These variants preserve its
+300-word/50-overlap passage boundaries, ordered chunk IDs, source `text`, source
+tiers and `source_map.jsonl`. Only `search_text` and, for blurbs, `context_blurb`
+change. Generated context is search assistance, not a new source quote.
+
+| Variant | Preparation | Output under `data/narrative/processed/chunking_strategies/C2/` |
+|---|---|---|
+| C2 baseline | Existing fixed C2 chunks | `full_v1/` |
+| C2 + contextual metadata | Deterministic company/document/period/section/page prefix in `search_text`; no generation calls | `contextual_metadata_v1/` |
+| C2 + contextual metadata + blurb | Add a short LLM-written context sentence to selected passages | `contextual_blurb_all_v1/` for all cases; historical `contextual_blurb_v1/` for the 32-case selection |
+
+All variants support BM25, dense, hybrid RRF and hybrid with cross-encoder
+reranking (R4), provided their matching vectors exist. Because enrichment changes
+`search_text`, rebuild the indexes and vectors in the new output build; do not
+reuse baseline vectors. The builder retains C2's embedding model and records
+embedding truncation in `token_overflow.jsonl`. Adding context does not increase
+the embedding model's input limit.
+
+The older `scripts/narrative/chunking/build_contextual_index.py` and
+`run_blurb_top50.py` belong to the separate contextual passage approach. The
+contextual builder can repack/split content into its own representation. Those
+outputs are not interchangeable with preserved C2 chunks. The C2 builder reuses
+the prefix/blurb helpers without applying that contextual splitting.
+
+#### Build contextual metadata
+
+Run from the repository root after the source C2 build is complete:
+
+```powershell
+$cases = 'data/narrative/evaluation/test_claims_v2/cases_combined.csv'
+$base = 'data/narrative/processed/chunking_strategies/C2'
+
+python -u -m scripts.narrative.chunking.build_c2_enriched `
+    --mode metadata `
+    --source-root "$base/full_v1" `
+    --output-root "$base/contextual_metadata_v1" `
+    --cases $cases `
+    --embed `
+    --resume
+```
+
+Omitting `--case-ranges` selects every row in the CSV (108 in the dataset used
+for this build). In metadata mode, cases determine which companies to prepare;
+the prefix does not depend on claim wording. Local embedding inference is
+required, but this step makes no generation API calls. For an older metadata
+build covering fewer companies, `extend_c2_metadata.py` provides a compatibility
+checked extension path; do not change an existing manifest manually.
+
+#### Plan and generate query-selected blurbs
+
+This mode first selects passages using the claims. For each selected claim it
+unions the top candidates from BM25 and dense retrieval, across support and
+counter queries, and deduplicates passage IDs. `--selection-backends bm25 dense`
+means two candidate searches followed by a union; it does not perform RRF here.
+The later evaluation retrieval backend is chosen independently.
+
+```powershell
+$env:FINSIGHT_LLM_PROVIDER = 'openai'
+$env:FINSIGHT_LLM_MODEL = 'gpt-5.4'
+# Use openai_api_key in private config.yaml.
+# Omit this removal if using an existing OPENAI_API_KEY environment variable.
+Remove-Item Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
+
+$blurbArgs = @(
+    '--mode', 'blurb',
+    '--source-root', "$base/contextual_metadata_v1",
+    '--output-root', "$base/contextual_blurb_all_v1",
+    '--cases', $cases,
+    '--selection-backends', 'bm25', 'dense',
+    '--candidate-k', '50',
+    '--blurb-model', 'gpt-5.4',
+    '--blurb-max-tokens', '3000',
+    '--embed',
+    '--resume'
+)
+
+# Plan only: no blurb generation calls; dense selection still runs locally.
+python -u -m scripts.narrative.chunking.build_c2_enriched @blurbArgs --prepare-only
+
+# Generate/cache blurbs and publish matching company indexes; incurs API usage.
+python -u -m scripts.narrative.chunking.build_c2_enriched @blurbArgs
+```
+
+The plan reports cases, companies and new unique blurb requests. These are not
+completed answers to claims. All selected claim types participate; gold labels,
+answers, snippets and distractors are not used in selection or blurb generation.
+Nevertheless, selection depends on the test queries, so describe this as
+**query-selected enrichment**, not claim-independent corpus preprocessing.
+All source chunks for the selected companies remain indexed; only shortlisted
+passages receive blurbs. "All cases" does not mean every corpus chunk gets one.
+
+For the 32-case subset, add `--case-ranges 1-20 38-49` and use a separate output
+root. Do not switch an existing 32-case blurb manifest to 108 cases in place.
+`--resume` requires compatible cases, code, model, settings and source hashes.
+
+#### Checkpoints, continuation and alternative builders
+
+| Artifact under the enriched output root | Purpose |
+|---|---|
+| `enrichment_configuration.json` | Source, dataset, code and model identities for compatibility checks |
+| `build_plan.json`, `selected_passages.json` | Planned scope and query-selected passage IDs |
+| `blurb_cache.jsonl` | Request checkpoints, completed blurbs and recorded usage/cost |
+| `<TICKER>/build_report.json` | Company completion, preserved chunk count and vector-build status |
+| `<TICKER>/chunks.jsonl`, `source_map.jsonl`, `indexes/` | Enriched search data, preserved source mapping and matching indexes |
+
+Successful matching prompt/model responses are reused from cache. Unresolved
+requests can already have been billed; inspect their checkpoints before opting
+into `--retry-incomplete`. `FINSIGHT_SPEND_LIMIT_USD` limits spending per process,
+so separate workers have separate limits. Count recorded costs from the root
+cache; `.workers/<TICKER>/blurb_cache.jsonl` contains recovery mirrors and must
+not be added again.
+
+After preparing the parent build, company workers can continue disjoint companies:
+
+```powershell
+python -u -m scripts.narrative.chunking.continue_c2_blurbs `
+    --output-root "$base/contextual_blurb_all_v1" `
+    --cases $cases `
+    --companies PLTR `
+    --threads 2 `
+    --progress-every 20 `
+    --resume
+```
+
+Keep the parent provider/model configuration. Stop the original builder before
+using workers; do not overlap companies between workers. `--threads` controls
+local embedding CPU work, while `--progress-every 20` reports passage progress,
+not 20 completed claims.
+
+For **claim-independent full-corpus blurbs**, use
+`scripts/narrative/chunking/build_c2_corpus_blurbs.py` with a separate output root
+such as `contextual_blurb_corpus_v1`. It has no cases/shortlisting requirement and
+enriches every source chunk in scope; use `--prepare-only` to inspect its plan
+before generation. This is a different, potentially larger experiment than the
+query-selected build above. For local Ollama, `build_c2_ollama_blurbs.py` supports
+either query-selected mode or `--all-chunks`, requires `--ollama-model`, and uses
+a separate output root; it does not fall back to OpenAI.
+
+These steps prepare artifacts only and do not change the default end-to-end
+Narrative configuration. Select the enriched build explicitly in Workflow C or
+the evaluation runner. Retrieval, generation and RAGAS quality measurements belong
+in [Workflow D](workflow_d_evaluation.md), after the required company indexes are
+complete. The commands above document the process; updating this guide does not
+execute them.

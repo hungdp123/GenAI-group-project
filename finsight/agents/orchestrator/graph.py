@@ -254,7 +254,9 @@ def _combine(runs: list[RunOutput]) -> RunOutput:
 
 
 # Sentences each run writes about its own counts. The merged result says them once, over both runs.
-_COUNT_SENTENCE = re.compile(r"^(?:Overall, |FinSight (?:split it|checked it)|In the same line the influencer also said)")
+_COUNT_SENTENCE = re.compile(
+    r"^(?:Overall, |FinSight (?:split it|checked it)|In the same line the influencer also said)"
+)
 
 
 def _merged_summary(finals: list[FinalAssessment], asked: list[SubClaimResult], overall: Verdict | None,
